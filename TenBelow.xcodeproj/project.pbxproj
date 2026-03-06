@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A7078E352F4CD61E00874199 /* StripePaymentSheet in Frameworks */ = {isa = PBXBuildFile; productRef = A7F1C1E12F4BDF0000F7536F /* StripePaymentSheet */; };
+		A7078E362F4CD61E00874199 /* Stripe in Frameworks */ = {isa = PBXBuildFile; productRef = A7F1C1E22F4BDF0000F7536F /* Stripe */; };
+		A74824FF2F4450BD003DE4FE /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A74824FE2F4450BD003DE4FE /* AppIcon.icon */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		A7C3B13C2F39357400927269 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,9 +30,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A74824FE2F4450BD003DE4FE /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		A7C3B12C2F39357200927269 /* TenBelow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TenBelow.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7C3B13B2F39357400927269 /* TenBelowTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TenBelowTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7C3B1452F39357400927269 /* TenBelowUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TenBelowUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A7F1C1DD2F4BDEC800F7536F /* CheckoutAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckoutAPI.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -52,6 +60,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A7078E362F4CD61E00874199 /* Stripe in Frameworks */,
+				A7078E352F4CD61E00874199 /* StripePaymentSheet in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -75,10 +85,12 @@
 		A7C3B1232F39357200927269 = {
 			isa = PBXGroup;
 			children = (
+				A7F1C1DC2F4BDEBE00F7536F /* Services  */,
 				A7C3B12E2F39357200927269 /* TenBelow */,
 				A7C3B13E2F39357400927269 /* TenBelowTests */,
 				A7C3B1482F39357400927269 /* TenBelowUITests */,
 				A7C3B12D2F39357200927269 /* Products */,
+				A74824FE2F4450BD003DE4FE /* AppIcon.icon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -90,6 +102,14 @@
 				A7C3B1452F39357400927269 /* TenBelowUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A7F1C1DC2F4BDEBE00F7536F /* Services  */ = {
+			isa = PBXGroup;
+			children = (
+				A7F1C1DD2F4BDEC800F7536F /* CheckoutAPI.swift */,
+			);
+			path = "Services ";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -112,6 +132,8 @@
 			);
 			name = TenBelow;
 			packageProductDependencies = (
+				A7F1C1E12F4BDF0000F7536F /* StripePaymentSheet */,
+				A7F1C1E22F4BDF0000F7536F /* Stripe */,
 			);
 			productName = TenBelow;
 			productReference = A7C3B12C2F39357200927269 /* TenBelow.app */;
@@ -195,6 +217,9 @@
 			);
 			mainGroup = A7C3B1232F39357200927269;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A7F1C1E02F4BDF0000F7536F /* XCRemoteSwiftPackageReference "stripe-ios" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A7C3B12D2F39357200927269 /* Products */;
 			projectDirPath = "";
@@ -212,6 +237,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A74824FF2F4450BD003DE4FE /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -398,6 +424,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -442,6 +469,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -615,6 +643,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A7F1C1E02F4BDF0000F7536F /* XCRemoteSwiftPackageReference "stripe-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stripe/stripe-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 24.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A7F1C1E12F4BDF0000F7536F /* StripePaymentSheet */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7F1C1E02F4BDF0000F7536F /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripePaymentSheet;
+		};
+		A7F1C1E22F4BDF0000F7536F /* Stripe */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A7F1C1E02F4BDF0000F7536F /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = Stripe;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A7C3B1242F39357200927269 /* Project object */;
 }

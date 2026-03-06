@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "updatedAt": "2026-02-22T00:00:00Z",
+  "products": [
+    {
+      "id": "desk-cable-clip-01",
+      "sellerId": "seller_001",
+      "name": "Desk Cable Clip",
+      "priceCents": 500,
+      "category": "desk",
+      "imageURLs": [],
+      "demoVideoURL": null,
+      "material": "PLA+",
+      "durabilityNote": "Everyday indoor use.",
+      "careWarnings": ["Avoid heat.", "Not load-bearing."],
+      "shipsInMinDays": 2,
+      "shipsInMaxDays": 4,
+      "isDrop": false,
+      "isActive": true,
+      "isApproved": true
+    }
+  ]
+}

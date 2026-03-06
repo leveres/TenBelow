@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "freeShippingEnabled": true,
+  "minimumOrderCents": 2000,
+
+  "dropEnabled": true,
+  "dropType": "weekly",
+  "dropTitle": "Weekly Drop",
+  "dropSubtitle": "Premium prints • Limited run",
+  "dropEndsAt": "2026-02-23T05:00:00Z",
+  "dropCta": "View Drop"
+}

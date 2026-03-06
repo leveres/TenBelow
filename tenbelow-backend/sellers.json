@@ -1,0 +1,12 @@
+{
+  "seller_001": {
+    "stripeAccountId": "acct_placeholder_001",
+    "email": "seller1@example.com",
+    "businessName": "PrintShop One"
+  },
+  "seller_002": {
+    "stripeAccountId": "acct_placeholder_002",
+    "email": "seller2@example.com",
+    "businessName": "MakerLab Two"
+  }
+}

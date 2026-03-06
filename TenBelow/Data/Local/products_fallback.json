@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "updatedAt": "2026-02-22T00:00:00Z",
+  "products": [
+    {
+      "id": "desk-cable-clip-01",
+      "sellerId": "seller_001",
+      "name": "Desk Cable Clip",
+      "priceCents": 500,
+      "category": "desk",
+      "imageURLs": [],
+      "demoVideoURL": null,
+      "material": "PLA+",
+      "durabilityNote": "Built for everyday indoor use.",
+      "careWarnings": [
+        "Avoid heat (car dashboards / dishwashers).",
+        "Not load-bearing."
+      ],
+      "shipsInMinDays": 2,
+      "shipsInMaxDays": 4,
+      "isDrop": false,
+      "isActive": true,
+      "isApproved": true
+    },
+    {
+      "id": "cup-holder-01",
+      "sellerId": "seller_001",
+      "name": "Cup Holder Insert",
+      "priceCents": 700,
+      "category": "car",
+      "imageURLs": [],
+      "demoVideoURL": null,
+      "material": "PETG",
+      "durabilityNote": "Tougher material, better for warm environments.",
+      "careWarnings": [
+        "Still avoid extreme heat.",
+        "Hand clean only."
+      ],
+      "shipsInMinDays": 2,
+      "shipsInMaxDays": 4,
+      "isDrop": false,
+      "isActive": true,
+      "isApproved": true
+    }
+  ]
+}

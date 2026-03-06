@@ -1,0 +1,106 @@
+//
+//  OrdersStatusBar.swift
+//  TenBelow
+//
+
+import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
+
+enum OrderListFilter: String, CaseIterable {
+    case all = "All"
+    case active = "Active"
+    case completed = "Completed"
+}
+
+struct OrdersStatusBar: View {
+    let orders: [Order]
+    var mode: OrdersMode = .buyer
+    var sellerId: String? = nil
+    @Binding var selectedFilter: OrderListFilter
+
+    private var activeCount: Int {
+        guard let sid = sellerId else {
+            return orders.filter { $0.status != .delivered }.count
+        }
+        return orders.filter { order in
+            order.shipments.filter { $0.sellerId == sid }.contains { $0.status != .delivered }
+        }.count
+    }
+
+    private var completedCount: Int {
+        guard let sid = sellerId else {
+            return orders.filter { $0.status == .delivered }.count
+        }
+        return orders.filter { order in
+            let my = order.shipments.filter { $0.sellerId == sid }
+            return !my.isEmpty && my.allSatisfy { $0.status == .delivered }
+        }.count
+    }
+
+    private var totalCents: Int {
+        guard let sid = sellerId else {
+            return orders.reduce(0) { $0 + $1.totalCents }
+        }
+        return orders.reduce(0) { sum, order in
+            sum + order.shipments
+                .filter { $0.sellerId == sid }
+                .reduce(0) { $0 + $1.items.reduce(0) { $0 + $1.unitPriceCents * $1.quantity } }
+        }
+    }
+
+    private var totalLabel: String {
+        mode == .seller ? "Earnings" : "Total"
+    }
+
+    private func formatMoney(_ cents: Int) -> String {
+        let value = Decimal(cents) / 100
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "USD"
+        return f.string(from: value as NSDecimalNumber) ?? "$\(value)"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            chip(icon: "circle.fill", tint: .orange, value: "\(activeCount)", label: "Active", filter: .active)
+            chip(icon: "checkmark.circle.fill", tint: .green, value: "\(completedCount)", label: "Done", filter: .completed)
+            chip(icon: "dollarsign.circle.fill", tint: TBTheme.icyBlue, value: formatMoney(totalCents), label: totalLabel, filter: .all)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+    }
+
+    private func chip(icon: String, tint: Color, value: String, label: String, filter: OrderListFilter) -> some View {
+        let isSelected = selectedFilter == filter
+        return Button {
+            #if os(iOS)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            #endif
+            selectedFilter = filter
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(tint)
+                Text("\(value) \(label)")
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isSelected ? tint.opacity(0.15) : Color.white.opacity(0.7))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(isSelected ? tint.opacity(0.4) : Color.secondary.opacity(0.14), lineWidth: 1)
+            )
+            .foregroundStyle(isSelected ? tint : Color.primary.opacity(0.75))
+        }
+        .buttonStyle(.plain)
+    }
+}
