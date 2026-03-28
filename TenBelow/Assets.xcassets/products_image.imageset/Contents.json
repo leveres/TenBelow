@@ -1,6 +1,7 @@
 {
   "images" : [
     {
+      "filename" : "pack.png",
       "idiom" : "universal",
       "scale" : "1x"
     },
