@@ -1,56 +1,46 @@
 import SwiftUI
 
 struct MetricChip: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let title: String
     let value: String
     let icon: String
 
     var body: some View {
         VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(TBTheme.icyBlue)
-                .shadow(color: TBTheme.icyBlue.opacity(0.30), radius: 3, y: 2)
+            ZStack {
+                Circle()
+                    .fill(.white.opacity(0.8))
+                    .frame(
+                        width: dynamicTypeSize.isAccessibilitySize ? 40 : 34,
+                        height: dynamicTypeSize.isAccessibilitySize ? 40 : 34
+                    )
+                Image(systemName: icon)
+                    .font(dynamicTypeSize.isAccessibilitySize ? .title3.weight(.semibold) : .body.weight(.semibold))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .symbolRenderingMode(.hierarchical)
+            }
 
             Text(value)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .font(dynamicTypeSize.isAccessibilitySize ? .title2.weight(.bold) : .title3.weight(.bold))
                 .foregroundStyle(TBTheme.deepSky)
-                .shadow(color: TBTheme.skyBlue.opacity(0.20), radius: 2, y: 1)
+                .minimumScaleFactor(0.85)
 
             Text(title)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, TBTheme.spacingMD)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                    .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                    .fill(
-                        LinearGradient(
-                            colors: [.white.opacity(0.50), .clear],
-                            startPoint: .top,
-                            endPoint: .center
-                        )
-                    )
-            }
-        )
+        .background(.white.opacity(0.72))
         .clipShape(RoundedRectangle(cornerRadius: TBTheme.radiusLG))
         .overlay(
             RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.white.opacity(0.6), TBTheme.skyBlue.opacity(0.10)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 1
-                )
+                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
         )
-        .shadow(color: TBTheme.deepSky.opacity(0.06), radius: 8, y: 3)
-        .shadow(color: TBTheme.skyBlue.opacity(0.03), radius: 1, y: 1)
+        .shadow(color: .black.opacity(0.03), radius: 8, y: 4)
     }
 }
 

@@ -13,23 +13,34 @@ struct CartButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "cart")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(TBTheme.icyBlue)
-                .frame(width: 28, height: 28)
-                .overlay(alignment: .topTrailing) {
-                    if itemCount > 0 {
-                        Text("\(min(itemCount, 99))")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(minWidth: 16, minHeight: 16)
-                            .background(Color.red)
-                            .clipShape(Circle())
-                            .offset(x: 6, y: -6)
-                    }
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "cart.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .offset(y: 1)
+
+                if itemCount > 0 {
+                    Text("\(min(itemCount, 99))")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .padding(.horizontal, itemCount >= 10 ? 5 : 4)
+                        .padding(.vertical, 3)
+                        .background(TBTheme.accent, in: Capsule())
+                        .padding(.top, 2)
+                        .padding(.trailing, 0)
                 }
+            }
+            // Room for the badge inside layout bounds (avoids nav bar clipping when a glass capsule is used).
+            .frame(width: 48, height: 44)
+            .contentShape(Rectangle())
         }
-        .accessibilityLabel("Cart, \(itemCount) items")
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open cart")
+        .accessibilityValue("\(itemCount) item\(itemCount == 1 ? "" : "s")")
     }
 }
 

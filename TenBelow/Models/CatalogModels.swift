@@ -6,6 +6,26 @@ struct CatalogResponse: Codable {
     let products: [RemoteProduct]
 }
 
+struct SellerProductResponse: Codable {
+    let product: RemoteProduct
+}
+
+struct UpsertSellerProductRequest: Codable {
+    let name: String
+    let priceCents: Int
+    let category: String
+    let imageURLs: [String]
+    let demoVideoURL: String?
+    let material: String
+    let durabilityNote: String
+    let careWarnings: [String]
+    let shipsInMinDays: Int
+    let shipsInMaxDays: Int
+    let isDrop: Bool
+    let isActive: Bool
+    let isApproved: Bool
+}
+
 enum DropType: String, Codable { case weekly, monthly }
 
 struct AppConfig: Codable {
@@ -49,4 +69,69 @@ struct RemoteProduct: Codable, Identifiable, Hashable {
     let isDrop: Bool
     let isActive: Bool
     let isApproved: Bool
+}
+
+extension RemoteProduct {
+    func asStorefrontProduct(fallbackProduct: Product? = nil) -> Product {
+        Product(
+            id: id,
+            sellerId: sellerId,
+            name: name,
+            priceCents: priceCents,
+            category: resolvedCategory,
+            imageNames: imageURLs.isEmpty ? (fallbackProduct?.imageNames ?? ["products_image"]) : imageURLs,
+            demoVideoURL: demoVideoURL.flatMap(URL.init(string:)),
+            productionPreviewURL: fallbackProduct?.productionPreviewURL,
+            pageViewCount: fallbackProduct?.pageViewCount ?? 0,
+            favoriteCount: fallbackProduct?.favoriteCount ?? 0,
+            material: material,
+            productionNote: fallbackProduct?.productionNote ?? "Printed fresh when you order",
+            durabilityNote: durabilityNote,
+            careWarnings: careWarnings,
+            shipsInDays: min(shipsInMinDays, shipsInMaxDays)...max(shipsInMinDays, shipsInMaxDays)
+        )
+    }
+
+    private var resolvedCategory: Category {
+        switch category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "home":
+            return .home
+        case "desk":
+            return .desk
+        case "car":
+            return .car
+        case "tech":
+            return .tech
+        case "gifts":
+            return .gifts
+        case "didn't know i needed this", "didnt know i needed this":
+            return .didntKnow
+        default:
+            return fallbackCategory
+        }
+    }
+
+    private var fallbackCategory: Category {
+        fallbackProductCategoryOrder.first ?? .home
+    }
+
+    private var fallbackProductCategoryOrder: [Category] {
+        Category.allCases.filter { $0.rawValue.caseInsensitiveCompare(category) == .orderedSame }
+    }
+}
+
+func resolvedStorefrontProducts(remoteProducts: [RemoteProduct], fallbackProducts: [Product]) -> [Product] {
+    let fallbackById = Dictionary(uniqueKeysWithValues: fallbackProducts.map { ($0.id, $0) })
+    let fallbackBySeller = Dictionary(
+        grouping: fallbackProducts,
+        by: \.sellerId
+    ).compactMapValues { $0.first }
+
+    let mappedRemoteProducts = remoteProducts.map { remoteProduct in
+        remoteProduct.asStorefrontProduct(
+            fallbackProduct: fallbackById[remoteProduct.id] ?? fallbackBySeller[remoteProduct.sellerId]
+        )
+    }
+
+    return mappedRemoteProducts.isEmpty ? fallbackProducts : mappedRemoteProducts
 }

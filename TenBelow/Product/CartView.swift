@@ -19,10 +19,12 @@ enum CheckoutPhase {
 struct CartView: View {
     @EnvironmentObject private var cart: CartStore
     @EnvironmentObject private var catalog: CatalogStore
+    @EnvironmentObject private var localProducts: LocalProductStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var phase: CheckoutPhase = .cart
     @State private var receiptItems: [CartItem] = []
+    @State private var cartUpdateMessage: String?
 
     private var minimumOrderCents: Int {
         catalog.config.minimumOrderCents
@@ -32,7 +34,7 @@ struct CartView: View {
         switch phase {
         case .cart: return "Cart"
         case .checkout: return "Checkout"
-        case .receipt: return "Order Confirmed"
+        case .receipt: return "Order confirmed"
         }
     }
 
@@ -42,25 +44,79 @@ struct CartView: View {
             .map { (sellerId: $0.key, items: $0.value) }
     }
 
+    private var availableProducts: [Product] {
+        resolvedStorefrontProducts(
+            remoteProducts: catalog.products,
+            fallbackProducts: localProducts.products
+        )
+    }
+
+    private var cartRefreshFingerprint: String {
+        let remoteFingerprint = catalog.products
+            .map { "\($0.id):\($0.priceCents):\($0.isActive):\($0.isApproved)" }
+            .joined(separator: "|")
+        let fallbackFingerprint = localProducts.products
+            .map { "\($0.id):\($0.priceCents)" }
+            .joined(separator: "|")
+        return "\(remoteFingerprint)#\(fallbackFingerprint)"
+    }
+
+    private var isShowingReceipt: Bool {
+        if case .receipt = phase {
+            return true
+        }
+        return false
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                switch phase {
-                case .cart:
-                    cartContent
-                case .checkout:
-                    CheckoutView(onSuccess: { orderId in
-                        receiptItems = cart.items
-                        phase = .receipt(orderId: orderId)
-                    })
-                case .receipt(let orderId):
-                    ReceiptView(orderId: orderId, items: receiptItems) {
-                        dismiss()
+                VStack(spacing: 12) {
+                    if let cartUpdateMessage, !isShowingReceipt {
+                        HStack(spacing: 8) {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundStyle(TBTheme.skyBlue)
+                            Text(cartUpdateMessage)
+                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                .foregroundStyle(TBTheme.deepSky)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.white.opacity(0.8), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .padding(.horizontal)
+                    }
+
+                    switch phase {
+                    case .cart:
+                        cartContent
+                    case .checkout:
+                        CheckoutView(onSuccess: { orderId in
+                            receiptItems = cart.items
+                            phase = .receipt(orderId: orderId)
+                        })
+                    case .receipt(let orderId):
+                        ReceiptView(orderId: orderId, items: receiptItems) {
+                            dismiss()
+                        }
                     }
                 }
             }
             .navigationTitle(phaseTitle)
             .navigationBarTitleDisplayMode(.inline)
+            .task(id: cartRefreshFingerprint) {
+                let removedCount = cart.syncAvailableProducts(availableProducts)
+                if removedCount > 0 {
+                    cartUpdateMessage = removedCount == 1
+                        ? "Your cart was updated because an item is no longer available."
+                        : "Your cart was updated because some items are no longer available."
+                    if case .checkout = phase, cart.items.isEmpty {
+                        phase = .cart
+                    }
+                } else if !cart.items.isEmpty {
+                    cartUpdateMessage = nil
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     switch phase {
@@ -87,7 +143,7 @@ struct CartView: View {
 
                 if case .cart = phase, !cart.items.isEmpty {
                     ToolbarItem(placement: .destructiveAction) {
-                        Button("Clear") {
+                        Button("Clear cart") {
                             #if os(iOS)
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                             #endif
@@ -97,7 +153,18 @@ struct CartView: View {
                     }
                 }
             }
-            .background(TBTheme.cloudWhite.ignoresSafeArea())
+            .background(
+                LinearGradient(
+                    colors: [
+                        TBTheme.cloudWhite,
+                        TBTheme.skyLight.opacity(0.2),
+                        TBTheme.cloudWhite
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+            )
         }
     }
 
@@ -113,46 +180,98 @@ struct CartView: View {
     }
 
     private var emptyCartView: some View {
-        VStack(spacing: TBTheme.spacingXL) {
-            Spacer()
+        ZStack {
+            LinearGradient(
+                colors: [
+                    TBTheme.cloudWhite,
+                    TBTheme.skyLight.opacity(0.2),
+                    TBTheme.cloudWhite
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
 
-            ZStack {
-                Circle()
-                    .fill(TBTheme.skyLight.opacity(0.6))
-                    .frame(width: 120, height: 120)
+            VStack(spacing: TBTheme.spacingXL) {
+                Spacer()
 
-                Image(systemName: "bag")
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundStyle(TBTheme.icyBlue)
+                // Icon — liquid glass orb
+                ZStack {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: 140, height: 140)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.9), TBTheme.skyBlue.opacity(0.2)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1.5
+                                )
+                        )
+                        .shadow(color: TBTheme.deepSky.opacity(0.08), radius: 24, y: 8)
+                        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+
+                    Image(systemName: "bag.fill")
+                        .font(.system(size: 52, weight: .light))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [TBTheme.deepSky, TBTheme.skyBlue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+
+                // Text — frosted glass card
+                VStack(spacing: TBTheme.spacingSM) {
+                    Text("Your cart is empty")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .tracking(-0.3)
+                        .foregroundStyle(TBTheme.deepSky)
+
+                    Text("Discover 3D-printed finds under $10.\nEach order is printed fresh.")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(5)
+                }
+                .padding(.horizontal, 32)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(0.8), .white.opacity(0.2)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .padding(.horizontal, 24)
+
+                Button {
+                    #if os(iOS)
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    #endif
+                    dismiss()
+                } label: {
+                    Text("Continue Shopping")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                }
+                .buttonStyle(GlassPillButtonStyle(isFinal: true))
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 48)
+                .padding(.top, 8)
+
+                Spacer()
             }
-
-            VStack(spacing: TBTheme.spacingSM) {
-                Text("Your cart is empty")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(TBTheme.deepSky)
-
-                Text("Add 3D-printed finds $10 and under.\nWe'll print them fresh when you order.")
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-            }
-            .padding(.horizontal, 32)
-
-            Button {
-                #if os(iOS)
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                #endif
-                dismiss()
-            } label: {
-                Text("Continue Shopping")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-            }
-            .buttonStyle(PrimaryCTAButtonStyle())
-            .frame(width: 220)
-            .padding(.top, 8)
-
-            Spacer()
         }
     }
 
@@ -172,7 +291,7 @@ struct CartView: View {
                 }
 
                 ForEach(itemsBySeller, id: \.sellerId) { group in
-                    GlassCard(cornerRadius: 20) {
+                    GlassCard(cornerRadius: 20, showsBorder: false) {
                         VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
                             HStack(spacing: 6) {
                                 Image(systemName: "storefront")
@@ -190,7 +309,7 @@ struct CartView: View {
                     .padding(.horizontal)
                 }
 
-                GlassCard(cornerRadius: 22) {
+                GlassCard(cornerRadius: 22, showsBorder: false) {
                     VStack(spacing: TBTheme.spacingMD) {
                         row("Subtotal", value: Money.format(cents: cart.subtotalCents))
                         row("Shipping", value: "FREE", valueColor: .green)
@@ -212,7 +331,7 @@ struct CartView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "info.circle.fill")
                             .font(.caption)
-                        Text("Minimum order \(Money.format(cents: minimumOrderCents)) for free shipping.")
+                        Text("Minimum order: \(Money.format(cents: minimumOrderCents)).")
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                     }
                     .foregroundStyle(.orange)
@@ -280,15 +399,13 @@ private struct CartRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: TBTheme.spacingMD) {
             ZStack {
-                if let name = item.product.imageNames.first {
-                    Image(name)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    TBTheme.skyLight.opacity(0.5)
-                    Image(systemName: "photo")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.secondary)
+                StorefrontImageView(reference: item.product.primaryImageReference) {
+                    ZStack {
+                        TBTheme.skyLight.opacity(0.5)
+                        Image(systemName: "photo")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .frame(width: 72, height: 72)
@@ -350,4 +467,5 @@ private struct CartRow: View {
     CartView()
         .environmentObject(CartStore())
         .environmentObject(CatalogStore())
+        .environmentObject(LocalProductStore(eventStore: CommerceEventStore()))
 }

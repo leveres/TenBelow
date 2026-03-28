@@ -1,17 +1,26 @@
 import Foundation
 
+struct CatalogLoadResult {
+    let products: [RemoteProduct]
+    let isFromRemote: Bool
+}
+
 enum CatalogService {
+    private static var catalogURL: URL {
+        CheckoutAPI.baseURL.appendingPathComponent("catalog")
+    }
 
-    /// Fetch → Cache → Fallback
-    static func loadProducts() async -> [RemoteProduct] {
-
+    /// Fetch → Cache → Fallback. Returns whether data came from the live server.
+    static func loadProducts() async -> CatalogLoadResult {
         // 1. Try remote
-        if let response = try? await URLSession.shared.decode(
-            CatalogResponse.self,
-            from: AppConstants.catalogURL
-        ) {
-            CacheStore.save(response, to: AppConstants.catalogCacheFile)
-            return response.products
+        if AppConstants.isBackendConfigured {
+            if let response = try? await URLSession.tenBelow.decode(
+                CatalogResponse.self,
+                from: catalogURL
+            ) {
+                CacheStore.save(response, to: AppConstants.catalogCacheFile)
+                return CatalogLoadResult(products: response.products, isFromRemote: true)
+            }
         }
 
         // 2. Try disk cache
@@ -19,7 +28,7 @@ enum CatalogService {
             CatalogResponse.self,
             from: AppConstants.catalogCacheFile
         ) {
-            return cached.products
+            return CatalogLoadResult(products: cached.products, isFromRemote: false)
         }
 
         // 3. Bundle fallback
@@ -27,9 +36,9 @@ enum CatalogService {
             CatalogResponse.self,
             resource: AppConstants.catalogFallbackFile
         ) {
-            return fallback.products
+            return CatalogLoadResult(products: fallback.products, isFromRemote: false)
         }
 
-        return []
+        return CatalogLoadResult(products: [], isFromRemote: false)
     }
 }

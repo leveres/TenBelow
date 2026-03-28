@@ -6,7 +6,7 @@ struct OrderTimelineView: View {
     var body: some View {
         GlassCard(cornerRadius: 20) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Order Progress")
+                Text("Order timeline")
                     .font(.headline)
                     .fontWeight(.semibold)
 
@@ -38,7 +38,7 @@ struct OrderTimelineView: View {
         let deliveredCount = order.shipments.filter { $0.status == .delivered }.count
 
         return [
-            ("Order Placed", order.createdAt.formatted(date: .abbreviated, time: .shortened), true),
+            ("Order placed", order.createdAt.formatted(date: .abbreviated, time: .shortened), true),
             ("Processing", "Preparing items across sellers", order.status != .placed),
             ("Shipped", "\(shippedCount) of \(order.shipments.count) shipments sent", shippedCount > 0),
             ("Delivered", "\(deliveredCount) of \(order.shipments.count) shipments delivered", deliveredCount == order.shipments.count && order.shipments.count > 0)

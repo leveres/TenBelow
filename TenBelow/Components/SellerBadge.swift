@@ -4,44 +4,31 @@ struct SellerBadge: View {
     let text: String
     let icon: String
     var tint: Color = TBTheme.icyBlue
+    /// Tighter padding for dense layouts (e.g. public store header).
+    var isCompact: Bool = false
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: isCompact ? 5 : 6) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
-                .shadow(color: tint.opacity(0.30), radius: 2, y: 1)
+                .font(.system(size: isCompact ? 10 : 11, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
 
             Text(text)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .shadow(color: tint.opacity(0.20), radius: 2, y: 1)
+                .font(.system(size: isCompact ? 11 : 12, weight: .semibold, design: .rounded))
         }
         .foregroundStyle(tint)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
+        .padding(.horizontal, isCompact ? 10 : 12)
+        .padding(.vertical, isCompact ? 5 : 7)
         .background(
-            ZStack {
-                Capsule().fill(tint.opacity(0.08))
-                Capsule().fill(
-                    LinearGradient(
-                        colors: [.white.opacity(0.45), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-            }
+            Capsule(style: .continuous)
+                .fill(.white.opacity(0.66))
         )
         .overlay(
-            Capsule().strokeBorder(
-                LinearGradient(
-                    colors: [.white.opacity(0.55), tint.opacity(0.12)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ),
-                lineWidth: 0.5
-            )
+            Capsule(style: .continuous)
+                .strokeBorder(tint.opacity(0.14), lineWidth: 0.8)
         )
         .clipShape(Capsule())
-        .shadow(color: tint.opacity(0.10), radius: 3, y: 2)
+        .shadow(color: .black.opacity(0.03), radius: 8, y: 4)
     }
 }
 

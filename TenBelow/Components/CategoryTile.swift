@@ -12,10 +12,16 @@ struct CategoryTile: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: category.icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(TBTheme.deepSky)
-                .frame(width: 24, alignment: .center)
+            ZStack {
+                Circle()
+                    .fill(.white.opacity(0.8))
+                    .frame(width: 30, height: 30)
+                Image(systemName: category.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .frame(width: 30, alignment: .center)
 
             Text(category.title)
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
@@ -28,23 +34,13 @@ struct CategoryTile: View {
         .padding(.vertical, 14)
         .background {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(.white.opacity(0.72))
         }
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            .white.opacity(0.7),
-                            TBTheme.skyBlue.opacity(0.2)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
+                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
         )
-        .shadow(color: TBTheme.deepSky.opacity(0.06), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.03), radius: 8, y: 4)
     }
 }
 

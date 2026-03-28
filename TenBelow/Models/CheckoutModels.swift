@@ -25,3 +25,10 @@ struct CreatePaymentIntentResponse: Codable {
     let clientSecret: String
     let orderId: String
 }
+
+struct CheckoutAPIErrorResponse: Codable {
+    let code: String?
+    let error: String
+    let productId: String?
+    let minimumOrderCents: Int?
+}

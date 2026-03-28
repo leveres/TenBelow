@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct OrderStatusPill: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let status: OrderStatus
 
     private var label: String {
@@ -45,18 +46,28 @@ struct OrderStatusPill: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: icon).font(.caption2)
-            Text(label).font(.caption).fontWeight(.semibold)
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(bg)
+        .padding(.vertical, 7)
+        .background(.white.opacity(0.74))
+        .overlay(
+            Capsule()
+                .strokeBorder(fg.opacity(0.16), lineWidth: 0.8)
+        )
         .foregroundStyle(fg)
         .clipShape(Capsule())
     }
 }
 
 struct ShipmentStatusPill: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let status: ShipmentStatus
 
     private var label: String {
@@ -93,12 +104,21 @@ struct ShipmentStatusPill: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: icon).font(.caption2)
-            Text(label).font(.caption).fontWeight(.semibold)
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(bg)
+        .padding(.vertical, 7)
+        .background(.white.opacity(0.74))
+        .overlay(
+            Capsule()
+                .strokeBorder(fg.opacity(0.16), lineWidth: 0.8)
+        )
         .foregroundStyle(fg)
         .clipShape(Capsule())
     }

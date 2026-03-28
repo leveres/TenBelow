@@ -22,12 +22,12 @@ struct ShippingProgressBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
             if remainingCents == 0 {
-                Text("You unlocked FREE shipping!")
+                Text("Free shipping unlocked")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(.green)
                     .shadow(color: .green.opacity(0.25), radius: 2, y: 1)
             } else {
-                Text("You're **\(Money.format(cents: remainingCents))** away from FREE shipping")
+                Text("Add **\(Money.format(cents: remainingCents))** for free shipping")
                     .font(.system(size: 15, weight: .medium, design: .rounded))
                     .foregroundStyle(TBTheme.deepSky)
                     .shadow(color: TBTheme.skyBlue.opacity(0.15), radius: 2, y: 1)

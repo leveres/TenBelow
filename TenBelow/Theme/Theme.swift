@@ -18,6 +18,8 @@ enum TBTheme {
     static let skyLight     = Color(red: 0.76, green: 0.89, blue: 1.0)    // #C2E3FF
     static let cloudWhite   = Color(red: 0.96, green: 0.98, blue: 1.0)    // #F5FAFF
     static let deepSky      = Color(red: 0.20, green: 0.45, blue: 0.78)   // #3373C7
+    /// Navy for labels on light “glass” pills over blue hero banners (reads vs mid-blue text on thin material).
+    static let bannerCTAForeground = Color(red: 0.04, green: 0.14, blue: 0.38)
     static let accent       = Color(red: 0.26, green: 0.56, blue: 0.96)   // #438FF5
     static let subtleGray   = Color(red: 0.94, green: 0.95, blue: 0.97)   // #F0F3F7
     static let icyBlue      = Color(red: 0.30, green: 0.52, blue: 0.90)   // #4D85E6 — frost price tint
@@ -35,6 +37,18 @@ enum TBTheme {
         colors: [deepSky, skyBlue],
         startPoint: .leading,
         endPoint: .trailing
+    )
+
+    /// Product names on light cards — readable first: saturated blues only (no pale “shine” band).
+    static let productNameTitleGradient = LinearGradient(
+        stops: [
+            .init(color: deepSky, location: 0),
+            .init(color: accent, location: 0.38),
+            .init(color: icyBlue, location: 0.62),
+            .init(color: deepSky, location: 1)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
     )
 
     static let frostTitleGradient = LinearGradient(
@@ -179,5 +193,210 @@ struct GlassPillButtonStyle: ButtonStyle {
             .clipShape(Capsule())
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
             .animation(.spring(response: 0.25), value: configuration.isPressed)
+    }
+}
+
+struct PremiumGlassPillButtonStyle: ButtonStyle {
+    var isEmphasized: Bool = false
+    var expandsToFullWidth: Bool = true
+    var horizontalPadding: CGFloat = 32
+    var verticalPadding: CGFloat = 16
+    var fontSize: CGFloat = 17
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: fontSize, weight: .semibold, design: .rounded))
+            .foregroundStyle(isEmphasized ? .white : TBTheme.deepSky)
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .frame(maxWidth: expandsToFullWidth ? .infinity : nil)
+            .background {
+                ZStack {
+                    if isEmphasized {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        TBTheme.accent,
+                                        TBTheme.skyBlue,
+                                        TBTheme.deepSky
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.22),
+                                        .white.opacity(0.08),
+                                        .clear
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .mask(
+                                Capsule()
+                                    .inset(by: 1.5)
+                            )
+                        Capsule()
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.72),
+                                        .white.opacity(0.24),
+                                        TBTheme.skyLight.opacity(0.18)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.1
+                            )
+                    } else {
+                        Capsule()
+                            .fill(.ultraThinMaterial)
+
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.36),
+                                        TBTheme.skyLight.opacity(0.20),
+                                        .white.opacity(0.12)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.48),
+                                        .white.opacity(0.16),
+                                        .clear
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .mask(
+                                Capsule()
+                                    .inset(by: 1.5)
+                            )
+
+                        Capsule()
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.86),
+                                        .white.opacity(0.28),
+                                        TBTheme.skyBlue.opacity(0.14)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.2
+                            )
+                    }
+                }
+                .shadow(
+                    color: isEmphasized ? TBTheme.accent.opacity(0.32) : .white.opacity(0.16),
+                    radius: isEmphasized ? 14 : 4,
+                    y: isEmphasized ? 6 : -1
+                )
+                .shadow(
+                    color: isEmphasized ? TBTheme.deepSky.opacity(0.20) : TBTheme.deepSky.opacity(0.10),
+                    radius: isEmphasized ? 16 : 12,
+                    y: isEmphasized ? 8 : 6
+                )
+            }
+            .clipShape(Capsule())
+            .scaleEffect(configuration.isPressed ? 0.975 : 1.0)
+            .opacity(configuration.isPressed ? 0.96 : 1.0)
+            .animation(.spring(response: 0.24, dampingFraction: 0.78), value: configuration.isPressed)
+    }
+}
+
+struct FrostedTextModifier: ViewModifier {
+    var edgeOpacity: Double = 0.32
+    var shadowOpacity: Double = 0.16
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                ZStack {
+                    content
+                        .offset(x: 1, y: 0)
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.30 + edgeOpacity))
+                    content
+                        .offset(x: -1, y: 0)
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.30 + edgeOpacity))
+                    content
+                        .offset(x: 0, y: 1)
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.30 + edgeOpacity))
+                    content
+                        .offset(x: 0, y: -1)
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.30 + edgeOpacity))
+                    content
+                        .offset(x: 1, y: 1)
+                        .foregroundStyle(TBTheme.skyBlue.opacity(0.18 + edgeOpacity))
+                    content
+                        .offset(x: -1, y: 1)
+                        .foregroundStyle(TBTheme.skyBlue.opacity(0.18 + edgeOpacity))
+                    content
+                        .offset(x: 1, y: -1)
+                        .foregroundStyle(TBTheme.skyBlue.opacity(0.18 + edgeOpacity))
+                    content
+                        .offset(x: -1, y: -1)
+                        .foregroundStyle(TBTheme.skyBlue.opacity(0.18 + edgeOpacity))
+                }
+            }
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [
+                        .white.opacity(0.92),
+                        TBTheme.skyLight.opacity(0.88),
+                        TBTheme.frostGlow.opacity(0.82),
+                        TBTheme.skyBlue.opacity(0.84)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .shadow(color: .white.opacity(0.16), radius: 0, x: 0, y: -1)
+            .shadow(color: TBTheme.deepSky.opacity(shadowOpacity + 0.12), radius: 0.6, x: 0, y: 1)
+            .overlay {
+                content
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.42),
+                                .white.opacity(0.10),
+                                .clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .center
+                        )
+                    )
+                    .opacity(0.72)
+            }
+    }
+}
+
+extension View {
+    func frostedText(edgeOpacity: Double = 0.32, shadowOpacity: Double = 0.16) -> some View {
+        modifier(FrostedTextModifier(edgeOpacity: edgeOpacity, shadowOpacity: shadowOpacity))
+    }
+
+    /// Product titles: brand gradient + one crisp edge shadow (no light halos that reduce clarity).
+    func tbProductNameTitleStyle() -> some View {
+        self
+            .foregroundStyle(TBTheme.productNameTitleGradient)
+            .shadow(color: TBTheme.deepSky.opacity(0.45), radius: 0, x: 0, y: 1)
+            .shadow(color: Color.black.opacity(0.10), radius: 0, x: 0, y: 1.5)
     }
 }

@@ -13,7 +13,21 @@ enum DropAPI {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(request)
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await URLSession.tenBelow.data(for: req)
+        try validateResponse(data: data, resp: resp)
+        return try JSONDecoder().decode(DropProduct.self, from: data)
+    }
+
+    // MARK: - Update an existing weekly drop submission
+
+    static func updateSubmission(productId: String, request: DropSubmissionRequest) async throws -> DropProduct {
+        let url = baseURL.appendingPathComponent("drop/submission/\(productId)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let (data, resp) = try await URLSession.tenBelow.data(for: req)
         try validateResponse(data: data, resp: resp)
         return try JSONDecoder().decode(DropProduct.self, from: data)
     }
@@ -22,7 +36,7 @@ enum DropAPI {
 
     static func currentDrop() async throws -> CurrentDropResponse {
         let url = baseURL.appendingPathComponent("drop/current")
-        let (data, resp) = try await URLSession.shared.data(from: url)
+        let (data, resp) = try await URLSession.tenBelow.data(from: url)
         try validateResponse(data: data, resp: resp)
         return try JSONDecoder().decode(CurrentDropResponse.self, from: data)
     }
@@ -31,7 +45,7 @@ enum DropAPI {
 
     static func mySubmissions(sellerId: String) async throws -> SellerSubmissionsResponse {
         let url = baseURL.appendingPathComponent("drop/my-submissions/\(sellerId)")
-        let (data, resp) = try await URLSession.shared.data(from: url)
+        let (data, resp) = try await URLSession.tenBelow.data(from: url)
         try validateResponse(data: data, resp: resp)
         return try JSONDecoder().decode(SellerSubmissionsResponse.self, from: data)
     }
@@ -43,7 +57,7 @@ enum DropAPI {
         var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await URLSession.tenBelow.data(for: req)
         try validateResponse(data: data, resp: resp)
     }
 

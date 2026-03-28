@@ -1,17 +1,21 @@
 import Foundation
 
 enum ConfigService {
+    private static var configURL: URL {
+        CheckoutAPI.baseURL.appendingPathComponent("config")
+    }
 
     /// Fetch → Cache → Fallback
     static func loadConfig() async -> AppConfig {
-
         // 1. Try remote
-        if let remote = try? await URLSession.shared.decode(
-            AppConfig.self,
-            from: AppConstants.configURL
-        ) {
-            CacheStore.save(remote, to: AppConstants.configCacheFile)
-            return remote
+        if AppConstants.isBackendConfigured {
+            if let remote = try? await URLSession.tenBelow.decode(
+                AppConfig.self,
+                from: configURL
+            ) {
+                CacheStore.save(remote, to: AppConstants.configCacheFile)
+                return remote
+            }
         }
 
         // 2. Try disk cache

@@ -13,26 +13,26 @@ struct CategoryChip: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: icon)
-                .font(.caption)
+                .font(.subheadline.weight(.semibold))
                 .symbolRenderingMode(.hierarchical)
 
             Text(title)
-                .font(.subheadline)
-                .fontWeight(.semibold)
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .background(
             Capsule(style: .continuous)
-                .fill(isSelected ? TBTheme.skyBlue.opacity(0.16) : Color.white.opacity(0.55))
+                .fill(isSelected ? TBTheme.skyBlue.opacity(0.12) : Color.white.opacity(0.72))
         )
         .overlay(
             Capsule(style: .continuous)
-                .stroke(isSelected ? TBTheme.skyBlue.opacity(0.35) : TBTheme.skyBlue.opacity(0.10), lineWidth: 1)
+                .stroke(isSelected ? TBTheme.deepSky.opacity(0.18) : TBTheme.skyBlue.opacity(0.10), lineWidth: 0.8)
         )
         .foregroundStyle(isSelected ? TBTheme.deepSky : Color.primary.opacity(0.85))
-        .shadow(color: .black.opacity(isSelected ? 0.06 : 0.03), radius: 8, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.03), radius: 8, x: 0, y: 4)
         .contentShape(Capsule())
         .animation(.easeInOut(duration: 0.18), value: isSelected)
     }

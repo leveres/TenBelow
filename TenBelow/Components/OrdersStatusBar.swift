@@ -15,6 +15,7 @@ enum OrderListFilter: String, CaseIterable {
 }
 
 struct OrdersStatusBar: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let orders: [Order]
     var mode: OrdersMode = .buyer
     var sellerId: String? = nil
@@ -63,10 +64,18 @@ struct OrdersStatusBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            chip(icon: "circle.fill", tint: .orange, value: "\(activeCount)", label: "Active", filter: .active)
-            chip(icon: "checkmark.circle.fill", tint: .green, value: "\(completedCount)", label: "Done", filter: .completed)
-            chip(icon: "dollarsign.circle.fill", tint: TBTheme.icyBlue, value: formatMoney(totalCents), label: totalLabel, filter: .all)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                chip(icon: "circle.fill", tint: .orange, value: "\(activeCount)", label: "Active", filter: .active)
+                chip(icon: "checkmark.circle.fill", tint: .green, value: "\(completedCount)", label: "Done", filter: .completed)
+                chip(icon: "dollarsign.circle.fill", tint: TBTheme.icyBlue, value: formatMoney(totalCents), label: totalLabel, filter: .all)
+            }
+
+            VStack(spacing: 8) {
+                chip(icon: "circle.fill", tint: .orange, value: "\(activeCount)", label: "Active", filter: .active)
+                chip(icon: "checkmark.circle.fill", tint: .green, value: "\(completedCount)", label: "Done", filter: .completed)
+                chip(icon: "dollarsign.circle.fill", tint: TBTheme.icyBlue, value: formatMoney(totalCents), label: totalLabel, filter: .all)
+            }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
@@ -82,22 +91,24 @@ struct OrdersStatusBar: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.caption.weight(.semibold))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(tint)
                 Text("\(value) \(label)")
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                    .lineLimit(1)
+                    .font(.caption.weight(isSelected ? .semibold : .medium))
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.8)
             }
             .padding(.horizontal, 11)
-            .padding(.vertical, 6)
+            .padding(.vertical, 7)
             .background(
                 Capsule(style: .continuous)
-                    .fill(isSelected ? tint.opacity(0.15) : Color.white.opacity(0.7))
+                    .fill(isSelected ? tint.opacity(0.10) : Color.white.opacity(0.76))
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .strokeBorder(isSelected ? tint.opacity(0.4) : Color.secondary.opacity(0.14), lineWidth: 1)
+                    .strokeBorder(isSelected ? tint.opacity(0.18) : Color.secondary.opacity(0.10), lineWidth: 0.8)
             )
             .foregroundStyle(isSelected ? tint : Color.primary.opacity(0.75))
         }

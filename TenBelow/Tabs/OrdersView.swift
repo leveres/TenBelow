@@ -4,12 +4,14 @@
 //
 
 import SwiftUI
+import AVKit
 
 struct OrdersView: View {
+    @EnvironmentObject private var orderStore: OrderStore
+    @EnvironmentObject private var localProducts: LocalProductStore
     @AppStorage("userRole") private var userRole = "buyer"
+    @AppStorage("buyerEmail") private var buyerEmail = ""
     @AppStorage("sellerSellerId") private var sellerId = ""
-
-    @State private var orders: [Order] = SampleOrders.data
     @State private var selectedFilter: OrderListFilter = .all
 
     /// Mode is driven by role picked at app start — no segmented control.
@@ -26,7 +28,9 @@ struct OrdersView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if filteredOrders.isEmpty {
+                if orderStore.isRefreshing, filteredOrders.isEmpty {
+                    loadingState
+                } else if filteredOrders.isEmpty {
                     emptyState
                 } else {
                     ordersList
@@ -37,7 +41,27 @@ struct OrdersView: View {
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            .task(id: "\(mode.rawValue)|\(buyerEmail)|\(sellerId)") {
+                await refreshOrders()
+            }
         }
+    }
+
+    private var loadingState: some View {
+        VStack(spacing: 14) {
+            Spacer()
+            ProgressView()
+                .tint(TBTheme.deepSky)
+                .scaleEffect(1.05)
+            Text("Loading orders")
+                .font(.tbSectionTitle)
+                .foregroundStyle(TBTheme.deepSky)
+            Text("Pulling in the latest order updates.")
+                .font(.tbBody)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {
@@ -45,22 +69,24 @@ struct OrdersView: View {
             GlassCard(cornerRadius: 20) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .top, spacing: 10) {
-                        Image("OrdersTitle")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 130, height: 56)
+                        SnowfallTitleContainer(cornerRadius: 22, horizontalPadding: 10, verticalPadding: 8, flakeCount: 72) {
+                            Image("OrdersTitle")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 160, height: 70)
+                        }
 
                         Text(mode == .buyer
                              ? "Your purchases and delivery updates."
                              : "Manage fulfillment and customer orders.")
-                            .font(.subheadline)
+                            .font(.tbBody)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
 
                     if mode == .seller, sellerId.isEmpty {
-                        Text("Preview: viewing as FilamentFox (SELL-01)")
-                            .font(.caption2)
+                        Text("Preview mode: FilamentFox (SELL-01)")
+                            .font(.tbCaption)
                             .foregroundStyle(.tertiary)
                     }
 
@@ -82,15 +108,11 @@ struct OrdersView: View {
                 .foregroundStyle(TBTheme.skyBlue)
 
             Text(mode == .buyer ? "No orders yet" : "No orders to fulfill")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .font(.tbSectionTitle)
                 .foregroundStyle(TBTheme.deepSky)
 
-            Text(mode == .buyer
-                 ? "Once you place an order, it'll show up here with live status updates."
-                 : sellerId.isEmpty
-                    ? "Showing demo data. Add your Seller ID in Settings to see your real orders."
-                    : "Orders from your store will appear here when buyers purchase.")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+            Text(emptyStateMessage)
+                .font(.tbBody)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
@@ -105,22 +127,24 @@ struct OrdersView: View {
             GlassCard(cornerRadius: 20) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .top, spacing: 10) {
-                        Image("OrdersTitle")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 130, height: 56)
+                        SnowfallTitleContainer(cornerRadius: 22, horizontalPadding: 10, verticalPadding: 8, flakeCount: 72) {
+                            Image("OrdersTitle")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 160, height: 70)
+                        }
 
                         Text(mode == .buyer
                              ? "Your purchases and delivery updates."
                              : "Manage fulfillment and customer orders.")
-                            .font(.subheadline)
+                            .font(.tbBody)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
 
                     if mode == .seller, sellerId.isEmpty {
-                        Text("Preview: viewing as FilamentFox (SELL-01)")
-                            .font(.caption2)
+                        Text("Preview mode: FilamentFox (SELL-01)")
+                            .font(.tbCaption)
                             .foregroundStyle(.tertiary)
                     }
 
@@ -141,12 +165,12 @@ struct OrdersView: View {
                     ForEach(filteredOrders) { order in
                         NavigationLink {
                             OrderDetailView(
-                                order: order,
+                                orderId: order.id,
                                 mode: mode,
                                 currentSellerId: mode == .seller ? effectiveSellerId : nil
                             )
                         } label: {
-                            OrderRowCard(order: order)
+                            OrderRowCard(order: order, products: localProducts.products)
                         }
                         .buttonStyle(.plain)
                     }
@@ -154,14 +178,17 @@ struct OrdersView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 28)
             }
+            .refreshable {
+                await refreshOrders()
+            }
         }
     }
 
     private var baseOrders: [Order] {
         switch mode {
-        case .buyer: return orders
+        case .buyer: return orderStore.orders
         case .seller:
-            return orders.filter { $0.shipments.contains { $0.sellerId == effectiveSellerId } }
+            return orderStore.orders.filter { $0.shipments.contains { $0.sellerId == effectiveSellerId } }
         }
     }
 
@@ -172,26 +199,61 @@ struct OrdersView: View {
         case .completed: return baseOrders.filter { $0.status == .delivered }
         }
     }
+
+    private var emptyStateMessage: String {
+        if let refreshError = orderStore.refreshError {
+            return refreshError
+        }
+
+        if mode == .buyer {
+            return "Your orders will appear here with live status updates."
+        }
+
+        if sellerId.isEmpty {
+            return "Showing demo data. Add your Seller ID in Settings to view live orders."
+        }
+
+        return "Orders from your store will appear here."
+    }
+
+    private func refreshOrders() async {
+        switch mode {
+        case .buyer:
+            await orderStore.refreshBuyerOrders(email: buyerEmail)
+        case .seller:
+            guard !sellerId.isEmpty else { return }
+            await orderStore.refreshSellerOrders(sellerId: sellerId)
+        }
+    }
 }
 
 
 // MARK: - Order Detail View (routes by mode)
 
 struct OrderDetailView: View {
-    let order: Order
+    @EnvironmentObject private var orderStore: OrderStore
+    let orderId: String
     let mode: OrdersMode
     /// When seller, only this seller's shipments are shown. Use first shipment's sellerId if nil (e.g. preview).
     var currentSellerId: String?
 
     var body: some View {
         Group {
-            switch mode {
-            case .buyer:
-                BuyerOrderDetailView(order: order)
-            case .seller:
-                SellerOrderDetailView(
-                    order: order,
-                    currentSellerId: currentSellerId ?? order.shipments.first?.sellerId ?? ""
+            if let order = orderStore.order(withId: orderId) {
+                switch mode {
+                case .buyer:
+                    BuyerOrderDetailView(order: order)
+                case .seller:
+                    SellerOrderDetailView(
+                        order: order,
+                        currentSellerId: currentSellerId ?? order.shipments.first?.sellerId ?? ""
+                    )
+                }
+            } else {
+                ContentUnavailableView(
+                    "Order unavailable",
+                    systemImage: "shippingbox",
+                    description: Text("This order could not be found.")
                 )
             }
         }
@@ -201,12 +263,13 @@ struct OrderDetailView: View {
 // MARK: - Buyer Order Detail (tracking, delivery, receipt)
 
 struct BuyerOrderDetailView: View {
+    @EnvironmentObject private var localProducts: LocalProductStore
     let order: Order
+    @State private var selectedProductionPreview: ProductionPreviewEntry?
 
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
-
                 GlassCard(cornerRadius: 24) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
@@ -248,6 +311,55 @@ struct BuyerOrderDetailView: View {
                 OrderTimelineView(order: order)
                     .padding(.horizontal, 16)
 
+                if let productionPreview = primaryProductionPreview {
+                    GlassCard(cornerRadius: 20) {
+                        Button {
+                            guard isProductionPreviewUnlocked else { return }
+                            selectedProductionPreview = productionPreview
+                        } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Color.white.opacity(0.8))
+                                        .frame(width: 48, height: 48)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .strokeBorder(TBTheme.skyBlue.opacity(0.16), lineWidth: 1)
+                                        )
+
+                                    Image(systemName: isProductionPreviewUnlocked ? "sparkles.tv.fill" : "clock.badge.exclamationmark")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(isProductionPreviewUnlocked ? TBTheme.icyBlue : .secondary)
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(isProductionPreviewUnlocked ? "See how your order is being made" : "Production preview not available yet")
+                                        .font(.tbBodyStrong)
+                                        .foregroundStyle(.primary)
+
+                                    Text(isProductionPreviewUnlocked
+                                         ? "Watch a short clip from the creation process"
+                                         : "This unlocks once your order reaches processing.")
+                                        .font(.tbCaption)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+
+                                Spacer(minLength: 8)
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(isProductionPreviewUnlocked ? TBTheme.icyBlue : Color.secondary.opacity(0.5))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!isProductionPreviewUnlocked)
+                        .opacity(isProductionPreviewUnlocked ? 1.0 : 0.62)
+                    }
+                    .padding(.horizontal, 16)
+                }
+
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Your shipments")
                         .font(.headline)
@@ -280,6 +392,56 @@ struct BuyerOrderDetailView: View {
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .sheet(item: $selectedProductionPreview) { preview in
+            ProductionPreviewPlayerSheet(preview: preview)
+        }
+    }
+
+    private var orderLineItems: [OrderLineItem] {
+        order.shipments.flatMap(\.items)
+    }
+
+    private var productionPreviewEntries: [ProductionPreviewEntry] {
+        var seen = Set<String>()
+        var entries: [ProductionPreviewEntry] = []
+
+        for item in orderLineItems {
+            let resolvedURL = item.productionPreviewResolvedURL ??
+                localProducts.product(withId: item.productId)?.productionPreviewURL
+
+            guard let resolvedURL else { continue }
+
+            let dedupeKey = "\(item.productId)|\(resolvedURL.absoluteString)"
+            guard seen.insert(dedupeKey).inserted else { continue }
+
+            entries.append(
+                ProductionPreviewEntry(
+                    productId: item.productId,
+                    productName: item.productName,
+                    videoURL: resolvedURL
+                )
+            )
+        }
+
+        return entries
+    }
+
+    private var primaryProductionPreview: ProductionPreviewEntry? {
+        productionPreviewEntries.first
+    }
+
+    private var isProductionPreviewUnlocked: Bool {
+        if order.status != .placed {
+            return true
+        }
+
+        // Some orders may still be marked "placed" while an individual shipment has started preparing.
+        return order.shipments.contains { shipment in
+            switch shipment.status {
+            case .preparing, .shipped, .delivered:
+                return true
+            }
+        }
     }
 
     private func formatMoney(_ cents: Int, _ currency: String) -> String {
@@ -291,9 +453,43 @@ struct BuyerOrderDetailView: View {
     }
 }
 
+private struct ProductionPreviewEntry: Identifiable {
+    let productId: String
+    let productName: String
+    let videoURL: URL
+
+    var id: String {
+        "\(productId)|\(videoURL.absoluteString)"
+    }
+}
+
+private struct ProductionPreviewPlayerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let preview: ProductionPreviewEntry
+
+    var body: some View {
+        NavigationStack {
+            VideoPlayer(player: AVPlayer(url: preview.videoURL))
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Production Preview")
+                #if os(iOS) || os(visionOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            dismiss()
+                        }
+                    }
+                }
+        }
+    }
+}
+
 // MARK: - Seller Order Detail (fulfillment, ship-by, buyer address)
 
 struct SellerOrderDetailView: View {
+    @EnvironmentObject private var orderStore: OrderStore
     let order: Order
     let currentSellerId: String
 
@@ -308,7 +504,6 @@ struct SellerOrderDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
-
                 GlassCard(cornerRadius: 24) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
@@ -339,7 +534,7 @@ struct SellerOrderDetailView: View {
                                 .foregroundStyle(.primary.opacity(0.9))
                         }
                         if let email = order.buyerEmail {
-                            Label("Buyer: \(email)", systemImage: "person.fill")
+                            Label("Buyer: \(email)", systemImage: "person")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -365,8 +560,28 @@ struct SellerOrderDetailView: View {
                             .padding(.vertical, 12)
                     } else {
                         ForEach(myShipments) { shipment in
-                            ShipmentCard(shipment: shipment, mode: .seller)
-                                .padding(.horizontal, 16)
+                            VStack(alignment: .leading, spacing: 8) {
+                                ShipmentCard(shipment: shipment, mode: .seller)
+
+                                if let nextAction = orderStore.nextAction(for: shipment, order: order) {
+                                    Button {
+                                        Task {
+                                            await orderStore.performShipmentAction(
+                                                nextAction,
+                                                orderId: order.id,
+                                                shipmentId: shipment.id,
+                                                sellerId: currentSellerId
+                                            )
+                                        }
+                                    } label: {
+                                        Label(nextAction.buttonTitle, systemImage: actionIcon(for: nextAction))
+                                            .font(.tbBodyStrong)
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true, horizontalPadding: 20, verticalPadding: 12, fontSize: 15))
+                                }
+                            }
+                            .padding(.horizontal, 16)
                         }
                     }
                 }
@@ -410,6 +625,17 @@ struct SellerOrderDetailView: View {
         f.numberStyle = .currency
         f.currencyCode = currency
         return f.string(from: value as NSDecimalNumber) ?? "$\(value)"
+    }
+
+    private func actionIcon(for action: SellerShipmentAction) -> String {
+        switch action {
+        case .startProcessing:
+            return "gearshape.2.fill"
+        case .markShipped:
+            return "truck.box.fill"
+        case .markDelivered:
+            return "checkmark.circle.fill"
+        }
     }
 }
 

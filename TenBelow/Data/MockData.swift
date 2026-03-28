@@ -18,9 +18,13 @@ enum MockData {
             name: "Desk Cable Clip",
             priceCents: 500,
             category: .desk,
-            imageNames: ["sample1"],
+            imageNames: ["products_image"],
             demoVideoURL: nil,
+            productionPreviewURL: URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4"),
+            pageViewCount: 920,
+            favoriteCount: 31,
             material: "PLA+",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "Built for everyday indoor use.",
             careWarnings: ["Avoid heat (car dashboards / dishwashers).", "Not load-bearing."],
             shipsInDays: 2...4
@@ -31,9 +35,13 @@ enum MockData {
             name: "Cup Holder Insert",
             priceCents: 700,
             category: .car,
-            imageNames: ["sample2"],
+            imageNames: ["filament_image"],
             demoVideoURL: nil,
+            productionPreviewURL: URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4"),
+            pageViewCount: 1180,
+            favoriteCount: 42,
             material: "PETG",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "Tougher material, better for warm environments.",
             careWarnings: ["Still avoid extreme heat.", "Hand clean only."],
             shipsInDays: 2...4
@@ -44,9 +52,13 @@ enum MockData {
             name: "Headphone Hook",
             priceCents: 600,
             category: .desk,
-            imageNames: ["sample1"],
+            imageNames: ["products_image"],
             demoVideoURL: nil,
+            productionPreviewURL: URL(string: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"),
+            pageViewCount: 640,
+            favoriteCount: 18,
             material: "PLA+",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "Clips onto most desks up to 1.5\" thick.",
             careWarnings: ["Not for headphones over 400g.", "Indoor use only."],
             shipsInDays: 2...4
@@ -57,9 +69,12 @@ enum MockData {
             name: "Mini Geometric Planter",
             priceCents: 800,
             category: .home,
-            imageNames: ["sample2"],
+            imageNames: ["filament_image"],
             demoVideoURL: nil,
+            pageViewCount: 520,
+            favoriteCount: 14,
             material: "PLA+",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "Great for succulents and small plants.",
             careWarnings: ["Not waterproof — use a liner.", "Indoor use only."],
             shipsInDays: 3...5
@@ -70,9 +85,12 @@ enum MockData {
             name: "Phone Stand",
             priceCents: 500,
             category: .tech,
-            imageNames: ["sample1"],
+            imageNames: ["products_image"],
             demoVideoURL: nil,
+            pageViewCount: 1340,
+            favoriteCount: 56,
             material: "PLA+",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "Fits most phones with or without case.",
             careWarnings: ["Don't force oversized devices.", "Keep away from heat."],
             shipsInDays: 2...4
@@ -83,9 +101,12 @@ enum MockData {
             name: "Hex Coaster Set (4)",
             priceCents: 999,
             category: .home,
-            imageNames: ["sample2"],
+            imageNames: ["filament_image"],
             demoVideoURL: nil,
+            pageViewCount: 410,
+            favoriteCount: 11,
             material: "PETG",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "Heat-resistant up to 80°C.",
             careWarnings: ["Hand wash only.", "May leave marks on glass tables."],
             shipsInDays: 3...5
@@ -96,9 +117,12 @@ enum MockData {
             name: "Car Vent Phone Clip",
             priceCents: 650,
             category: .car,
-            imageNames: ["sample1"],
+            imageNames: ["products_image"],
             demoVideoURL: nil,
+            pageViewCount: 760,
+            favoriteCount: 22,
             material: "PETG",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "Snaps onto standard car vents.",
             careWarnings: ["Not for round vents.", "May mark soft-touch interiors."],
             shipsInDays: 2...4
@@ -109,9 +133,12 @@ enum MockData {
             name: "Page-Hugger Bookmark",
             priceCents: 300,
             category: .gifts,
-            imageNames: ["sample2"],
+            imageNames: ["filament_image"],
             demoVideoURL: nil,
+            pageViewCount: 240,
+            favoriteCount: 9,
             material: "PLA+",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "Flexible clip that hugs pages.",
             careWarnings: ["May mark thin pages.", "Keep away from pets."],
             shipsInDays: 2...3
@@ -122,9 +149,12 @@ enum MockData {
             name: "Mystery Desk Gadget",
             priceCents: 400,
             category: .didntKnow,
-            imageNames: ["sample1"],
+            imageNames: ["products_image"],
             demoVideoURL: nil,
+            pageViewCount: 180,
+            favoriteCount: 5,
             material: "PLA+",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "A fun desk fidget you didn't know you needed.",
             careWarnings: ["Decorative only.", "Not a toy for small children."],
             shipsInDays: 2...4
@@ -135,14 +165,29 @@ enum MockData {
             name: "Cable Spine Organizer",
             priceCents: 850,
             category: .tech,
-            imageNames: ["sample2"],
+            imageNames: ["filament_image"],
             demoVideoURL: nil,
+            pageViewCount: 330,
+            favoriteCount: 8,
             material: "PLA+",
+            productionNote: "Printed fresh when you order",
             durabilityNote: "Routes up to 6 cables neatly.",
             careWarnings: ["Not for cables thicker than 8mm.", "Mount with included adhesive."],
             shipsInDays: 3...5
         )
     ]
+
+    /// Catalog rows for public seller pages when the live/local catalog has no products for this seller id yet.
+    /// Matches mock sellers by id; otherwise shows the PrintCraft sample set so storefronts are not empty during development.
+    static func publicCatalogProducts(for sellerId: String) -> [Product] {
+        let trimmed = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fromCatalog = products.filter { $0.sellerId == trimmed }
+        if !fromCatalog.isEmpty { return fromCatalog }
+        if let known = SellerProfile.mockLookup(id: trimmed) {
+            return products.filter { $0.sellerId == known.id }
+        }
+        return products.filter { $0.sellerId == SellerProfile.sample.id }
+    }
 
     // MARK: - Current Drop
 
@@ -159,9 +204,12 @@ enum MockData {
                 name: "Cloud Lamp — Warm White",
                 priceCents: 999,
                 category: .home,
-                imageNames: ["sample1"],
+                imageNames: ["products_image"],
                 demoVideoURL: nil,
+                pageViewCount: 460,
+                favoriteCount: 17,
                 material: "PETG (translucent)",
+                productionNote: "Printed fresh when you order",
                 durabilityNote: "USB powered, fits any desk. Warm LED included.",
                 careWarnings: ["Do not submerge.", "LED is not replaceable.", "Indoor use only."],
                 shipsInDays: 5...7
@@ -172,15 +220,18 @@ enum MockData {
                 name: "Cloud Lamp — Cool Blue",
                 priceCents: 999,
                 category: .home,
-                imageNames: ["sample2"],
+                imageNames: ["filament_image"],
                 demoVideoURL: nil,
+                pageViewCount: 390,
+                favoriteCount: 15,
                 material: "PETG (translucent)",
+                productionNote: "Printed fresh when you order",
                 durabilityNote: "USB powered, fits any desk. Cool LED included.",
                 careWarnings: ["Do not submerge.", "LED is not replaceable.", "Indoor use only."],
                 shipsInDays: 5...7
             )
         ],
-        imageName: "sample1"
+        imageName: "products_image"
     )
 
     // MARK: - Mock Orders

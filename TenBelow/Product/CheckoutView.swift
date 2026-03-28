@@ -13,7 +13,11 @@ import UIKit
 struct CheckoutView: View {
     @EnvironmentObject private var cart: CartStore
     @EnvironmentObject private var catalog: CatalogStore
+    @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
+    @EnvironmentObject private var orderStore: OrderStore
     @Environment(\.openURL) private var openURL
+    @AppStorage("buyerFullName") private var buyerFullName = ""
+    @AppStorage("buyerEmail") private var buyerEmail = ""
     var onSuccess: (String) -> Void
 
     @State private var email = ""
@@ -32,12 +36,25 @@ struct CheckoutView: View {
     @State private var showPaymentSheet = false
     @State private var paymentSheet: PaymentSheet?
 
+    private var isCheckoutReady: Bool {
+        AppConstants.isBackendConfigured && AppConstants.isStripeConfigured
+    }
+
     private var minimumOrderCents: Int {
         catalog.config.minimumOrderCents
     }
 
     private var canProceed: Bool {
-        !email.isEmpty && !name.isEmpty && !line1.isEmpty && !city.isEmpty && !state.isEmpty && !postalCode.isEmpty && agreedToTerms
+        !trimmedEmail.isEmpty
+            && !trimmedName.isEmpty
+            && !trimmedAddressLine1.isEmpty
+            && !trimmedCity.isEmpty
+            && !normalizedState.isEmpty
+            && !normalizedPostalCode.isEmpty
+            && isValidEmail(trimmedEmail)
+            && isValidUSState(normalizedState)
+            && isValidUSPostalCode(normalizedPostalCode)
+            && agreedToTerms
     }
 
     private var itemsBySeller: [(sellerId: String, items: [CartItem])] {
@@ -47,50 +64,133 @@ struct CheckoutView: View {
         }
     }
 
+    private var trimmedEmail: String {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedAddressLine1: String {
+        line1.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedAddressLine2: String {
+        line2.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedCity: String {
+        city.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var normalizedState: String {
+        state.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private var normalizedPostalCode: String {
+        postalCode.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var normalizedCountry: String {
+        country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: TBTheme.spacingXL) {
+        let content = ZStack {
+            ScrollView {
+                VStack(spacing: TBTheme.spacingXL) {
 
-                if let err = errorMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        Text(err)
-                            .font(.system(size: 14, weight: .medium, design: .rounded))
-                            .foregroundStyle(.red)
+                    if let err = errorMessage {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text(err)
+                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                .foregroundStyle(.red)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.08))
+                        .cornerRadius(TBTheme.radiusMD)
+                        .padding(.horizontal)
                     }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.red.opacity(0.08))
-                    .cornerRadius(TBTheme.radiusMD)
-                    .padding(.horizontal)
+
+                    if !isCheckoutReady {
+                        stripeSetupNotice
+                    }
+
+                    orderSummarySection
+
+                    shippingSection
+
+                    policyAgreementSection
+
+                    payButton
                 }
-
-                orderSummarySection
-
-                shippingSection
-
-                policyAgreementSection
-
-                payButton
+                .padding(.vertical, TBTheme.spacingLG)
+                .padding(.bottom, 40)
             }
-            .padding(.vertical, TBTheme.spacingLG)
-            .padding(.bottom, 40)
+            .scrollDismissesKeyboard(.interactively)
+
+            if isSubmitting {
+                AppLoadingOverlay(
+                    title: "Preparing Payment",
+                    subtitle: "Securing your order details."
+                )
+                .transition(.opacity)
+                .zIndex(1)
+            }
         }
-        .scrollDismissesKeyboard(.interactively)
-        .onAppear { errorMessage = nil }
-        .paymentSheet(
-            isPresented: $showPaymentSheet,
-            paymentSheet: paymentSheet!,
-            onCompletion: handlePaymentCompletion
+        .onAppear {
+            errorMessage = nil
+            if email.isEmpty { email = buyerEmail }
+            if name.isEmpty { name = buyerFullName }
+        }
+
+        if let paymentSheet {
+            content.paymentSheet(
+                isPresented: $showPaymentSheet,
+                paymentSheet: paymentSheet,
+                onCompletion: handlePaymentCompletion
+            )
+        } else {
+            content
+        }
+    }
+
+    private var stripeSetupNotice: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "creditcard")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(TBTheme.icyBlue)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Checkout unavailable")
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
+
+                Text(AppConstants.checkoutSetupMessage)
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
         )
+        .padding(.horizontal)
     }
 
     // MARK: - Order Summary
 
     @ViewBuilder
     private var orderSummarySection: some View {
-        GlassCard(cornerRadius: 22) {
+        GlassCard(cornerRadius: 22, showsBorder: false) {
             VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
                 HStack {
                     Image(systemName: "list.bullet.rectangle")
@@ -169,7 +269,7 @@ struct CheckoutView: View {
     // MARK: - Shipping
 
     private var shippingSection: some View {
-        GlassCard(cornerRadius: 22) {
+        GlassCard(cornerRadius: 22, showsBorder: false) {
             VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
                 HStack {
                     Image(systemName: "location.fill")
@@ -199,6 +299,7 @@ struct CheckoutView: View {
                         .textContentType(.addressCity)
                     CheckoutField(label: "State", text: $state, icon: nil)
                         .textContentType(.addressState)
+                        .textInputAutocapitalization(.characters)
                         .frame(maxWidth: .infinity)
                 }
 
@@ -209,6 +310,7 @@ struct CheckoutView: View {
                         .frame(maxWidth: .infinity)
                     CheckoutField(label: "Country", text: $country, icon: nil)
                         .textContentType(.countryName)
+                        .textInputAutocapitalization(.characters)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -231,6 +333,8 @@ struct CheckoutView: View {
                     .foregroundStyle(agreedToTerms ? TBTheme.icyBlue : .secondary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(agreedToTerms ? "Terms accepted" : "Accept terms")
+            .accessibilityHint("Double tap to toggle agreement with the Terms of Service, Privacy Policy, and Refund Policy.")
 
             policyAgreementText
         }
@@ -277,9 +381,11 @@ struct CheckoutView: View {
                     .padding(.vertical, 16)
             } else {
                 HStack {
-                    Text("Pay \(Money.format(cents: cart.subtotalCents))")
-                    Image(systemName: "lock.fill")
-                        .font(.caption)
+                    Text(isCheckoutReady
+                         ? "Pay \(Money.format(cents: cart.subtotalCents))"
+                         : "Checkout Unavailable")
+                    Image(systemName: isCheckoutReady ? "lock.fill" : "clock")
+                        .font(.caption.weight(.semibold))
                 }
                 .font(.system(size: 17, weight: .semibold, design: .rounded))
                 .frame(maxWidth: .infinity)
@@ -287,14 +393,20 @@ struct CheckoutView: View {
             }
         }
         .buttonStyle(PrimaryCTAButtonStyle())
-        .disabled(!canProceed || isSubmitting || cart.subtotalCents < minimumOrderCents)
-        .opacity(canProceed && !isSubmitting && cart.subtotalCents >= minimumOrderCents ? 1 : 0.6)
+        .disabled(!canProceed || isSubmitting || cart.subtotalCents < minimumOrderCents || !isCheckoutReady)
+        .opacity(canProceed && !isSubmitting && cart.subtotalCents >= minimumOrderCents && isCheckoutReady ? 1 : 0.6)
         .padding(.horizontal)
 
         if cart.subtotalCents < minimumOrderCents {
             Text("Minimum order \(Money.format(cents: minimumOrderCents)) to proceed.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.orange)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+        } else if !isCheckoutReady {
+            Text(AppConstants.checkoutSetupMessage)
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
         }
@@ -305,28 +417,63 @@ struct CheckoutView: View {
     private func createAndPresentPayment() async {
         errorMessage = nil
 
+        guard isCheckoutReady else {
+            errorMessage = AppConstants.checkoutSetupMessage
+            return
+        }
+
         guard cart.subtotalCents >= minimumOrderCents else {
             errorMessage = "Minimum order is \(Money.format(cents: minimumOrderCents))."
             return
         }
 
+        guard isValidEmail(trimmedEmail) else {
+            errorMessage = "Enter a valid email address."
+            return
+        }
+
+        guard trimmedName.count >= 2 else {
+            errorMessage = "Enter the full name for this order."
+            return
+        }
+
+        guard !trimmedAddressLine1.isEmpty, !trimmedCity.isEmpty else {
+            errorMessage = "Enter the full shipping address."
+            return
+        }
+
+        guard isValidUSState(normalizedState) else {
+            errorMessage = "Enter a valid 2-letter state code."
+            return
+        }
+
+        guard isValidUSPostalCode(normalizedPostalCode) else {
+            errorMessage = "Enter a valid ZIP code."
+            return
+        }
+
+        guard normalizedCountry == "US" else {
+            errorMessage = "Checkout currently supports US shipping only."
+            return
+        }
+
         guard agreedToTerms else {
-            errorMessage = "Please agree to the Terms and policies to continue."
+            errorMessage = "Please accept Terms, Privacy, and Refund Policy."
             return
         }
 
         isSubmitting = true
 
         let req = CreatePaymentIntentRequest(
-            email: email,
+            email: trimmedEmail,
             shipping: ShippingAddress(
-                name: name,
-                line1: line1,
-                line2: line2.isEmpty ? nil : line2,
-                city: city,
-                state: state,
-                postalCode: postalCode,
-                country: country
+                name: trimmedName,
+                line1: trimmedAddressLine1,
+                line2: trimmedAddressLine2.isEmpty ? nil : trimmedAddressLine2,
+                city: trimmedCity,
+                state: normalizedState,
+                postalCode: normalizedPostalCode,
+                country: normalizedCountry
             ),
             items: cart.items.map { CheckoutItem(productId: $0.product.id, quantity: $0.quantity) }
         )
@@ -344,7 +491,7 @@ struct CheckoutView: View {
             )
             showPaymentSheet = true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = friendlyCheckoutErrorMessage(for: error)
         }
         isSubmitting = false
     }
@@ -353,14 +500,55 @@ struct CheckoutView: View {
         switch result {
         case .completed:
             if let id = orderId {
+                let purchasedProducts = cart.items.map(\.product)
+                orderStore.placeOrder(
+                    orderId: id,
+                    items: cart.items,
+                    buyerEmail: trimmedEmail,
+                    shipToCity: trimmedCity,
+                    shipToState: normalizedState
+                )
+                buyerEngagement.trackPurchase(products: purchasedProducts)
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    await orderStore.refreshBuyerOrders(email: trimmedEmail)
+                }
                 onSuccess(id)
             }
             cart.clear()
         case .canceled:
             break
         case .failed(let error):
-            errorMessage = error.localizedDescription
+            errorMessage = friendlyCheckoutErrorMessage(for: error)
         }
+    }
+
+    private func friendlyCheckoutErrorMessage(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "You're offline. Reconnect to finish checkout."
+            case .timedOut:
+                return "Checkout took too long to respond. Please try again."
+            default:
+                break
+            }
+        }
+
+        return error.localizedDescription
+    }
+
+    private func isValidEmail(_ email: String) -> Bool {
+        let pattern = #"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$"#
+        return email.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    private func isValidUSState(_ state: String) -> Bool {
+        state.range(of: #"^[A-Z]{2}$"#, options: .regularExpression) != nil
+    }
+
+    private func isValidUSPostalCode(_ postalCode: String) -> Bool {
+        postalCode.range(of: #"^\d{5}(-\d{4})?$"#, options: .regularExpression) != nil
     }
 }
 

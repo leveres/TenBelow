@@ -62,4 +62,14 @@ struct OrderLineItem: Identifiable, Codable, Hashable {
     var unitPriceCents: Int
     var quantity: Int
     var thumbnailURL: String?
+    /// Optional order-bound production clip URL string.
+    /// This is independent from public product media/gallery.
+    var productionPreviewURL: String? = nil
+
+    var productionPreviewResolvedURL: URL? {
+        guard let productionPreviewURL,
+              let url = URL(string: productionPreviewURL)
+        else { return nil }
+        return url
+    }
 }

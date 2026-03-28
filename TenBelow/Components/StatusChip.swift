@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct StatusChip: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let status: OrderStatus
 
     private var color: Color {
@@ -38,42 +39,29 @@ struct StatusChip: View {
     }
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .bold))
+                .font(.caption.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
 
             Text(label)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.caption.weight(.semibold))
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                .multilineTextAlignment(.center)
         }
         .foregroundStyle(color)
-        .shadow(color: color.opacity(0.20), radius: 2, y: 1)
         .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.vertical, 7)
         .background(
-            ZStack {
-                Capsule().fill(color.opacity(0.10))
-                Capsule().fill(
-                    LinearGradient(
-                        colors: [.white.opacity(0.45), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-            }
+            Capsule(style: .continuous)
+                .fill(.white.opacity(0.74))
         )
         .overlay(
-            Capsule()
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.white.opacity(0.55), color.opacity(0.15)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 1
-                )
+            Capsule(style: .continuous)
+                .strokeBorder(color.opacity(0.16), lineWidth: 0.8)
         )
         .clipShape(Capsule())
-        .shadow(color: color.opacity(0.12), radius: 3, y: 2)
+        .shadow(color: .black.opacity(0.03), radius: 8, y: 4)
         .opacity(chipOpacity)
     }
 }

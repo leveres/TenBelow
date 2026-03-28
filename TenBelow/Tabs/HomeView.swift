@@ -11,16 +11,68 @@ import Combine
 struct HomeView: View {
     @EnvironmentObject private var cart: CartStore
     @EnvironmentObject private var catalog: CatalogStore
+    @EnvironmentObject private var localProducts: LocalProductStore
+    @EnvironmentObject private var orderStore: OrderStore
+    @EnvironmentObject private var notifications: NotificationStore
     @AppStorage("userRole") private var userRole = ""
+    @AppStorage("buyerFullName") private var buyerFullName = ""
+    @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
+    @AppStorage("sellerSellerId") private var sellerId = ""
+    @AppStorage("sellerBusinessName") private var sellerBusinessName = ""
     @State private var showCart = false
     @State private var liveDrop: CurrentDropResponse?
-    private let products = MockData.products
+    @State private var selectedFeaturedProduct: Product?
+    @State private var selectedFeaturedCreator: SellerProfile?
+    @State private var featuredRotationIndex = 0
+    @State private var creatorRotationIndex = 0
     private let drop = MockData.currentDrop
+    private let rotationInterval: TimeInterval = 120
+    private let rotationTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
+
+    /// Shared horizontal inset and vertical rhythm for the home screen.
+    private enum HomeMetrics {
+        static let pageInset = TBTheme.spacingXL
+        static let sectionSpacing = TBTheme.spacingMD
+        static let titleToContent = TBTheme.spacingXS + 2
+        static let logoImageHeight: CGFloat = 118
+        static let dealBannerHeight: CGFloat = 148
+        static let trendingRowHeight: CGFloat = 180
+        static let spotlightBottomInset: CGFloat = 2
+    }
+
+    private var products: [Product] {
+        resolvedStorefrontProducts(
+            remoteProducts: catalog.products,
+            fallbackProducts: localProducts.products
+        )
+    }
+
+    private var sellerProfilesByID: [String: SellerProfile] {
+        resolvedSellerProfilesByID(
+            storefrontProducts: products,
+            remoteProfiles: catalog.sellerProfiles
+        )
+    }
+
+    private var orders: [Order] {
+        orderStore.orders
+    }
+
+    private var currentSellerProfile: SellerProfile {
+        resolvedSellerProfile(
+            sellerId: sellerId,
+            storefrontProducts: products,
+            remoteProfiles: catalog.sellerProfiles
+        ) ?? .previewProfile(sellerId: sellerId, businessName: sellerBusinessName)
+    }
 
     @ViewBuilder
     private var profileDestination: some View {
         if userRole == "seller" {
-            SellerProfileView()
+            PublicSellerProfileView(
+                seller: currentSellerProfile,
+                products: products
+            )
         } else {
             BuyerProfileView()
         }
@@ -31,83 +83,260 @@ struct HomeView: View {
         return false
     }
 
+    private var profileToolbarIcon: some View {
+        Group {
+            if userRole == "buyer", buyerAccountCreated, !buyerInitials.isEmpty {
+                Text(buyerInitials)
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundStyle(TBTheme.deepSky)
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(TBTheme.deepSky)
+            }
+        }
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+    }
+
+    private var buyerInitials: String {
+        let trimmedName = buyerFullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmedName.split(whereSeparator: \.isWhitespace)
+        let letters = parts.prefix(2).compactMap { $0.first.map { String($0).uppercased() } }
+        return letters.joined()
+    }
+
+    private var excludedFeaturedProductIDs: Set<String> {
+        if let liveDrop, liveDrop.active {
+            return Set(liveDrop.products.map(\.id))
+        }
+
+        if catalog.config.dropEnabled {
+            return Set(drop.products.map(\.id))
+        }
+
+        return []
+    }
+
+    private var featuredProducts: [Product] {
+        let nonDropProducts = products.filter { !excludedFeaturedProductIDs.contains($0.id) }
+        let source = nonDropProducts.isEmpty ? products : nonDropProducts
+
+        let sellerBuckets = Dictionary(grouping: source, by: \.sellerId)
+            .mapValues { sellerProducts in
+                sellerProducts.sorted { lhs, rhs in
+                    let lhsScore = featuredProductPriorityScore(lhs)
+                    let rhsScore = featuredProductPriorityScore(rhs)
+
+                    if lhsScore == rhsScore {
+                        if lhs.priceCents == rhs.priceCents {
+                            return lhs.name < rhs.name
+                        }
+                        return lhs.priceCents < rhs.priceCents
+                    }
+
+                    return lhsScore < rhsScore
+                }
+            }
+
+        let sellerOrder = sellerBuckets.keys.sorted { lhs, rhs in
+            let lhsTraffic = sellerProfilesByID[lhs]?.pageViewCount ?? 0
+            let rhsTraffic = sellerProfilesByID[rhs]?.pageViewCount ?? 0
+            if lhsTraffic == rhsTraffic {
+                return lhs < rhs
+            }
+            return lhsTraffic < rhsTraffic
+        }
+
+        var workingBuckets = sellerBuckets
+        var rotation: [Product] = []
+        var appendedProductIDs = Set<String>()
+
+        while rotation.count < source.count {
+            var appendedInPass = false
+
+            for sellerID in sellerOrder {
+                guard var sellerProducts = workingBuckets[sellerID], !sellerProducts.isEmpty else { continue }
+                let nextProduct = sellerProducts.removeFirst()
+                workingBuckets[sellerID] = sellerProducts
+
+                if appendedProductIDs.insert(nextProduct.id).inserted {
+                    rotation.append(nextProduct)
+                    appendedInPass = true
+                }
+            }
+
+            if !appendedInPass {
+                break
+            }
+        }
+
+        return rotation.isEmpty ? source : rotation
+    }
+
+    private var spotlightCreators: [SellerProfile] {
+        let sellerIDs = Set(products.map(\.sellerId))
+
+        return sellerIDs
+            .compactMap { sellerProfilesByID[$0] }
+            .sorted { lhs, rhs in
+                let lhsScore = creatorSpotlightScore(lhs)
+                let rhsScore = creatorSpotlightScore(rhs)
+
+                if lhsScore == rhsScore {
+                    return lhs.displayName < rhs.displayName
+                }
+
+                return lhsScore > rhsScore
+            }
+    }
+
+    private var featuredCreator: SellerProfile? {
+        guard !spotlightCreators.isEmpty else { return nil }
+        return spotlightCreators[creatorRotationIndex % spotlightCreators.count]
+    }
+
+    private var featuredProduct: Product? {
+        guard !featuredProducts.isEmpty else { return nil }
+        return featuredProducts[featuredRotationIndex % featuredProducts.count]
+    }
+
+    private func products(for seller: SellerProfile) -> [Product] {
+        products.filter { $0.sellerId == seller.id }
+    }
+
+    private var productSalesCounts: [String: Int] {
+        orders
+            .flatMap(\.shipments)
+            .flatMap(\.items)
+            .reduce(into: [:]) { counts, item in
+                counts[item.productId, default: 0] += item.quantity
+            }
+    }
+
+    private func creatorSpotlightScore(_ seller: SellerProfile) -> Double {
+        let likes = Double(seller.likeCount)
+        let traffic = Double(seller.pageViewCount)
+        let orders = Double(seller.orderCount)
+        let ratingLift = seller.rating * 180
+        let verificationBoost = seller.showsVerifiedBadge ? 220.0 : 0.0
+        return traffic * 0.62 + likes * 1.05 + orders * 18 + ratingLift + verificationBoost
+    }
+
+    private func featuredProductPriorityScore(_ product: Product) -> Double {
+        let salesCount = Double(productSalesCounts[product.id] ?? 0)
+        let sellerTraffic = Double(sellerProfilesByID[product.sellerId]?.pageViewCount ?? 0)
+        let productViews = Double(product.pageViewCount)
+        let favorites = Double(product.favoriteCount)
+        let priceWeight = Double(product.priceCents) / 100.0
+        return salesCount * 100 + productViews * 0.18 + favorites * 8 + sellerTraffic * 0.02 + priceWeight
+    }
+
+    private func seedRotations() {
+        let spotlightCount = max(spotlightCreators.count, 1)
+        let featuredCount = max(featuredProducts.count, 1)
+        let timeBucket = Int(Date().timeIntervalSinceReferenceDate / rotationInterval)
+
+        creatorRotationIndex = timeBucket % spotlightCount
+        featuredRotationIndex = timeBucket % featuredCount
+    }
+
+    private func advanceRotations() {
+        if spotlightCreators.count > 1 {
+            creatorRotationIndex = (creatorRotationIndex + 1) % spotlightCreators.count
+        }
+
+        if featuredProducts.count > 1 {
+            featuredRotationIndex = (featuredRotationIndex + 1) % featuredProducts.count
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-
-                // Brand logo
-                Image("Logo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 160)
+            GeometryReader { _ in
+                VStack(alignment: .leading, spacing: HomeMetrics.sectionSpacing) {
+                    SnowfallTitleContainer(
+                        cornerRadius: 30,
+                        horizontalPadding: TBTheme.spacingLG + 2,
+                        verticalPadding: TBTheme.spacingSM,
+                        flakeCount: 84
+                    ) {
+                        Image("Logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: HomeMetrics.logoImageHeight)
+                    }
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 4)
-                    .padding(.bottom, TBTheme.spacingSM)
 
-                // Weekly Drop hero
-                if hasLiveDrop, let ld = liveDrop {
-                    // Live drop with real seller products
-                    VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
-                        Text("Weekly Drop")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundStyle(TBTheme.frostTitleGradient)
+                    if let dealOfDayProduct = featuredProduct {
+                        VStack(alignment: .leading, spacing: HomeMetrics.titleToContent) {
+                            Text("Today's standout")
+                                .font(.tbSectionTitle)
+                                .tracking(-0.2)
+                                .foregroundStyle(TBTheme.icyBlue)
 
-                        NavigationLink {
-                            DropView()
-                                .environmentObject(cart)
-                                .environmentObject(catalog)
-                        } label: {
-                            LiveDropBanner(endsAt: ld.endsAt, productCount: ld.products.count)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, TBTheme.spacingSM)
-                } else if catalog.config.dropEnabled {
-                    // Fallback: config-driven drop banner (always shows when enabled)
-                    VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
-                        Text(catalog.config.dropTitle)
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundStyle(TBTheme.frostTitleGradient)
-
-                        NavigationLink {
-                            DropView()
-                        } label: {
-                            DropHeroBanner(drop: drop, dropEndsAt: catalog.config.dropEndsAt, cta: catalog.config.dropCta)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, TBTheme.spacingSM)
-                }
-
-                // Trending products
-                VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
-                    Text("Trending Under $10")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(TBTheme.frostTitleGradient)
-                        .padding(.horizontal)
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: TBTheme.spacingMD) {
-                            ForEach(products.prefix(6)) { product in
-                                ProductCard(
-                                    product: product,
-                                    seller: .mockLookup(id: product.sellerId),
-                                    allProducts: products
-                                )
-                                .frame(width: 160)
+                            DealOfDayBanner(product: dealOfDayProduct) {
+                                selectedFeaturedProduct = dealOfDayProduct
                             }
+                            .frame(height: HomeMetrics.dealBannerHeight)
                         }
-                        .padding(.horizontal)
+                    }
+
+                    VStack(alignment: .leading, spacing: HomeMetrics.titleToContent) {
+                        Text("Fresh favorites")
+                            .font(.tbSectionTitle)
+                            .tracking(-0.2)
+                            .foregroundStyle(TBTheme.icyBlue)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: TBTheme.spacingLG + 2) {
+                                ForEach(products.prefix(6)) { product in
+                                    ProductCard(
+                                        product: product,
+                                        seller: sellerProfilesByID[product.sellerId],
+                                        allProducts: products
+                                    )
+                                    .frame(width: 166)
+                                }
+                            }
+                            .padding(.trailing, HomeMetrics.pageInset)
+                        }
+                        .frame(height: HomeMetrics.trendingRowHeight)
+                    }
+
+                    if let featuredCreator {
+                        VStack(alignment: .leading, spacing: HomeMetrics.titleToContent) {
+                            Text("Maker spotlight")
+                                .font(.tbSectionTitle)
+                                .tracking(-0.2)
+                                .foregroundStyle(TBTheme.icyBlue)
+
+                            CreatorSpotlightCard(
+                                creator: featuredCreator,
+                                onOpenStore: {
+                                    selectedFeaturedCreator = featuredCreator
+                                }
+                            )
+                            .frame(maxWidth: .infinity, alignment: .top)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(.bottom, HomeMetrics.spotlightBottomInset)
+                    } else {
+                        Spacer(minLength: 0)
                     }
                 }
-
-                Spacer(minLength: 0)
+                .padding(.horizontal, HomeMetrics.pageInset)
+                .padding(.top, 2)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .padding(.bottom, 88)
             .task {
                 do { liveDrop = try await DropAPI.currentDrop() } catch { }
+            }
+            .onAppear {
+                seedRotations()
+            }
+            .onReceive(rotationTimer) { _ in
+                advanceRotations()
             }
             .background(TBTheme.cloudWhite)
             .navigationTitle("")
@@ -115,50 +344,393 @@ struct HomeView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        profileDestination
-                    } label: {
-                        Image(systemName: "person.crop.circle")
-                            .font(.title3)
-                            .foregroundStyle(TBTheme.icyBlue)
+                    HStack(spacing: 2) {
+                        NavigationLink {
+                            profileDestination
+                        } label: {
+                            profileToolbarIcon
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(userRole == "seller" ? "Open seller profile" : "Open buyer profile")
+
+                        NavigationLink {
+                            NotificationsHubView()
+                        } label: {
+                            NotificationBellButton(unreadCount: notifications.unreadCount())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarTrailing) {
                     CartButton(itemCount: cart.items.reduce(0) { $0 + $1.quantity }) {
                         showCart = true
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             #else
             .toolbar {
                 ToolbarItem(placement: .automatic) {
-                    NavigationLink {
-                        profileDestination
-                    } label: {
-                        Image(systemName: "person.crop.circle")
-                            .font(.title3)
-                            .foregroundStyle(TBTheme.icyBlue)
+                    HStack(spacing: 2) {
+                        NavigationLink {
+                            profileDestination
+                        } label: {
+                            profileToolbarIcon
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(userRole == "seller" ? "Open seller profile" : "Open buyer profile")
+
+                        NavigationLink {
+                            NotificationsHubView()
+                        } label: {
+                            NotificationBellButton(unreadCount: notifications.unreadCount())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .automatic) {
                     CartButton(itemCount: cart.items.reduce(0) { $0 + $1.quantity }) {
                         showCart = true
                     }
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             #endif
             .sheet(isPresented: $showCart) {
                 CartView()
                     .environmentObject(cart)
                     .environmentObject(catalog)
+                    .environmentObject(localProducts)
+            }
+            .navigationDestination(item: $selectedFeaturedProduct) { product in
+                ProductDetailView(product: product)
+            }
+            .navigationDestination(item: $selectedFeaturedCreator) { seller in
+                PublicSellerProfileView(
+                    seller: seller,
+                    products: products(for: seller)
+                )
             }
         }
+    }
+}
+
+private struct DealOfDayBanner: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let product: Product
+    let onSeeDetails: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: TBTheme.spacingLG) {
+            VStack(alignment: .leading, spacing: TBTheme.spacingSM + 2) {
+                Text(product.name)
+                    .font(.tbProductTitleXL)
+                    .tracking(-0.25)
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
+                    .multilineTextAlignment(.leading)
+
+                Text(Money.format(cents: product.priceCents))
+                    .font(.tbProductPriceLG)
+                    .tracking(-0.5)
+                    .foregroundStyle(.white)
+
+                Spacer(minLength: TBTheme.spacingSM)
+
+                actionStack
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.16),
+                                .white.opacity(0.06)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .strokeBorder(.white.opacity(0.18), lineWidth: 1)
+                    )
+                    .frame(width: 96, height: 96)
+
+                StorefrontImageView(reference: product.primaryImageReference, contentMode: .fit) {
+                    Image(systemName: product.category.icon)
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.88))
+                        .frame(width: 108, height: 108)
+                }
+                .frame(width: 108, height: 108)
+                .shadow(color: .white.opacity(0.18), radius: 6, y: -1)
+                .shadow(color: .black.opacity(0.10), radius: 10, y: 5)
+                .offset(y: -2)
+            }
+            .frame(width: 104, height: 104)
+        }
+        .padding(.horizontal, TBTheme.spacingLG + 2)
+        .padding(.vertical, TBTheme.spacingMD + 2)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.35, green: 0.58, blue: 0.91),
+                        Color(red: 0.28, green: 0.54, blue: 0.92),
+                        Color(red: 0.24, green: 0.49, blue: 0.88)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                SnowfallParticleCanvas(flakeCount: 84)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: TBTheme.radiusLG, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.18),
+                            .white.opacity(0.06),
+                            .clear
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottom
+                    )
+                )
+                .allowsHitTesting(false)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: TBTheme.radiusLG, style: .continuous)
+                .strokeBorder(.white.opacity(0.14), lineWidth: 0.9)
+                .allowsHitTesting(false)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: TBTheme.radiusLG, style: .continuous))
+        .shadow(color: TBTheme.deepSky.opacity(0.16), radius: 10, y: 4)
+    }
+
+    @ViewBuilder
+    private var actionStack: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
+                curatedPickPill
+                detailsButton
+            }
+        } else {
+            HStack(spacing: TBTheme.spacingMD) {
+                curatedPickPill
+                detailsButton
+            }
+        }
+    }
+
+    private var curatedPickPill: some View {
+        Text("Curated pick")
+            .font(.caption.weight(.semibold))
+            .tracking(0.15)
+            .foregroundStyle(.white)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            .multilineTextAlignment(.center)
+            .minimumScaleFactor(0.9)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(.white.opacity(0.14), in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+            )
+    }
+
+    private var detailsButton: some View {
+        Button(action: onSeeDetails) {
+            HStack(spacing: 6) {
+                Text("View details")
+                Image(systemName: "arrow.right")
+                    .font(.caption.weight(.bold))
+            }
+            .font(.callout.weight(.semibold))
+            .tracking(-0.08)
+            .foregroundStyle(TBTheme.bannerCTAForeground)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 15)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(Color.white.opacity(0.92)))
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(0.98), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.14), radius: 6, y: 3)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct CreatorSpotlightCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let creator: SellerProfile
+    let onOpenStore: () -> Void
+
+    var body: some View {
+        content
+        .padding(.horizontal, TBTheme.spacingMD)
+        .padding(.vertical, TBTheme.spacingMD + 2)
+        .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? 108 : 88)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .background {
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.35, green: 0.58, blue: 0.91),
+                        Color(red: 0.27, green: 0.52, blue: 0.90)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.18),
+                            .white.opacity(0.05),
+                            .clear
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottom
+                    )
+                )
+                .allowsHitTesting(false)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous)
+                .strokeBorder(.white.opacity(0.15), lineWidth: 0.9)
+                .allowsHitTesting(false)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous))
+        .shadow(color: TBTheme.deepSky.opacity(0.15), radius: 10, y: 4)
+    }
+
+    private var avatarInitials: String {
+        let words = creator.displayName.split(separator: " ")
+        let initials = words.prefix(2).compactMap { $0.first }
+        return initials.isEmpty ? "TB" : String(initials)
+    }
+
+    private var metadataText: String {
+        "\(creator.productCount) products • \(formattedLikes)"
+    }
+
+    private var formattedLikes: String {
+        let count = Double(creator.likeCount)
+
+        guard count >= 1_000 else { return "\(creator.likeCount) likes" }
+
+        let value = count / 1_000
+        let text = value == floor(value)
+            ? String(format: "%.0fk", value)
+            : String(format: "%.1fk", value)
+
+        return "\(text) likes"
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
+                headerRow
+                storeButton
+            }
+        } else {
+            HStack(alignment: .center, spacing: TBTheme.spacingMD) {
+                headerRow
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                storeButton
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: TBTheme.spacingMD) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.98), TBTheme.skyLight.opacity(0.55)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                Circle()
+                    .strokeBorder(.white.opacity(0.88), lineWidth: 1)
+
+                Text(avatarInitials)
+                    .font(.system(size: 21, weight: .semibold, design: .rounded))
+                    .foregroundStyle(TBTheme.deepSky)
+            }
+            .frame(width: 48, height: 48)
+
+            VStack(alignment: .leading, spacing: TBTheme.spacingXS) {
+                Text(creator.displayName)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .tracking(-0.15)
+                    .foregroundStyle(.white)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+
+                Text("Spotlight seller")
+                    .font(.tbMicro)
+                    .foregroundStyle(.white.opacity(0.82))
+
+                Text(metadataText)
+                    .font(.tbCaption)
+                    .foregroundStyle(.white.opacity(0.74))
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            }
+        }
+    }
+
+    private var storeButton: some View {
+        Button(action: onOpenStore) {
+            HStack(spacing: TBTheme.spacingXS + 1) {
+                Text("View store")
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+            }
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .foregroundStyle(TBTheme.bannerCTAForeground)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, TBTheme.spacingMD)
+            .padding(.vertical, TBTheme.spacingSM)
+            .background(Capsule().fill(Color.white.opacity(0.92)))
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(0.98), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.14), radius: 6, y: 3)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
     }
 }
 
 // MARK: - Live Drop Banner (replaces old DropHeroBanner on Home)
 
 private struct LiveDropBanner: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let endsAt: String
     let productCount: Int
 
@@ -167,7 +739,7 @@ private struct LiveDropBanner: View {
             HStack {
                 Image(systemName: "flame.fill")
                     .foregroundStyle(.orange)
-                Text("Premium Products This Weekend")
+                Text("Weekend drop highlights")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
             }
@@ -185,9 +757,7 @@ private struct LiveDropBanner: View {
 
                 Spacer()
 
-                Text("\(productCount) item\(productCount == 1 ? "" : "s") • View Drop →")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                viewDropPill
             }
         }
         .padding(TBTheme.spacingLG)
@@ -197,10 +767,46 @@ private struct LiveDropBanner: View {
         .cornerRadius(TBTheme.radiusLG)
         .shadow(color: TBTheme.skyBlue.opacity(0.25), radius: 10, y: 4)
     }
+
+    private var viewDropPill: some View {
+        HStack(spacing: 6) {
+            Text("\(productCount) item\(productCount == 1 ? "" : "s")")
+            Text("View drop")
+            Image(systemName: "arrow.right")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+        }
+        .font(.system(size: 13, weight: .semibold, design: .rounded))
+        .foregroundStyle(TBTheme.bannerCTAForeground)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(Color.white.opacity(0.92)))
+        .overlay(
+            Capsule()
+                .strokeBorder(.white.opacity(0.98), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.14), radius: 6, y: 3)
+    }
 }
 
 #Preview {
-    HomeView()
+    let events = CommerceEventStore()
+    let products = LocalProductStore(eventStore: events)
+    let orders = OrderStore(eventStore: events)
+    let engagement = BuyerEngagementStore(eventStore: events)
+    let notifications = NotificationStore(
+        eventStore: events,
+        buyerEngagement: engagement,
+        localProducts: products,
+        orderStore: orders
+    )
+
+    return HomeView()
         .environmentObject(CartStore())
         .environmentObject(CatalogStore())
+        .environmentObject(engagement)
+        .environmentObject(products)
+        .environmentObject(orders)
+        .environmentObject(notifications)
 }

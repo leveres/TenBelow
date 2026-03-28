@@ -26,7 +26,15 @@ enum SampleOrders {
                         shippedAt: now.addingTimeInterval(-86400 * 2),
                         deliveredAt: nil,
                         items: [
-                            OrderLineItem(id: "LI-1", productId: "P-1", productName: "Desk Cable Clip", unitPriceCents: 500, quantity: 2, thumbnailURL: nil)
+                            OrderLineItem(
+                                id: "LI-1",
+                                productId: "P-1",
+                                productName: "Desk Cable Clip",
+                                unitPriceCents: 500,
+                                quantity: 2,
+                                thumbnailURL: nil,
+                                productionPreviewURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4"
+                            )
                         ]
                     ),
                     Shipment(
@@ -69,7 +77,15 @@ enum SampleOrders {
                         shippedAt: now.addingTimeInterval(-86400 * 26),
                         deliveredAt: now.addingTimeInterval(-86400 * 24),
                         items: [
-                            OrderLineItem(id: "LI-4", productId: "P-4", productName: "Cloud Lamp — Warm White", unitPriceCents: 999, quantity: 1, thumbnailURL: nil)
+                            OrderLineItem(
+                                id: "LI-4",
+                                productId: "P-4",
+                                productName: "Cloud Lamp — Warm White",
+                                unitPriceCents: 999,
+                                quantity: 1,
+                                thumbnailURL: nil,
+                                productionPreviewURL: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4"
+                            )
                         ]
                     )
                 ]

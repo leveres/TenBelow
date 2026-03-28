@@ -30,7 +30,7 @@ extension TBCategory {
     }
 }
 
-enum Category: String, CaseIterable, Identifiable {
+enum Category: String, CaseIterable, Identifiable, Codable {
     case home = "Home"
     case desk = "Desk"
     case car = "Car"

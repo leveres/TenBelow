@@ -2,6 +2,7 @@ import SwiftUI
 
 struct OrderRowCard: View {
     let order: Order
+    var products: [Product] = MockData.products
 
     var body: some View {
         GlassCard {
@@ -13,6 +14,25 @@ struct OrderRowCard: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     OrderStatusPill(status: order.status)
+                }
+
+                if !previewItems.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(previewItems, id: \.id) { item in
+                            orderThumbnail(for: item)
+                        }
+                        if remainingPreviewCount > 0 {
+                            Text("+\(remainingPreviewCount)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 38, height: 38)
+                                .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 10))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                                )
+                        }
+                    }
                 }
 
                 Text(primaryTitle)
@@ -32,21 +52,39 @@ struct OrderRowCard: View {
                     Spacer()
                     HStack(spacing: 6) {
                         Text("View")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .accessibilityHidden(true)
                     }
                     .foregroundStyle(Color.blue.opacity(0.9))
                 }
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(orderAccessibilityLabel)
+        .accessibilityHint("Opens order details.")
     }
 
     private var primaryTitle: String {
         let firstItem = order.shipments.first?.items.first?.productName ?? "Order"
         return firstItem
+    }
+
+    private var orderItems: [OrderLineItem] {
+        order.shipments.flatMap(\.items)
+    }
+
+    private var previewItems: [OrderLineItem] {
+        Array(orderItems.prefix(3))
+    }
+
+    private var remainingPreviewCount: Int {
+        max(0, orderItems.count - previewItems.count)
+    }
+
+    private var productsById: [String: Product] {
+        Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
     }
 
     private var subtitle: String {
@@ -56,11 +94,62 @@ struct OrderRowCard: View {
         return "\(date)  •  \(items)  •  \(shipments)"
     }
 
+    @ViewBuilder
+    private func orderThumbnail(for item: OrderLineItem) -> some View {
+        if let product = productsById[item.productId] {
+            StorefrontImageView(reference: product.primaryImageReference) {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.white.opacity(0.78))
+                    .overlay {
+                        Image(systemName: "shippingbox")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+            }
+            .frame(width: 38, height: 38)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white.opacity(0.85), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.05), radius: 3, y: 1)
+        } else {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white.opacity(0.78))
+                .frame(width: 38, height: 38)
+                .overlay {
+                    Image(systemName: "shippingbox")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                )
+        }
+    }
+
     private func formatMoney(_ cents: Int, _ currency: String) -> String {
         let value = Decimal(cents) / 100
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = currency
         return f.string(from: value as NSDecimalNumber) ?? "$\(value)"
+    }
+
+    private var orderAccessibilityLabel: String {
+        [
+            primaryTitle,
+            order.status.accessibilityTitle,
+            subtitle.replacingOccurrences(of: "•", with: ","),
+            "Total \(formatMoney(order.totalCents, order.currency))"
+        ].joined(separator: ", ")
+    }
+}
+
+private extension OrderStatus {
+    var accessibilityTitle: String {
+        rawValue.replacingOccurrences(of: "-", with: " ")
     }
 }

@@ -63,7 +63,7 @@ struct ShipmentCard: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else if shipment.status == .preparing {
-                Text("Preparing for shipment")
+                Text("Preparing shipment")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -90,7 +90,7 @@ struct ShipmentCard: View {
             }
 
             if shipment.status == .preparing {
-                Text("Next: Purchase label and add tracking")
+                Text("Next: purchase label and add tracking")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

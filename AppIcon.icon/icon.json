@@ -20,7 +20,7 @@
       "layers" : [
         {
           "blend-mode" : "normal",
-          "image-name" : "TenBelow.PNG",
+          "image-name" : "TenBelow.png",
           "name" : "TenBelow",
           "position" : {
             "scale" : 1,

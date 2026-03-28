@@ -9,6 +9,9 @@ import SwiftUI
 import Combine
 
 struct CategoryView: View {
+    @EnvironmentObject private var catalog: CatalogStore
+    @EnvironmentObject private var localProducts: LocalProductStore
+
     let category: Category?
     let displayTitle: String
     let displayIcon: String
@@ -25,9 +28,23 @@ struct CategoryView: View {
         self.displayIcon = tbCategory.icon
     }
 
+    private var storefrontProducts: [Product] {
+        resolvedStorefrontProducts(
+            remoteProducts: catalog.products,
+            fallbackProducts: localProducts.products
+        )
+    }
+
+    private var sellerProfilesByID: [String: SellerProfile] {
+        resolvedSellerProfilesByID(
+            storefrontProducts: storefrontProducts,
+            remoteProfiles: catalog.sellerProfiles
+        )
+    }
+
     private var products: [Product] {
-        guard let category else { return MockData.products }
-        return MockData.products(for: category)
+        guard let category else { return storefrontProducts }
+        return storefrontProducts.filter { $0.category == category }
     }
 
     var body: some View {
@@ -54,8 +71,8 @@ struct CategoryView: View {
                     ForEach(products) { product in
                         ProductCard(
                             product: product,
-                            seller: .mockLookup(id: product.sellerId),
-                            allProducts: MockData.products
+                            seller: sellerProfilesByID[product.sellerId],
+                            allProducts: storefrontProducts
                         )
                     }
                 }
@@ -68,8 +85,12 @@ struct CategoryView: View {
 }
 
 #Preview {
+    let events = CommerceEventStore()
     NavigationStack {
         CategoryView(category: .desk)
     }
     .environmentObject(CartStore())
+    .environmentObject(CatalogStore())
+    .environmentObject(BuyerEngagementStore(eventStore: events))
+    .environmentObject(LocalProductStore(eventStore: events))
 }

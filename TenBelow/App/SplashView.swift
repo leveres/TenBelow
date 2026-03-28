@@ -9,40 +9,48 @@ import SwiftUI
 import Combine
 
 struct SplashView: View {
-    @State private var isActive = false
+    var onFinish: (() -> Void)? = nil
     @State private var logoOpacity = 0.0
     @State private var logoScale = 0.85
+    @State private var contentOffset: CGFloat = 16
 
     var body: some View {
-        if isActive {
-            AppRootView()
-        } else {
-            ZStack {
-                Color.black.ignoresSafeArea()
+        ZStack {
+            WinterSceneBackground()
 
-                VStack(spacing: 20) {
-                    AnimatedLogoView()
-                        .frame(height: 220)
-                        .scaleEffect(logoScale)
-                        .opacity(logoOpacity)
+            VStack(spacing: 0) {
+                Spacer()
 
+                AnimatedLogoView()
+                    .frame(height: 260)
+                    .scaleEffect(logoScale)
+                    .opacity(logoOpacity)
+                    .offset(y: contentOffset)
+
+                Spacer()
+
+                VStack(spacing: 8) {
                     Text("Everything $10 & under")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(TBTheme.frostGlow)
-                        .opacity(logoOpacity)
-                }
-            }
-            .onAppear {
-                withAnimation(.easeOut(duration: 0.8)) {
-                    logoOpacity = 1.0
-                    logoScale = 1.0
-                }
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.86))
 
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) {
-                    withAnimation(.easeInOut(duration: 0.4)) {
-                        isActive = true
-                    }
+                    Text("Fresh 3D printed finds, ready to explore.")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.primary.opacity(0.48))
                 }
+                .opacity(logoOpacity)
+                .padding(.bottom, 64)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 1.0)) {
+                logoOpacity = 1.0
+                logoScale = 1.0
+                contentOffset = 0
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.8) {
+                onFinish?()
             }
         }
     }
