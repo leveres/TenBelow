@@ -414,8 +414,11 @@ struct CheckoutView: View {
 
     // MARK: - Actions
 
+    @MainActor
     private func createAndPresentPayment() async {
         errorMessage = nil
+        showPaymentSheet = false
+        paymentSheet = nil
 
         guard isCheckoutReady else {
             errorMessage = AppConstants.checkoutSetupMessage
@@ -484,18 +487,33 @@ struct CheckoutView: View {
 
             var configuration = PaymentSheet.Configuration()
             configuration.merchantDisplayName = "TenBelow"
+            configuration.paymentMethodOrder = ["card"]
 
-            paymentSheet = PaymentSheet(
+            let sheet = PaymentSheet(
                 paymentIntentClientSecret: response.clientSecret,
                 configuration: configuration
             )
-            showPaymentSheet = true
+
+            #if os(iOS)
+            dismissKeyboard()
+            #endif
+
+            paymentSheet = sheet
+            isSubmitting = false
+
+            // Stripe's SwiftUI presenter can fail silently if the sheet is requested
+            // in the same update cycle that creates it, especially after text input.
+            DispatchQueue.main.async {
+                showPaymentSheet = true
+            }
+            return
         } catch {
             errorMessage = friendlyCheckoutErrorMessage(for: error)
         }
         isSubmitting = false
     }
 
+    @MainActor
     private func handlePaymentCompletion(_ result: PaymentSheetResult) {
         switch result {
         case .completed:
@@ -522,6 +540,13 @@ struct CheckoutView: View {
             errorMessage = friendlyCheckoutErrorMessage(for: error)
         }
     }
+
+    #if os(iOS)
+    @MainActor
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    #endif
 
     private func friendlyCheckoutErrorMessage(for error: Error) -> String {
         if let urlError = error as? URLError {

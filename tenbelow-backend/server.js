@@ -608,6 +608,7 @@ app.post("/create-payment-intent", async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalCents,
       currency: "usd",
+      payment_method_types: ["card"],
       metadata: {
         orderId,
         buyerEmail: email,
