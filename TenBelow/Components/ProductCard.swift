@@ -7,6 +7,11 @@
 
 import SwiftUI
 
+enum ProductCardStyle {
+    case standard
+    case blended
+}
+
 struct ProductCard: View {
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
     @EnvironmentObject private var localProducts: LocalProductStore
@@ -15,6 +20,7 @@ struct ProductCard: View {
     let product: Product
     var seller: SellerProfile? = nil
     var allProducts: [Product] = []
+    var style: ProductCardStyle = .standard
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -75,26 +81,29 @@ struct ProductCard: View {
                 }
             }
             .padding(9)
-            .frame(maxWidth: .infinity, minHeight: 182, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: cardMinHeight, alignment: .topLeading)
             .background(
                 ZStack {
                     RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                        .fill(TBTheme.cardGradient)
+                        .fill(cardFill)
 
                     RoundedRectangle(cornerRadius: TBTheme.radiusLG)
                         .fill(
                             LinearGradient(
-                                colors: [.white.opacity(0.5), .clear],
+                                colors: style == .blended ? [.white.opacity(0.28), .clear] : [.white.opacity(0.5), .clear],
                                 startPoint: .top,
                                 endPoint: .center
                             )
                         )
                 }
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: TBTheme.radiusLG)
+                    .strokeBorder(cardBorderColor, lineWidth: style == .blended ? 0.8 : 0)
+            )
             .cornerRadius(TBTheme.radiusLG)
-            .shadow(color: TBTheme.deepSky.opacity(0.1), radius: 2, x: 0, y: 1)
-            .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 6)
-            .shadow(color: TBTheme.skyBlue.opacity(0.06), radius: 16, y: 8)
+            .shadow(color: primaryShadowColor, radius: primaryShadowRadius, x: 0, y: primaryShadowYOffset)
+            .shadow(color: secondaryShadowColor, radius: secondaryShadowRadius, y: secondaryShadowYOffset)
 
             if buyerEngagement.showsFavoriteButton(for: product) {
                 Button {
@@ -130,6 +139,56 @@ struct ProductCard: View {
             parts.append("by \(seller.displayName)")
         }
         return parts.joined(separator: ", ")
+    }
+
+    private var cardFill: LinearGradient {
+        switch style {
+        case .standard:
+            return TBTheme.cardGradient
+        case .blended:
+            return LinearGradient(
+                colors: [TBTheme.cloudWhite.opacity(0.86), TBTheme.skyLight.opacity(0.18)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+
+    private var cardMinHeight: CGFloat {
+        switch style {
+        case .standard:
+            return 182
+        case .blended:
+            return 170
+        }
+    }
+
+    private var cardBorderColor: Color {
+        style == .blended ? .white.opacity(0.55) : .clear
+    }
+
+    private var primaryShadowColor: Color {
+        style == .blended ? TBTheme.deepSky.opacity(0.03) : TBTheme.deepSky.opacity(0.1)
+    }
+
+    private var primaryShadowRadius: CGFloat {
+        style == .blended ? 4 : 2
+    }
+
+    private var primaryShadowYOffset: CGFloat {
+        style == .blended ? 1 : 1
+    }
+
+    private var secondaryShadowColor: Color {
+        style == .blended ? TBTheme.skyBlue.opacity(0.025) : .black.opacity(0.1)
+    }
+
+    private var secondaryShadowRadius: CGFloat {
+        style == .blended ? 8 : 12
+    }
+
+    private var secondaryShadowYOffset: CGFloat {
+        style == .blended ? 3 : 6
     }
 }
 

@@ -51,6 +51,13 @@ struct CartView: View {
         )
     }
 
+    private var sellerProfilesByID: [String: SellerProfile] {
+        resolvedSellerProfilesByID(
+            storefrontProducts: availableProducts,
+            remoteProfiles: catalog.sellerProfiles
+        )
+    }
+
     private var cartRefreshFingerprint: String {
         let remoteFingerprint = catalog.products
             .map { "\($0.id):\($0.priceCents):\($0.isActive):\($0.isApproved)" }
@@ -66,6 +73,10 @@ struct CartView: View {
             return true
         }
         return false
+    }
+
+    private func sellerDisplayName(for sellerId: String) -> String {
+        sellerProfilesByID[sellerId]?.displayName ?? sellerId
     }
 
     var body: some View {
@@ -294,9 +305,17 @@ struct CartView: View {
                     GlassCard(cornerRadius: 20, showsBorder: false) {
                         VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
                             HStack(spacing: 6) {
-                                Image(systemName: "storefront")
-                                    .font(.caption)
-                                Text("Ships from \(group.sellerId.replacingOccurrences(of: "seller_", with: "Seller #"))")
+                                Image("Logo")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .padding(4)
+                                    .frame(width: 24, height: 24)
+                                    .background(Color.white.opacity(0.92), in: Circle())
+                                    .overlay(
+                                        Circle()
+                                            .strokeBorder(TBTheme.skyBlue.opacity(0.18), lineWidth: 1)
+                                    )
+                                Text("Ships from \(sellerDisplayName(for: group.sellerId))")
                                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                                     .foregroundStyle(TBTheme.skyBlue)
                             }

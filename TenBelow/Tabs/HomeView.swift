@@ -36,8 +36,11 @@ struct HomeView: View {
         static let titleToContent = TBTheme.spacingXS + 2
         static let logoImageHeight: CGFloat = 118
         static let dealBannerHeight: CGFloat = 148
-        static let trendingRowHeight: CGFloat = 180
         static let spotlightBottomInset: CGFloat = 2
+        static let freshFavoritesGridColumns = [
+            GridItem(.flexible(), spacing: TBTheme.spacingMD),
+            GridItem(.flexible(), spacing: TBTheme.spacingMD),
+        ]
     }
 
     private var products: [Product] {
@@ -125,8 +128,8 @@ struct HomeView: View {
         let sellerBuckets = Dictionary(grouping: source, by: \.sellerId)
             .mapValues { sellerProducts in
                 sellerProducts.sorted { lhs, rhs in
-                    let lhsScore = featuredProductPriorityScore(lhs)
-                    let rhsScore = featuredProductPriorityScore(rhs)
+                    let lhsScore = dealOfDayPriorityScore(lhs)
+                    let rhsScore = dealOfDayPriorityScore(rhs)
 
                     if lhsScore == rhsScore {
                         if lhs.priceCents == rhs.priceCents {
@@ -174,6 +177,45 @@ struct HomeView: View {
         return rotation.isEmpty ? source : rotation
     }
 
+    /// Pool for Fresh favorites ranking. Usually excludes the current Deal of the Day so sections differ,
+    /// but when that would leave fewer than two items while more storefront products exist, include all
+    /// eligible products so the horizontal carousel still shows multiple cards (same catalog the cart uses).
+    private var freshFavoriteRankingPool: [Product] {
+        let nonDropProducts = products.filter { !excludedFeaturedProductIDs.contains($0.id) }
+        let source = nonDropProducts.isEmpty ? products : nonDropProducts
+        guard let featuredProductID = featuredProduct?.id else { return source }
+
+        let withoutDealOfDay = source.filter { $0.id != featuredProductID }
+        if withoutDealOfDay.isEmpty { return source }
+        // Avoid a single-card carousel when the deal is eating the only other listing(s).
+        if withoutDealOfDay.count < 2, source.count > withoutDealOfDay.count {
+            return source
+        }
+        return withoutDealOfDay
+    }
+
+    private var freshFavoriteProducts: [Product] {
+        let rankingPool = freshFavoriteRankingPool
+
+        let ranked = rankingPool.sorted { lhs, rhs in
+            let lhsScore = freshFavoritePriorityScore(lhs)
+            let rhsScore = freshFavoritePriorityScore(rhs)
+
+            if lhsScore == rhsScore {
+                if lhs.favoriteCount == rhs.favoriteCount {
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+                return lhs.favoriteCount > rhs.favoriteCount
+            }
+
+            return lhsScore > rhsScore
+        }
+
+        guard !ranked.isEmpty else { return [] }
+        let startIndex = freshFavoritesRotationOffset % ranked.count
+        return Array(ranked[startIndex...] + ranked[..<startIndex])
+    }
+
     private var spotlightCreators: [SellerProfile] {
         let sellerIDs = Set(products.map(\.sellerId))
 
@@ -201,6 +243,15 @@ struct HomeView: View {
         return featuredProducts[featuredRotationIndex % featuredProducts.count]
     }
 
+    private var freshFavoritesRotationOffset: Int {
+        let poolSize = max(freshFavoriteProductsCountForRotation, 1)
+        return (featuredRotationIndex + creatorRotationIndex) % poolSize
+    }
+
+    private var freshFavoriteProductsCountForRotation: Int {
+        max(freshFavoriteRankingPool.count, 0)
+    }
+
     private func products(for seller: SellerProfile) -> [Product] {
         products.filter { $0.sellerId == seller.id }
     }
@@ -218,18 +269,34 @@ struct HomeView: View {
         let likes = Double(seller.likeCount)
         let traffic = Double(seller.pageViewCount)
         let orders = Double(seller.orderCount)
-        let ratingLift = seller.rating * 180
+        let ratingLift = seller.rating * 220
+        let reviewTrust = Double(seller.positiveReviewCount) * 4.0
         let verificationBoost = seller.showsVerifiedBadge ? 220.0 : 0.0
-        return traffic * 0.62 + likes * 1.05 + orders * 18 + ratingLift + verificationBoost
+        return traffic * 0.45 + likes * 1.2 + orders * 30 + ratingLift + reviewTrust + verificationBoost
     }
 
-    private func featuredProductPriorityScore(_ product: Product) -> Double {
+    private func dealOfDayPriorityScore(_ product: Product) -> Double {
         let salesCount = Double(productSalesCounts[product.id] ?? 0)
-        let sellerTraffic = Double(sellerProfilesByID[product.sellerId]?.pageViewCount ?? 0)
-        let productViews = Double(product.pageViewCount)
         let favorites = Double(product.favoriteCount)
+        let productViews = Double(product.pageViewCount)
+        let sellerTraffic = Double(sellerProfilesByID[product.sellerId]?.pageViewCount ?? 0)
+        return salesCount * 45 + favorites * 8 + productViews * 0.35 + sellerTraffic * 0.05
+    }
+
+    private func freshFavoritePriorityScore(_ product: Product) -> Double {
+        let salesCount = Double(productSalesCounts[product.id] ?? 0)
+        let favorites = Double(product.favoriteCount)
+        let sellerTraffic = Double(sellerProfilesByID[product.sellerId]?.pageViewCount ?? 0)
+        let sellerOrders = Double(sellerProfilesByID[product.sellerId]?.orderCount ?? 0)
         let priceWeight = Double(product.priceCents) / 100.0
-        return salesCount * 100 + productViews * 0.18 + favorites * 8 + sellerTraffic * 0.02 + priceWeight
+        let productViews = Double(product.pageViewCount)
+        let attentionWithoutPurchase = max(productViews - (salesCount * 3), 0)
+        return favorites * 16
+            + attentionWithoutPurchase * 0.8
+            + sellerTraffic * 0.08
+            + sellerOrders * 1.5
+            + priceWeight
+            - salesCount * 22
     }
 
     private func seedRotations() {
@@ -270,7 +337,7 @@ struct HomeView: View {
 
                     if let dealOfDayProduct = featuredProduct {
                         VStack(alignment: .leading, spacing: HomeMetrics.titleToContent) {
-                            Text("Today's standout")
+                            Text("Deal of the Day")
                                 .font(.tbSectionTitle)
                                 .tracking(-0.2)
                                 .foregroundStyle(TBTheme.icyBlue)
@@ -288,20 +355,16 @@ struct HomeView: View {
                             .tracking(-0.2)
                             .foregroundStyle(TBTheme.icyBlue)
 
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: TBTheme.spacingLG + 2) {
-                                ForEach(products.prefix(6)) { product in
-                                    ProductCard(
-                                        product: product,
-                                        seller: sellerProfilesByID[product.sellerId],
-                                        allProducts: products
-                                    )
-                                    .frame(width: 166)
-                                }
+                        LazyVGrid(columns: HomeMetrics.freshFavoritesGridColumns, spacing: TBTheme.spacingMD) {
+                            ForEach(freshFavoriteProducts.prefix(4)) { product in
+                                ProductCard(
+                                    product: product,
+                                    seller: sellerProfilesByID[product.sellerId],
+                                    allProducts: products,
+                                    style: .blended
+                                )
                             }
-                            .padding(.trailing, HomeMetrics.pageInset)
                         }
-                        .frame(height: HomeMetrics.trendingRowHeight)
                     }
 
                     if let featuredCreator {
@@ -319,6 +382,7 @@ struct HomeView: View {
                             )
                             .frame(maxWidth: .infinity, alignment: .top)
                         }
+                        .padding(.top, -10)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(.bottom, HomeMetrics.spotlightBottomInset)
                     } else {
@@ -520,34 +584,7 @@ private struct DealOfDayBanner: View {
 
     @ViewBuilder
     private var actionStack: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: TBTheme.spacingMD) {
-                curatedPickPill
-                detailsButton
-            }
-
-            VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
-                curatedPickPill
-                detailsButton
-            }
-        }
-    }
-
-    private var curatedPickPill: some View {
-        Text("Curated pick")
-            .font(.caption.weight(.semibold))
-            .tracking(0.15)
-            .foregroundStyle(.white)
-            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-            .multilineTextAlignment(.center)
-            .minimumScaleFactor(0.9)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(.white.opacity(0.14), in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(.white.opacity(0.16), lineWidth: 1)
-            )
+        detailsButton
     }
 
     private var detailsButton: some View {
@@ -620,7 +657,7 @@ private struct CreatorSpotlightCard: View {
                 .allowsHitTesting(false)
         )
         .clipShape(RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous))
-        .shadow(color: TBTheme.deepSky.opacity(0.15), radius: 10, y: 4)
+        .shadow(color: TBTheme.deepSky.opacity(0.07), radius: 6, y: 2)
     }
 
     private var avatarInitials: String {

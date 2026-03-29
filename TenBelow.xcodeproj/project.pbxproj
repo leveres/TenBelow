@@ -12,16 +12,6 @@
 		A74824FF2F4450BD003DE4FE /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A74824FE2F4450BD003DE4FE /* AppIcon.icon */; };
 /* End PBXBuildFile section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		A7E8C1012F50000100874199 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = A7C3B12B2F39357200927269 /* TenBelow */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXContainerItemProxy section */
 		A7C3B13C2F39357400927269 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -47,11 +37,21 @@
 		A7F1C1DD2F4BDEC800F7536F /* CheckoutAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckoutAPI.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A7E8C1012F50000100874199 /* Exceptions for "TenBelow" folder in "TenBelow" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A7C3B12B2F39357200927269 /* TenBelow */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A7C3B12E2F39357200927269 /* TenBelow */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				A7E8C1012F50000100874199 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+				A7E8C1012F50000100874199 /* Exceptions for "TenBelow" folder in "TenBelow" target */,
 			);
 			path = TenBelow;
 			sourceTree = "<group>";

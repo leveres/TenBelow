@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-02-22T00:00:00Z",
+  "updatedAt": "2026-03-29T00:00:00Z",
   "products": [
     {
       "id": "desk-cable-clip-01",
@@ -38,6 +38,40 @@
       ],
       "shipsInMinDays": 2,
       "shipsInMaxDays": 4,
+      "isDrop": false,
+      "isActive": true,
+      "isApproved": true
+    },
+    {
+      "id": "phone-stand-mini-01",
+      "sellerId": "seller_002",
+      "name": "Phone Stand Mini",
+      "priceCents": 900,
+      "category": "tech",
+      "imageURLs": [],
+      "demoVideoURL": null,
+      "material": "PLA+",
+      "durabilityNote": "Stable angle for video calls.",
+      "careWarnings": ["Not for tablets.", "Indoor use."],
+      "shipsInMinDays": 3,
+      "shipsInMaxDays": 5,
+      "isDrop": false,
+      "isActive": true,
+      "isApproved": true
+    },
+    {
+      "id": "desk-organizer-tray-01",
+      "sellerId": "seller_002",
+      "name": "Desk Organizer Tray",
+      "priceCents": 1200,
+      "category": "desk",
+      "imageURLs": [],
+      "demoVideoURL": null,
+      "material": "PLA+",
+      "durabilityNote": "Keeps small items corralled.",
+      "careWarnings": ["Not food-safe.", "Wipe clean."],
+      "shipsInMinDays": 3,
+      "shipsInMaxDays": 5,
       "isDrop": false,
       "isActive": true,
       "isApproved": true

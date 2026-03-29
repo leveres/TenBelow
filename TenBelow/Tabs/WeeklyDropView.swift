@@ -58,20 +58,39 @@ struct WeeklyDropView: View {
 // MARK: - Hero
 
 private struct WeeklyDropHero: View {
+    @State private var animateSheen: Bool = false
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            // Full-bleed hero image with gradient overlay
-            Image("WeeklyDropHero")
-                .resizable()
-                .scaledToFill()
-                .frame(height: 260)
-                .clipped()
-                .overlay(
-                    LinearGradient(
-                        colors: [Color.black.opacity(0.0), Color.black.opacity(0.45)],
-                        startPoint: .center, endPoint: .bottom
+            GeometryReader { proxy in
+                let minY = proxy.frame(in: .global).minY
+                Image("WeeklyDropHero")
+                    .resizable()
+                    .scaledToFill()
+                    .frame(height: 260 + max(0, minY))
+                    .offset(y: min(0, -minY))
+                    .clipped()
+                    .overlay(
+                        LinearGradient(
+                            colors: [Color.black.opacity(0.0), Color.black.opacity(0.45)],
+                            startPoint: .center, endPoint: .bottom
+                        )
                     )
-                )
+                    .overlay(
+                        // Animated sheen
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.white.opacity(0.0), Color.white.opacity(0.22), Color.white.opacity(0.0)]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        .blendMode(.screen)
+                        .opacity(0.7)
+                        .rotationEffect(.degrees(8))
+                        .offset(x: animateSheen ? 280 : -280)
+                    )
+            }
+            .frame(height: 260)
+            .clipped()
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
@@ -91,6 +110,11 @@ private struct WeeklyDropHero: View {
         }
         .cornerRadius(24)
         .shadow(color: Color.black.opacity(0.18), radius: 24, x: 0, y: 18)
+        .onAppear {
+            withAnimation(.linear(duration: 3.6).repeatForever(autoreverses: false)) {
+                animateSheen = true
+            }
+        }
     }
 }
 
@@ -143,11 +167,14 @@ private struct WeeklyDropStatusStrip: View {
 // MARK: - Spotlight Card
 
 private struct WeeklyDropSpotlightCard: View {
+    @State private var isPressed: Bool = false
+    @State private var shimmer: Bool = false
+
     var body: some View {
         GlassCard(cornerRadius: 22) {
             VStack(alignment: .leading, spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    let base = RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(LinearGradient(
                             colors: [TBTheme.icyBlue.opacity(0.18), TBTheme.skyBlue.opacity(0.08)],
                             startPoint: .topLeading, endPoint: .bottomTrailing
@@ -157,11 +184,23 @@ private struct WeeklyDropSpotlightCard: View {
                                 .strokeBorder(TBTheme.skyBlue.opacity(0.15), lineWidth: 1)
                         )
 
+                    base
+                        .overlay(
+                            LinearGradient(colors: [Color.white.opacity(0.18), .clear], startPoint: .top, endPoint: .center)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        )
+
                     Image("DropPrimaryProduct")
                         .resizable()
                         .scaledToFit()
                         .padding(14)
                         .shadow(color: .black.opacity(0.22), radius: 20, x: 0, y: 18)
+                        .scaleEffect(isPressed ? 0.98 : 1.0)
+                        .onLongPressGesture(minimumDuration: 0.01, pressing: { pressing in
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                                isPressed = pressing
+                            }
+                        }, perform: {})
                 }
                 .frame(height: 180)
                 .overlay(alignment: .topTrailing) {
@@ -185,13 +224,32 @@ private struct WeeklyDropSpotlightCard: View {
                     Button {
                         // TODO: Hook to product detail or add-to-cart
                     } label: {
-                        Label("Shop now", systemImage: "sparkles")
-                            .font(.tbBodyStrong)
+                        ZStack {
+                            Label("Shop now", systemImage: "sparkles")
+                                .font(.tbBodyStrong)
+                            // Shimmer overlay
+                            LinearGradient(
+                                gradient: Gradient(colors: [.white.opacity(0.0), .white.opacity(0.7), .white.opacity(0.0)]),
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .blendMode(.overlay)
+                            .mask(
+                                Label("Shop now", systemImage: "sparkles")
+                                    .font(.tbBodyStrong)
+                            )
+                            .offset(x: shimmer ? 120 : -120)
+                        }
                     }
                     .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true, horizontalPadding: 18, verticalPadding: 10, fontSize: 15))
                 }
             }
             .padding(12)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.8).delay(0.3).repeatForever(autoreverses: false)) {
+                shimmer = true
+            }
         }
     }
 }

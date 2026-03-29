@@ -64,6 +64,10 @@ struct CheckoutView: View {
         }
     }
 
+    private var checkoutProducts: [Product] {
+        cart.items.map(\.product)
+    }
+
     private var trimmedEmail: String {
         email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
@@ -94,6 +98,14 @@ struct CheckoutView: View {
 
     private var normalizedCountry: String {
         country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    }
+
+    private func sellerDisplayName(for sellerId: String) -> String {
+        resolvedSellerProfile(
+            sellerId: sellerId,
+            storefrontProducts: checkoutProducts,
+            remoteProfiles: catalog.sellerProfiles
+        )?.displayName ?? sellerId
     }
 
     var body: some View {
@@ -203,7 +215,19 @@ struct CheckoutView: View {
 
                 ForEach(itemsBySeller, id: \.sellerId) { group in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("From \(group.sellerId.replacingOccurrences(of: "seller_", with: "Seller #"))")
+                        HStack(spacing: 6) {
+                            Image("Logo")
+                                .resizable()
+                                .scaledToFit()
+                                .padding(4)
+                                .frame(width: 24, height: 24)
+                                .background(Color.white.opacity(0.92), in: Circle())
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(TBTheme.skyBlue.opacity(0.18), lineWidth: 1)
+                                )
+                            Text("From \(sellerDisplayName(for: group.sellerId))")
+                        }
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundStyle(TBTheme.skyBlue)
 
