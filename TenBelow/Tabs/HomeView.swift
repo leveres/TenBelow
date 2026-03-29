@@ -520,13 +520,13 @@ private struct DealOfDayBanner: View {
 
     @ViewBuilder
     private var actionStack: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: TBTheme.spacingMD) {
                 curatedPickPill
                 detailsButton
             }
-        } else {
-            HStack(spacing: TBTheme.spacingMD) {
+
+            VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
                 curatedPickPill
                 detailsButton
             }
@@ -562,6 +562,7 @@ private struct DealOfDayBanner: View {
             .foregroundStyle(TBTheme.bannerCTAForeground)
             .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
             .multilineTextAlignment(.center)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 15)
             .padding(.vertical, 9)
             .background(Capsule().fill(Color.white.opacity(0.92)))
@@ -713,6 +714,7 @@ private struct CreatorSpotlightCard: View {
             .foregroundStyle(TBTheme.bannerCTAForeground)
             .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
             .multilineTextAlignment(.center)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, TBTheme.spacingMD)
             .padding(.vertical, TBTheme.spacingSM)
             .background(Capsule().fill(Color.white.opacity(0.92)))
@@ -779,6 +781,7 @@ private struct LiveDropBanner: View {
         .foregroundStyle(TBTheme.bannerCTAForeground)
         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
         .multilineTextAlignment(.center)
+        .fixedSize(horizontal: true, vertical: false)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(Capsule().fill(Color.white.opacity(0.92)))
