@@ -18,9 +18,11 @@ private enum NotificationDestination: Identifiable, Hashable {
     }
 }
 
-/// In-app notification history for the current account (filtered by Settings toggles).
+/// In-app activity history for the current account, combining favorites and notifications.
 struct NotificationActivityView: View {
     @EnvironmentObject private var notificationStore: NotificationStore
+    @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
+    @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @EnvironmentObject private var orderStore: OrderStore
     @AppStorage("userRole") private var userRole = "buyer"
@@ -32,19 +34,34 @@ struct NotificationActivityView: View {
         notificationStore.currentNotifications.filter { NotificationPreferences.isTypeEnabled($0.type) }
     }
 
+    private var storefrontProducts: [Product] {
+        resolvedStorefrontProducts(
+            remoteProducts: catalog.products,
+            fallbackProducts: localProducts.products
+        )
+    }
+
+    private var favoriteProducts: [Product] {
+        let favoritesByID = Set(buyerEngagement.favoriteProductIDs)
+        return storefrontProducts
+            .filter { favoritesByID.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var showsBuyerFavoritesSection: Bool {
+        userRole != "seller"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Recent activity")
-                    .font(.tbHeadline)
-                    .foregroundStyle(TBTheme.icyBlue)
+                if showsBuyerFavoritesSection {
+                    favoritesSection
+                }
 
-                Text("Tap an item for details. Change what appears here in Settings → Notification settings.")
-                    .font(.tbCaption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                activitySectionHeader
 
-                if notifications.isEmpty {
+                if notifications.isEmpty, !(showsBuyerFavoritesSection && !favoriteProducts.isEmpty) {
                     ContentUnavailableView(
                         "No activity yet",
                         systemImage: "tray",
@@ -82,12 +99,66 @@ struct NotificationActivityView: View {
     private var emptyActivityDescription: String {
         userRole == "seller"
             ? "Orders, favorites, and reminders appear here."
-            : "Price drops, new listings, and order updates appear here."
+            : "Favorites, price drops, new listings, and order updates appear here."
     }
 
     private var activeSellerId: String {
         let trimmed = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "SELL-01" : trimmed
+    }
+
+    private var favoritesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Favorites")
+                .font(.tbHeadline)
+                .foregroundStyle(TBTheme.icyBlue)
+
+            Text("Saved items stay here for quick access alongside your notifications.")
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if favoriteProducts.isEmpty {
+                Text("Tap the heart on products you like while shopping. Your saved items will show up here.")
+                    .font(.tbBody)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(TBTheme.skyBlue.opacity(0.10), lineWidth: 1)
+                    )
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(favoriteProducts) { product in
+                            Button {
+                                selectedDestination = .product(product)
+                            } label: {
+                                NotificationFavoriteTile(product: product)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+
+    private var activitySectionHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Recent activity")
+                .font(.tbHeadline)
+                .foregroundStyle(TBTheme.icyBlue)
+
+            Text("Tap an item for details. Change notification types in Settings → Notification settings.")
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func notificationRow(_ notification: AppNotification) -> some View {
@@ -189,5 +260,42 @@ struct NotificationActivityView: View {
     private func notificationAccessibilityLabel(_ notification: AppNotification) -> String {
         let readState = notification.isRead ? "Read" : "Unread"
         return "\(readState). \(notification.title). \(notification.message). \(relativeTimestamp(for: notification.createdAt))."
+    }
+}
+
+private struct NotificationFavoriteTile: View {
+    let product: Product
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            StorefrontImageView(reference: product.primaryImageReference) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(TBTheme.skyLight.opacity(0.30))
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            }
+            .frame(width: 100, height: 100)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(.white.opacity(0.55), lineWidth: 1)
+            )
+
+            Text(product.name)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .frame(width: 100, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(Money.format(cents: product.priceCents))
+                .font(.tbMicro)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(product.name), \(Money.format(cents: product.priceCents)), \(product.category.rawValue)")
+        .accessibilityHint("Opens favorited product.")
     }
 }

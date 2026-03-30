@@ -36,11 +36,8 @@ struct HomeView: View {
         static let titleToContent = TBTheme.spacingXS + 2
         static let logoImageHeight: CGFloat = 118
         static let dealBannerHeight: CGFloat = 148
+        static let freshFavoritesRowHeight: CGFloat = 194
         static let spotlightBottomInset: CGFloat = 2
-        static let freshFavoritesGridColumns = [
-            GridItem(.flexible(), spacing: TBTheme.spacingMD),
-            GridItem(.flexible(), spacing: TBTheme.spacingMD),
-        ]
     }
 
     private var products: [Product] {
@@ -355,16 +352,21 @@ struct HomeView: View {
                             .tracking(-0.2)
                             .foregroundStyle(TBTheme.icyBlue)
 
-                        LazyVGrid(columns: HomeMetrics.freshFavoritesGridColumns, spacing: TBTheme.spacingMD) {
-                            ForEach(freshFavoriteProducts.prefix(4)) { product in
-                                ProductCard(
-                                    product: product,
-                                    seller: sellerProfilesByID[product.sellerId],
-                                    allProducts: products,
-                                    style: .blended
-                                )
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: TBTheme.spacingLG + 2) {
+                                ForEach(freshFavoriteProducts.prefix(6)) { product in
+                                    ProductCard(
+                                        product: product,
+                                        seller: sellerProfilesByID[product.sellerId],
+                                        allProducts: products,
+                                        style: .blended
+                                    )
+                                    .frame(width: 166)
+                                }
                             }
+                            .padding(.trailing, HomeMetrics.pageInset)
                         }
+                        .frame(height: HomeMetrics.freshFavoritesRowHeight)
                     }
 
                     if let featuredCreator {

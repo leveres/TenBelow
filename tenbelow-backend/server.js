@@ -70,7 +70,7 @@ function initializeBackendStorage() {
   });
   ensureJSONFile(CONFIG_PATH, {
     seedCandidates: [LEGACY_CONFIG_PATH],
-    fallbackValue: () => ({ version: 2, minimumOrderCents: 2000 }),
+    fallbackValue: () => ({ version: 2, minimumOrderCents: 1500 }),
   });
   ensureJSONFile(SELLERS_PATH, {
     seedCandidates: [LEGACY_SELLERS_PATH],
@@ -117,7 +117,7 @@ async function fetchConfig() {
   }
   try {
     return JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-  } catch { return { version: 2, minimumOrderCents: 2000 }; }
+  } catch { return { version: 2, minimumOrderCents: 1500 }; }
 }
 
 async function fetchSellers() {
@@ -593,7 +593,7 @@ app.post("/create-payment-intent", async (req, res) => {
       });
     }
 
-    const minimumOrderCents = config.minimumOrderCents || 2000;
+    const minimumOrderCents = config.minimumOrderCents || 1500;
     if (subtotalCents < minimumOrderCents) {
       return res.status(400).json({
         code: "minimum_order_not_met",
@@ -667,7 +667,7 @@ app.get("/orders", (req, res) => {
 
 app.post("/orders/shipment-action", (req, res) => {
   try {
-    const { orderId, shipmentId, sellerId, action } = req.body || {};
+    const { orderId, shipmentId, sellerId, action, carrier, trackingNumber } = req.body || {};
     if (!orderId || !shipmentId || !sellerId || !action) {
       return res.status(400).json({ error: "orderId, shipmentId, sellerId, and action are required" });
     }
@@ -688,12 +688,18 @@ app.post("/orders/shipment-action", (req, res) => {
       case "startProcessing":
         orders[orderIndex].status = "processing";
         break;
-      case "markShipped":
+      case "markShipped": {
+        const trimmedCarrier = String(carrier || "").trim();
+        const trimmedTrackingNumber = String(trackingNumber || "").trim();
+        if (!trimmedCarrier || !trimmedTrackingNumber) {
+          return res.status(400).json({ error: "carrier and trackingNumber are required to mark a shipment as shipped" });
+        }
         shipment.status = "shipped";
         shipment.shippedAt = timestamp;
-        shipment.carrier = shipment.carrier || "USPS";
-        shipment.trackingNumber = shipment.trackingNumber || `TB-${shipmentId.replace("SHP-", "")}`;
+        shipment.carrier = trimmedCarrier;
+        shipment.trackingNumber = trimmedTrackingNumber;
         break;
+      }
       case "markDelivered":
         shipment.status = "delivered";
         shipment.deliveredAt = timestamp;

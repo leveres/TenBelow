@@ -15,6 +15,7 @@ struct ReceiptView: View {
     var onDismiss: () -> Void
 
     @Environment(\.openURL) private var openURL
+    @AppStorage("buyerEmail") private var buyerEmail = ""
 
     private var itemsBySeller: [(sellerId: String, items: [CartItem])] {
         Dictionary(grouping: items, by: { $0.product.sellerId })
@@ -77,6 +78,8 @@ struct ReceiptView: View {
                 }
 
                 receiptDetails
+
+                exchangeActions
 
                 policyLinks
 
@@ -145,11 +148,41 @@ struct ReceiptView: View {
         .padding(.horizontal)
     }
 
+    private var exchangeActions: some View {
+        VStack(spacing: 10) {
+            Button {
+                #if os(iOS)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                #endif
+                if let url = AppConstants.exchangeRequestMailtoURL(orderId: orderId, buyerEmail: buyerEmail) {
+                    openURL(url)
+                }
+            } label: {
+                Label("Request an exchange", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(TBTheme.icyBlue)
+
+            Text("We handle changes as exchanges per our policy, not cash refunds.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal)
+    }
+
     private var policyLinks: some View {
         HStack(spacing: 16) {
-            Button("Refund policy") { openURL(AppConstants.refundPolicyURL) }
+            Button("Exchange policy") { openURL(AppConstants.exchangePolicyURL) }
             Text("·").foregroundStyle(.tertiary)
-            Button("Contact support") { openURL(URL(string: "mailto:support@tenbelow.com")!) }
+            Button("Contact support") {
+                if let url = AppConstants.supportMailtoURL {
+                    openURL(url)
+                }
+            }
         }
         .font(.system(size: 12, weight: .medium, design: .rounded))
         .foregroundStyle(.secondary)

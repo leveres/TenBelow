@@ -4,12 +4,12 @@
 
 import SwiftUI
 
-/// In-app notification inbox (activity only). Manage preferences in Settings → Notification settings.
+/// In-app activity hub for favorites and notifications. Manage notification preferences in Settings.
 struct NotificationsHubView: View {
     var body: some View {
         NotificationActivityView()
             .background(TBTheme.cloudWhite.ignoresSafeArea())
-            .navigationTitle("Notifications")
+            .navigationTitle("Activity")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif

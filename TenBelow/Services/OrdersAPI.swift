@@ -9,6 +9,8 @@ private struct ShipmentActionRequest: Codable {
     let shipmentId: String
     let sellerId: String
     let action: String
+    let carrier: String?
+    let trackingNumber: String?
 }
 
 private struct ShipmentActionResponse: Codable {
@@ -48,7 +50,9 @@ enum OrdersAPI {
         _ action: SellerShipmentAction,
         orderId: String,
         shipmentId: String,
-        sellerId: String
+        sellerId: String,
+        carrier: String? = nil,
+        trackingNumber: String? = nil
     ) async throws -> Order {
         let url = baseURL.appendingPathComponent("orders/shipment-action")
         var request = URLRequest(url: url)
@@ -59,7 +63,9 @@ enum OrdersAPI {
                 orderId: orderId,
                 shipmentId: shipmentId,
                 sellerId: sellerId,
-                action: action.rawValue
+                action: action.rawValue,
+                carrier: carrier,
+                trackingNumber: trackingNumber
             )
         )
 

@@ -5,6 +5,9 @@
 
 import SwiftUI
 import AVKit
+#if os(iOS)
+import UIKit
+#endif
 
 struct OrdersView: View {
     @EnvironmentObject private var orderStore: OrderStore
@@ -264,6 +267,8 @@ struct OrderDetailView: View {
 
 struct BuyerOrderDetailView: View {
     @EnvironmentObject private var localProducts: LocalProductStore
+    @Environment(\.openURL) private var openURL
+    @AppStorage("buyerEmail") private var storedBuyerEmail = ""
     let order: Order
     @State private var selectedProductionPreview: ProductionPreviewEntry?
 
@@ -372,6 +377,9 @@ struct BuyerOrderDetailView: View {
                     }
                 }
 
+                buyerExchangeSection
+                    .padding(.horizontal, 16)
+
                 GlassCard(cornerRadius: 20) {
                     HStack {
                         Text("Order Total")
@@ -394,6 +402,49 @@ struct BuyerOrderDetailView: View {
         #endif
         .sheet(item: $selectedProductionPreview) { preview in
             ProductionPreviewPlayerSheet(preview: preview)
+        }
+    }
+
+    private var buyerExchangeSection: some View {
+        GlassCard(cornerRadius: 20) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Exchanges")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+
+                Text("Need a different item or size? We process changes as exchanges, not cash refunds. Read the policy, then send a request with your order number.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    openURL(AppConstants.exchangePolicyURL)
+                } label: {
+                    Text("Read Exchange Policy")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.bordered)
+                .tint(TBTheme.icyBlue)
+
+                Button {
+                    #if os(iOS)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    #endif
+                    let email = order.buyerEmail ?? storedBuyerEmail
+                    if let url = AppConstants.exchangeRequestMailtoURL(orderId: order.id, buyerEmail: email) {
+                        openURL(url)
+                    }
+                } label: {
+                    Label("Request an exchange", systemImage: "envelope.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(TBTheme.icyBlue)
+            }
         }
     }
 
@@ -492,6 +543,9 @@ struct SellerOrderDetailView: View {
     @EnvironmentObject private var orderStore: OrderStore
     let order: Order
     let currentSellerId: String
+    @State private var pendingShipmentDraft: ShipmentTrackingDraft?
+    @State private var carrier = ""
+    @State private var trackingNumber = ""
 
     private var myShipments: [Shipment] {
         order.shipments.filter { $0.sellerId == currentSellerId }
@@ -546,6 +600,14 @@ struct SellerOrderDetailView: View {
                 OrderTimelineView(order: order)
                     .padding(.horizontal, 16)
 
+                if let shipmentActionError = orderStore.shipmentActionError, !shipmentActionError.isEmpty {
+                    Text(shipmentActionError)
+                        .font(.tbCaption)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                }
+
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Your shipments")
                         .font(.headline)
@@ -565,14 +627,7 @@ struct SellerOrderDetailView: View {
 
                                 if let nextAction = orderStore.nextAction(for: shipment, order: order) {
                                     Button {
-                                        Task {
-                                            await orderStore.performShipmentAction(
-                                                nextAction,
-                                                orderId: order.id,
-                                                shipmentId: shipment.id,
-                                                sellerId: currentSellerId
-                                            )
-                                        }
+                                        handleShipmentAction(nextAction, for: shipment)
                                     } label: {
                                         Label(nextAction.buttonTitle, systemImage: actionIcon(for: nextAction))
                                             .font(.tbBodyStrong)
@@ -611,6 +666,33 @@ struct SellerOrderDetailView: View {
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .sheet(item: $pendingShipmentDraft) { draft in
+            ShipmentTrackingSheet(
+                sellerName: draft.sellerName,
+                carrier: $carrier,
+                trackingNumber: $trackingNumber,
+                onCancel: {
+                    pendingShipmentDraft = nil
+                },
+                onSave: {
+                    let trimmedCarrier = carrier.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let trimmedTrackingNumber = trackingNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmedCarrier.isEmpty, !trimmedTrackingNumber.isEmpty else { return }
+
+                    Task {
+                        await orderStore.performShipmentAction(
+                            .markShipped,
+                            orderId: draft.orderId,
+                            shipmentId: draft.shipmentId,
+                            sellerId: draft.sellerId,
+                            carrier: trimmedCarrier,
+                            trackingNumber: trimmedTrackingNumber
+                        )
+                        pendingShipmentDraft = nil
+                    }
+                }
+            )
+        }
     }
 
     private var myShipmentsTotalCents: Int {
@@ -636,6 +718,144 @@ struct SellerOrderDetailView: View {
         case .markDelivered:
             return "checkmark.circle.fill"
         }
+    }
+
+    private func handleShipmentAction(_ action: SellerShipmentAction, for shipment: Shipment) {
+        switch action {
+        case .markShipped:
+            carrier = shipment.carrier ?? ""
+            trackingNumber = shipment.trackingNumber ?? ""
+            pendingShipmentDraft = ShipmentTrackingDraft(
+                orderId: order.id,
+                shipmentId: shipment.id,
+                sellerId: currentSellerId,
+                sellerName: shipment.sellerName
+            )
+        case .startProcessing, .markDelivered:
+            Task {
+                await orderStore.performShipmentAction(
+                    action,
+                    orderId: order.id,
+                    shipmentId: shipment.id,
+                    sellerId: currentSellerId
+                )
+            }
+        }
+    }
+}
+
+private struct ShipmentTrackingDraft: Identifiable {
+    let orderId: String
+    let shipmentId: String
+    let sellerId: String
+    let sellerName: String
+
+    var id: String {
+        "\(orderId)|\(shipmentId)|\(sellerId)"
+    }
+}
+
+private struct ShipmentTrackingSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let sellerName: String
+    @Binding var carrier: String
+    @Binding var trackingNumber: String
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    private var trimmedCarrier: String {
+        carrier.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedTrackingNumber: String {
+        trackingNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSave: Bool {
+        !trimmedCarrier.isEmpty && !trimmedTrackingNumber.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    GlassCard(cornerRadius: 22) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Shipping details")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            Text("Enter the real carrier and tracking number from the label you bought for \(sellerName). Buyers will see this in their Orders tab.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    GlassCard(cornerRadius: 22) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Carrier")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            ShipmentTrackingField(title: "USPS, UPS, FedEx, etc.", text: $carrier)
+                                .textInputAutocapitalization(.words)
+
+                            Text("Tracking number")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            ShipmentTrackingField(title: "Enter the tracking number from the label", text: $trackingNumber)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                        }
+                    }
+
+                    Button {
+                        onSave()
+                        dismiss()
+                    } label: {
+                        Label("Save Tracking", systemImage: "truck.box.fill")
+                            .font(.tbBodyStrong)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true, horizontalPadding: 20, verticalPadding: 12, fontSize: 15))
+                    .disabled(!canSave)
+                    .opacity(canSave ? 1 : 0.6)
+                }
+                .padding(16)
+            }
+            .background(Color.blue.opacity(0.03).ignoresSafeArea())
+            .navigationTitle("Add Tracking")
+            #if os(iOS) || os(visionOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ShipmentTrackingField: View {
+    let title: String
+    @Binding var text: String
+
+    var body: some View {
+        TextField(title, text: $text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 16, weight: .medium, design: .rounded))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.white.opacity(0.7))
+            .cornerRadius(TBTheme.radiusMD)
+            .overlay(
+                RoundedRectangle(cornerRadius: TBTheme.radiusMD)
+                    .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
+            .autocorrectionDisabled()
     }
 }
 

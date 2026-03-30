@@ -6,9 +6,9 @@ enum AppConstants {
 
     // MARK: - Shipping
 
-    static let freeShippingThresholdCents = 2000
+    static let freeShippingThresholdCents = 1500
     static let flatShippingCents          = 499
-    static let minimumOrderCents          = 2000
+    static let minimumOrderCents          = 1500
 
     // MARK: - Cache File Names
 
@@ -24,11 +24,15 @@ enum AppConstants {
 
     static let reportListingEmail = "report@tenbelow.com"
 
+    /// Buyer support — exchange requests and general help (opens Mail via `mailto:`).
+    static let supportEmail = "support@tenbelow.com"
+
     // MARK: - Legal (replace with your URLs)
 
     static let termsURL           = URL(string: "https://tenbelow.com/terms")!
     static let privacyPolicyURL   = URL(string: "https://tenbelow.com/privacy")!
-    static let refundPolicyURL    = URL(string: "https://tenbelow.com/refunds")!
+    /// Buyer policy for returns as exchanges (not cash refunds). Host this page at the same path.
+    static let exchangePolicyURL  = URL(string: "https://tenbelow.com/exchanges")!
     static let ipPolicyURL        = URL(string: "https://tenbelow.com/ip-policy")!
     static let dmcaURL            = URL(string: "https://tenbelow.com/dmca")!
     static let sellerAgreementURL = URL(string: "https://tenbelow.com/seller-agreement")!
@@ -104,6 +108,33 @@ enum AppConstants {
         return normalized.contains("YOUR_")
             || normalized.contains("PLACEHOLDER")
             || normalized.contains("REPLACE_ME")
+    }
+
+    // MARK: - Support (mailto)
+
+    /// General support message (no order context).
+    static var supportMailtoURL: URL? {
+        guard var components = URLComponents(string: "mailto:\(supportEmail)") else { return nil }
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "TenBelow support"),
+        ]
+        return components.url
+    }
+
+    /// Pre-filled exchange request. No backend is required; your team handles the thread in your inbox.
+    static func exchangeRequestMailtoURL(orderId: String, buyerEmail: String?) -> URL? {
+        let subject = "TenBelow exchange request — \(orderId)"
+        var body = "Order ID: \(orderId)\n\n"
+        if let email = buyerEmail?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+            body += "Email on order: \(email)\n\n"
+        }
+        body += "Item(s) to exchange:\n\nDesired replacement:\n\nReason for exchange:\n"
+        guard var components = URLComponents(string: "mailto:\(supportEmail)") else { return nil }
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: subject),
+            URLQueryItem(name: "body", value: body),
+        ]
+        return components.url
     }
 }
 

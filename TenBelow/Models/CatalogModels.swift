@@ -43,7 +43,7 @@ struct AppConfig: Codable {
     static let `default` = AppConfig(
         version: 2,
         freeShippingEnabled: true,
-        minimumOrderCents: 2000,
+        minimumOrderCents: 1500,
         dropEnabled: true,
         dropType: .weekly,
         dropTitle: "Weekly Drop",

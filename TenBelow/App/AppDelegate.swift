@@ -13,9 +13,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
-        Task {
-            await Self.requestAuthorizationAndRegister()
-        }
         return true
     }
 
@@ -41,13 +38,26 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         completionHandler([.banner, .badge, .sound])
     }
 
-    private static func requestAuthorizationAndRegister() async {
+    static func ensureNotificationsAuthorizedIfNeeded() async {
         let center = UNUserNotificationCenter.current()
         do {
-            let granted = try await center.requestAuthorization(options: [.alert, .badge, .sound])
-            guard granted else { return }
-            await MainActor.run {
-                UIApplication.shared.registerForRemoteNotifications()
+            let settings = await center.notificationSettings()
+
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                await MainActor.run {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            case .notDetermined:
+                let granted = try await center.requestAuthorization(options: [.alert, .badge, .sound])
+                guard granted else { return }
+                await MainActor.run {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            case .denied:
+                return
+            @unknown default:
+                return
             }
         } catch {
             print("Notification authorization error: \(error.localizedDescription)")

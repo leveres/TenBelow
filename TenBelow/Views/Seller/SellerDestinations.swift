@@ -1330,7 +1330,7 @@ struct SupportView: View {
                 }
 
                 SellerSettingsCard(title: "Helpful Links") {
-                    supportLinkRow(title: "Refund Policy", subtitle: "Buyer-facing refund guidelines", url: AppConstants.refundPolicyURL)
+                    supportLinkRow(title: "Exchange Policy", subtitle: "Buyer-facing exchange guidelines", url: AppConstants.exchangePolicyURL)
                     supportLinkRow(title: "IP Policy", subtitle: "Know what can and can’t be listed", url: AppConstants.ipPolicyURL)
                     supportLinkRow(title: "DMCA", subtitle: "Report infringement or review copyright policy", url: AppConstants.dmcaURL)
                     supportLinkRow(title: "Privacy Policy", subtitle: "See how TenBelow handles seller data", url: AppConstants.privacyPolicyURL)

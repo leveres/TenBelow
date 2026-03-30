@@ -308,13 +308,7 @@ struct CartView: View {
                                 Image("Logo")
                                     .resizable()
                                     .scaledToFit()
-                                    .padding(4)
-                                    .frame(width: 24, height: 24)
-                                    .background(Color.white.opacity(0.92), in: Circle())
-                                    .overlay(
-                                        Circle()
-                                            .strokeBorder(TBTheme.skyBlue.opacity(0.18), lineWidth: 1)
-                                    )
+                                    .frame(width: 34, height: 34)
                                 Text("Ships from \(sellerDisplayName(for: group.sellerId))")
                                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                                     .foregroundStyle(TBTheme.skyBlue)
@@ -331,7 +325,7 @@ struct CartView: View {
                 GlassCard(cornerRadius: 22, showsBorder: false) {
                     VStack(spacing: TBTheme.spacingMD) {
                         row("Subtotal", value: Money.format(cents: cart.subtotalCents))
-                        row("Shipping", value: "FREE", valueColor: .green)
+                        row("Shipping", value: "Set by seller", valueColor: .secondary)
                         Divider().background(Color.secondary.opacity(0.2))
                         HStack {
                             Text("Total")
@@ -402,7 +396,7 @@ struct CartView: View {
             Text("·").foregroundStyle(.tertiary)
             Button("Privacy") { openURL(AppConstants.privacyPolicyURL) }
             Text("·").foregroundStyle(.tertiary)
-            Button("Refunds") { openURL(AppConstants.refundPolicyURL) }
+            Button("Exchanges") { openURL(AppConstants.exchangePolicyURL) }
         }
         .font(.system(size: 12, weight: .medium, design: .rounded))
         .foregroundStyle(.secondary)

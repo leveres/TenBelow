@@ -1,7 +1,7 @@
 {
   "version": 2,
   "freeShippingEnabled": true,
-  "minimumOrderCents": 2000,
+  "minimumOrderCents": 1500,
 
   "dropEnabled": true,
   "dropType": "weekly",

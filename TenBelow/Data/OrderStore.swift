@@ -144,7 +144,9 @@ final class OrderStore: ObservableObject {
         _ action: SellerShipmentAction,
         orderId: String,
         shipmentId: String,
-        sellerId: String
+        sellerId: String,
+        carrier: String? = nil,
+        trackingNumber: String? = nil
     ) {
         guard let orderIndex = orders.firstIndex(where: { $0.id == orderId }) else { return }
         guard let shipmentIndex = orders[orderIndex].shipments.firstIndex(where: { $0.id == shipmentId && $0.sellerId == sellerId }) else { return }
@@ -158,8 +160,8 @@ final class OrderStore: ObservableObject {
         case .markShipped:
             orders[orderIndex].shipments[shipmentIndex].status = .shipped
             orders[orderIndex].shipments[shipmentIndex].shippedAt = timestamp
-            orders[orderIndex].shipments[shipmentIndex].carrier = orders[orderIndex].shipments[shipmentIndex].carrier ?? "USPS"
-            orders[orderIndex].shipments[shipmentIndex].trackingNumber = orders[orderIndex].shipments[shipmentIndex].trackingNumber ?? generatedTrackingNumber(from: shipmentId)
+            orders[orderIndex].shipments[shipmentIndex].carrier = carrier
+            orders[orderIndex].shipments[shipmentIndex].trackingNumber = trackingNumber
         case .markDelivered:
             orders[orderIndex].shipments[shipmentIndex].status = .delivered
             orders[orderIndex].shipments[shipmentIndex].deliveredAt = timestamp
@@ -200,7 +202,9 @@ final class OrderStore: ObservableObject {
         _ action: SellerShipmentAction,
         orderId: String,
         shipmentId: String,
-        sellerId: String
+        sellerId: String,
+        carrier: String? = nil,
+        trackingNumber: String? = nil
     ) async {
         shipmentActionError = nil
         do {
@@ -208,17 +212,28 @@ final class OrderStore: ObservableObject {
                 action,
                 orderId: orderId,
                 shipmentId: shipmentId,
-                sellerId: sellerId
+                sellerId: sellerId,
+                carrier: carrier,
+                trackingNumber: trackingNumber
             )
             upsertOrder(updatedOrder)
         } catch {
-            perform(
-                action,
-                orderId: orderId,
-                shipmentId: shipmentId,
-                sellerId: sellerId
-            )
-            shipmentActionError = "Saved locally — will sync when connected."
+            let nsError = error as NSError
+            let isConnectivityIssue = nsError.domain == NSURLErrorDomain
+
+            if isConnectivityIssue {
+                perform(
+                    action,
+                    orderId: orderId,
+                    shipmentId: shipmentId,
+                    sellerId: sellerId,
+                    carrier: carrier,
+                    trackingNumber: trackingNumber
+                )
+                shipmentActionError = "Saved locally — will sync when connected."
+            } else {
+                shipmentActionError = error.localizedDescription
+            }
         }
     }
 
@@ -294,10 +309,6 @@ final class OrderStore: ObservableObject {
         }
 
         return current
-    }
-
-    private func generatedTrackingNumber(from shipmentId: String) -> String {
-        "TB-\(shipmentId.replacingOccurrences(of: "SHP-", with: ""))"
     }
 
     private func persist() {

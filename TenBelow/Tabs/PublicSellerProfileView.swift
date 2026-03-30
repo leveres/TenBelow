@@ -308,9 +308,10 @@ struct PublicSellerProfileView: View {
 
                     let rowCount = max(1, Int(ceil(Double(currentPageProducts.count) / 2.0)))
                     let totalRowSpacing = CGFloat(max(0, rowCount - 1)) * gridRowSpacing
-                    let rowCellHeight = (gridBudget - totalRowSpacing) / CGFloat(rowCount)
+                    let rawRowCellHeight = (gridBudget - totalRowSpacing) / CGFloat(rowCount)
+                    let rowCellHeight = min(max(rawRowCellHeight, 188), 260)
                     let textAndChromeReserve: CGFloat = 54
-                    let artworkHeight = max(68, rowCellHeight - textAndChromeReserve)
+                    let artworkHeight = min(max(104, rowCellHeight - textAndChromeReserve), 178)
 
                     VStack(spacing: sectionStackSpacing) {
                         LazyVGrid(

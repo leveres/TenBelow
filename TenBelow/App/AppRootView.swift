@@ -20,8 +20,10 @@ struct AppRootView: View {
     @AppStorage("userRole") var userRole = ""
     #if os(iOS)
     @AppStorage("sellerSellerId") private var sellerSellerId = ""
+    @AppStorage("sellerAccountCreated") private var sellerAccountCreated = false
     @AppStorage("buyerEmail") private var buyerEmail = ""
     @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
+    @AppStorage("buyerCheckoutPreference") private var buyerCheckoutPreference = "guest"
     #endif
 
     var body: some View {
@@ -49,6 +51,10 @@ struct AppRootView: View {
         #if os(iOS)
         .task(id: "\(userRole)|\(sellerSellerId)|\(buyerEmail)|\(buyerAccountCreated)") {
             await PushDeviceRegistration.syncAfterIdentityChange()
+        }
+        .task(id: notificationPromptFingerprint) {
+            guard shouldRequestNotificationPermission else { return }
+            await AppDelegate.ensureNotificationsAuthorizedIfNeeded()
         }
         #endif
     }
@@ -87,6 +93,26 @@ struct AppRootView: View {
             .joined(separator: "|")
         return "\(remoteFingerprint)#\(fallbackFingerprint)"
     }
+
+    #if os(iOS)
+    private var shouldRequestNotificationPermission: Bool {
+        guard hasSeenOnboarding, !userRole.isEmpty else { return false }
+
+        if userRole == "seller" {
+            return sellerAccountCreated && !sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        if buyerAccountCreated {
+            return !buyerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        return buyerCheckoutPreference == "guest"
+    }
+
+    private var notificationPromptFingerprint: String {
+        "\(hasSeenOnboarding)|\(userRole)|\(sellerAccountCreated)|\(sellerSellerId)|\(buyerAccountCreated)|\(buyerEmail)|\(buyerCheckoutPreference)"
+    }
+    #endif
 }
 
 #Preview("Main App") {

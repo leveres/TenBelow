@@ -219,13 +219,7 @@ struct CheckoutView: View {
                             Image("Logo")
                                 .resizable()
                                 .scaledToFit()
-                                .padding(4)
-                                .frame(width: 24, height: 24)
-                                .background(Color.white.opacity(0.92), in: Circle())
-                                .overlay(
-                                    Circle()
-                                        .strokeBorder(TBTheme.skyBlue.opacity(0.18), lineWidth: 1)
-                                )
+                                .frame(width: 34, height: 34)
                             Text("From \(sellerDisplayName(for: group.sellerId))")
                         }
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -261,9 +255,9 @@ struct CheckoutView: View {
                         .font(.system(size: 15, weight: .medium, design: .rounded))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("FREE")
+                    Text("Set by seller")
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(.secondary)
                 }
                 HStack {
                     Text("Total")
@@ -358,7 +352,7 @@ struct CheckoutView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(agreedToTerms ? "Terms accepted" : "Accept terms")
-            .accessibilityHint("Double tap to toggle agreement with the Terms of Service, Privacy Policy, and Refund Policy.")
+            .accessibilityHint("Double tap to toggle agreement with the Terms of Service, Privacy Policy, and Exchange Policy.")
 
             policyAgreementText
         }
@@ -381,7 +375,7 @@ struct CheckoutView: View {
             Text(", and ")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
-            Link("Refund Policy", destination: AppConstants.refundPolicyURL)
+            Link("Exchange Policy", destination: AppConstants.exchangePolicyURL)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
             Text(".")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -485,7 +479,7 @@ struct CheckoutView: View {
         }
 
         guard agreedToTerms else {
-            errorMessage = "Please accept Terms, Privacy, and Refund Policy."
+            errorMessage = "Please accept Terms, Privacy, and Exchange Policy."
             return
         }
 

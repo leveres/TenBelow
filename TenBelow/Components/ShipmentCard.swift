@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ShipmentCard: View {
+    @Environment(\.openURL) private var openURL
     let shipment: Shipment
     let mode: OrdersMode
 
@@ -59,9 +60,26 @@ struct ShipmentCard: View {
     private var buyerLine: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let carrier = shipment.carrier, let tracking = shipment.trackingNumber, !tracking.isEmpty {
-                Text("\(carrier) • \(tracking)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if let trackingURL = trackingURL(for: carrier, trackingNumber: tracking) {
+                    Button {
+                        openURL(trackingURL)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("\(carrier) • \(tracking)")
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(TBTheme.icyBlue)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Track package with \(carrier)")
+                    .accessibilityHint("Opens the carrier tracking page for this shipment.")
+                } else {
+                    Text("\(carrier) • \(tracking)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             } else if shipment.status == .preparing {
                 Text("Preparing shipment")
                     .font(.subheadline)
@@ -89,7 +107,11 @@ struct ShipmentCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            if shipment.status == .preparing {
+            if let carrier = shipment.carrier, let tracking = shipment.trackingNumber, !tracking.isEmpty {
+                Text("\(carrier) • \(tracking)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if shipment.status == .preparing {
                 Text("Next: purchase label and add tracking")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -103,5 +125,42 @@ struct ShipmentCard: View {
         f.numberStyle = .currency
         f.currencyCode = currency
         return f.string(from: value as NSDecimalNumber) ?? "$\(value)"
+    }
+
+    private func trackingURL(for carrier: String, trackingNumber: String) -> URL? {
+        let trimmedTrackingNumber = trackingNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTrackingNumber.isEmpty else { return nil }
+
+        let normalizedCarrier = carrier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        var components: URLComponents?
+        switch normalizedCarrier {
+        case "usps", "u.s.p.s.", "united states postal service":
+            components = URLComponents(string: "https://tools.usps.com/go/TrackConfirmAction")
+            components?.queryItems = [
+                URLQueryItem(name: "tLabels", value: trimmedTrackingNumber),
+            ]
+        case "ups":
+            components = URLComponents(string: "https://wwwapps.ups.com/WebTracking/track")
+            components?.queryItems = [
+                URLQueryItem(name: "track", value: "yes"),
+                URLQueryItem(name: "trackNums", value: trimmedTrackingNumber),
+            ]
+        case "fedex":
+            components = URLComponents(string: "https://www.fedex.com/fedextrack/")
+            components?.queryItems = [
+                URLQueryItem(name: "trknbr", value: trimmedTrackingNumber),
+            ]
+        case "dhl":
+            components = URLComponents(string: "https://www.dhl.com/us-en/home/tracking/tracking-express.html")
+            components?.queryItems = [
+                URLQueryItem(name: "submit", value: "1"),
+                URLQueryItem(name: "tracking-id", value: trimmedTrackingNumber),
+            ]
+        default:
+            return nil
+        }
+
+        return components?.url
     }
 }
