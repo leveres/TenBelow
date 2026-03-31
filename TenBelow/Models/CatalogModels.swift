@@ -69,6 +69,8 @@ struct RemoteProduct: Codable, Identifiable, Hashable {
     let isDrop: Bool
     let isActive: Bool
     let isApproved: Bool
+    let averageRating: Double?
+    let reviewCount: Int?
 }
 
 extension RemoteProduct {
@@ -84,6 +86,8 @@ extension RemoteProduct {
             productionPreviewURL: fallbackProduct?.productionPreviewURL,
             pageViewCount: fallbackProduct?.pageViewCount ?? 0,
             favoriteCount: fallbackProduct?.favoriteCount ?? 0,
+            averageRating: averageRating ?? fallbackProduct?.averageRating ?? 0,
+            reviewCount: reviewCount ?? fallbackProduct?.reviewCount ?? 0,
             material: material,
             productionNote: fallbackProduct?.productionNote ?? "Printed fresh when you order",
             durabilityNote: durabilityNote,

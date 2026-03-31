@@ -21,6 +21,8 @@ struct Product: Identifiable, Hashable {
     let productionPreviewURL: URL?
     let pageViewCount: Int
     let favoriteCount: Int
+    let averageRating: Double
+    let reviewCount: Int
 
     let material: String
     let productionNote: String
@@ -39,6 +41,8 @@ struct Product: Identifiable, Hashable {
         productionPreviewURL: URL? = nil,
         pageViewCount: Int,
         favoriteCount: Int,
+        averageRating: Double = 0,
+        reviewCount: Int = 0,
         material: String,
         productionNote: String,
         durabilityNote: String,
@@ -55,6 +59,8 @@ struct Product: Identifiable, Hashable {
         self.productionPreviewURL = productionPreviewURL
         self.pageViewCount = pageViewCount
         self.favoriteCount = favoriteCount
+        self.averageRating = averageRating
+        self.reviewCount = reviewCount
         self.material = material
         self.productionNote = productionNote
         self.durabilityNote = durabilityNote

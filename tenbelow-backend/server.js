@@ -41,6 +41,7 @@ const CONFIG_PATH = dataFileURL("config.json");
 const SELLERS_PATH = dataFileURL("sellers.json");
 const ORDERS_PATH = dataFileURL("orders.json");
 const DROPS_PATH = dataFileURL("drops.json");
+const PRODUCT_REVIEWS_PATH = dataFileURL("product-reviews.json");
 
 function ensureJSONFile(targetURL, { seedCandidates = [], fallbackValue }) {
   const targetPath = fileURLToPath(targetURL);
@@ -84,6 +85,9 @@ function initializeBackendStorage() {
     seedCandidates: [LEGACY_DROPS_PATH],
     fallbackValue: {},
   });
+  ensureJSONFile(PRODUCT_REVIEWS_PATH, {
+    fallbackValue: [],
+  });
 }
 
 initializeBackendStorage();
@@ -99,14 +103,19 @@ async function fetchJSON(url) {
 }
 
 async function fetchCatalog() {
+  const hydrateCatalog = (catalog) => {
+    const reviews = loadProductReviewsFile();
+    return hydrateCatalogWithProductReviews(catalog, reviews);
+  };
+
   if (process.env.CATALOG_URL) {
     try { return await fetchJSON(process.env.CATALOG_URL); } catch (e) {
       console.warn("CATALOG_URL fetch failed:", e.message);
     }
   }
   try {
-    return JSON.parse(readFileSync(PRODUCTS_PATH, "utf-8"));
-  } catch { return { version: 1, updatedAt: new Date().toISOString(), products: [] }; }
+    return hydrateCatalog(JSON.parse(readFileSync(PRODUCTS_PATH, "utf-8")));
+  } catch { return hydrateCatalog({ version: 1, updatedAt: new Date().toISOString(), products: [] }); }
 }
 
 async function fetchConfig() {
@@ -201,6 +210,74 @@ function saveCatalog(catalog = {}) {
     products: normalizedProducts,
   };
   writeFileSync(PRODUCTS_PATH, JSON.stringify(payload, null, 2));
+}
+
+function loadProductReviewsFile() {
+  try {
+    const parsed = JSON.parse(readFileSync(PRODUCT_REVIEWS_PATH, "utf-8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveProductReviewsFile(reviews) {
+  writeFileSync(PRODUCT_REVIEWS_PATH, JSON.stringify(Array.isArray(reviews) ? reviews : [], null, 2));
+}
+
+function buildProductReviewSummaryMap(reviews = []) {
+  const summaryMap = new Map();
+
+  for (const review of reviews) {
+    const productId = String(review.productId || "").trim();
+    const rating = Math.max(1, Math.min(5, asFiniteNumber(review.rating, 0)));
+    if (!productId || !rating) continue;
+
+    const current = summaryMap.get(productId) || { total: 0, count: 0 };
+    current.total += rating;
+    current.count += 1;
+    summaryMap.set(productId, current);
+  }
+
+  return summaryMap;
+}
+
+function hydrateCatalogWithProductReviews(catalog = {}, reviews = []) {
+  const summaryMap = buildProductReviewSummaryMap(reviews);
+  const products = Array.isArray(catalog.products) ? catalog.products : [];
+
+  return {
+    ...catalog,
+    products: products.map((product) => {
+      const summary = summaryMap.get(product.id);
+      if (!summary || summary.count <= 0) {
+        return {
+          ...product,
+          averageRating: 0,
+          reviewCount: 0,
+        };
+      }
+
+      return {
+        ...product,
+        averageRating: Number((summary.total / summary.count).toFixed(1)),
+        reviewCount: summary.count,
+      };
+    }),
+  };
+}
+
+function orderContainsDeliveredProductForBuyer(order, buyerEmail, productId) {
+  const normalizedBuyerEmail = String(buyerEmail || "").trim().toLowerCase();
+  if (!normalizedBuyerEmail || !productId) return false;
+
+  const orderBuyerEmail = String(order?.buyerEmail || "").trim().toLowerCase();
+  if (orderBuyerEmail !== normalizedBuyerEmail) return false;
+
+  return (order?.shipments || []).some((shipment) => {
+    const isDelivered = shipment?.status === "delivered" || order?.status === "delivered";
+    return isDelivered && (shipment?.items || []).some((item) => item.productId === productId);
+  });
 }
 
 function normalizeSellerPublicProfile(profile = {}, sellerId = "", businessName = "") {
@@ -713,6 +790,103 @@ app.post("/orders/shipment-action", (req, res) => {
     res.json({ order: orders[orderIndex] });
   } catch (err) {
     console.error("shipment action error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/product-reviews", (req, res) => {
+  try {
+    const { orderId, productId, buyerEmail, rating, reviewText } = req.body || {};
+    const normalizedOrderId = String(orderId || "").trim();
+    const normalizedProductId = String(productId || "").trim();
+    const normalizedBuyerEmail = String(buyerEmail || "").trim().toLowerCase();
+    const normalizedRating = Math.round(asFiniteNumber(rating, 0));
+
+    if (!normalizedOrderId || !normalizedProductId || !normalizedBuyerEmail) {
+      return res.status(400).json({ error: "orderId, productId, and buyerEmail are required" });
+    }
+
+    if (![1, 2, 3, 4, 5].includes(normalizedRating)) {
+      return res.status(400).json({ error: "rating must be an integer from 1 to 5" });
+    }
+
+    const orders = loadOrdersFile();
+    const order = orders.find((entry) => entry.id === normalizedOrderId);
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    if (!orderContainsDeliveredProductForBuyer(order, normalizedBuyerEmail, normalizedProductId)) {
+      return res.status(400).json({ error: "Only delivered products from your orders can be rated" });
+    }
+
+    const shipment = (order.shipments || []).find((entry) =>
+      (entry.items || []).some((item) => item.productId === normalizedProductId)
+    );
+    const sellerId = shipment?.sellerId || null;
+
+    const reviews = loadProductReviewsFile();
+    const existingIndex = reviews.findIndex((entry) =>
+      String(entry.orderId || "").trim() === normalizedOrderId &&
+      String(entry.productId || "").trim() === normalizedProductId &&
+      String(entry.buyerEmail || "").trim().toLowerCase() === normalizedBuyerEmail
+    );
+
+    const timestamp = new Date().toISOString();
+    const nextReview = {
+      id: existingIndex >= 0 ? reviews[existingIndex].id : `REV-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+      orderId: normalizedOrderId,
+      productId: normalizedProductId,
+      sellerId,
+      buyerEmail: normalizedBuyerEmail,
+      rating: normalizedRating,
+      reviewText: String(reviewText || "").trim() || null,
+      createdAt: existingIndex >= 0 ? reviews[existingIndex].createdAt : timestamp,
+      updatedAt: timestamp,
+    };
+
+    if (existingIndex >= 0) {
+      reviews[existingIndex] = nextReview;
+    } else {
+      reviews.unshift(nextReview);
+    }
+
+    saveProductReviewsFile(reviews);
+
+    const summary = buildProductReviewSummaryMap(reviews).get(normalizedProductId) || { total: normalizedRating, count: 1 };
+    res.json({
+      ok: true,
+      productId: normalizedProductId,
+      averageRating: Number((summary.total / summary.count).toFixed(1)),
+      reviewCount: summary.count,
+    });
+  } catch (err) {
+    console.error("product review error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/product-reviews", (req, res) => {
+  try {
+    const productId = String(req.query.productId || "").trim();
+    if (!productId) {
+      return res.status(400).json({ error: "productId is required" });
+    }
+
+    const reviews = loadProductReviewsFile()
+      .filter((entry) => String(entry.productId || "").trim() === productId)
+      .sort((lhs, rhs) => new Date(rhs.updatedAt || rhs.createdAt || 0).getTime() - new Date(lhs.updatedAt || lhs.createdAt || 0).getTime());
+
+    const summary = buildProductReviewSummaryMap(reviews).get(productId) || { total: 0, count: 0 };
+
+    res.json({
+      productId,
+      averageRating: summary.count > 0 ? Number((summary.total / summary.count).toFixed(1)) : 0,
+      reviewCount: summary.count,
+      reviews,
+    });
+  } catch (err) {
+    console.error("product reviews fetch error:", err);
     res.status(500).json({ error: err.message });
   }
 });

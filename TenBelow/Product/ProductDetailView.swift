@@ -14,6 +14,9 @@ struct ProductDetailView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
     @EnvironmentObject private var localProducts: LocalProductStore
+    @EnvironmentObject private var orderStore: OrderStore
+    @AppStorage("userRole") private var userRole = ""
+    @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
     let product: Product
 
     @State private var addedToCart = false
@@ -22,6 +25,15 @@ struct ProductDetailView: View {
     @State private var selectedMediaIndex = 0
     @State private var showFullscreenMedia = false
     @State private var showReportListingHelp = false
+    @State private var showRatingSheet = false
+    @State private var selectedRating = 0
+    @State private var ratingReviewText = ""
+    @State private var isSubmittingRating = false
+    @State private var ratingErrorMessage: String?
+    @State private var ratingSuccessMessage: String?
+    @State private var latestAverageRating: Double?
+    @State private var latestReviewCount: Int?
+    @State private var loadedReviews: [ProductReview] = []
 
     private var sellerProfile: SellerProfile? {
         resolvedSellerProfile(
@@ -43,6 +55,48 @@ struct ProductDetailView: View {
         product.imageNames.count + (product.demoVideoURL == nil ? 0 : 1)
     }
 
+    private var isInCart: Bool {
+        cart.items.contains { $0.product.id == product.id }
+    }
+
+    private var displayedAverageRating: Double {
+        latestAverageRating ?? product.averageRating
+    }
+
+    private var displayedReviewCount: Int {
+        latestReviewCount ?? product.reviewCount
+    }
+
+    private var deliveredOrderForRating: Order? {
+        guard userRole != "seller" else { return nil }
+
+        return orderStore.orders.first { order in
+            (order.shipments).contains { shipment in
+                let delivered = shipment.status == .delivered || order.status == .delivered
+                let matchesProduct = shipment.items.contains { $0.productId == product.id }
+                return delivered && matchesProduct
+            }
+        }
+    }
+
+    private var hasPurchasedProduct: Bool {
+        orderStore.orders.contains { order in
+            order.shipments.contains { shipment in
+                shipment.items.contains { $0.productId == product.id }
+            }
+        }
+    }
+
+    private var canRateProduct: Bool {
+        guard let order = deliveredOrderForRating else { return false }
+        let normalizedBuyerEmail = order.buyerEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !normalizedBuyerEmail.isEmpty
+    }
+
+    private var displayedReviews: [ProductReview] {
+        Array(loadedReviews.prefix(3))
+    }
+
     private func reportListing(product: Product) {
         #if os(iOS)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -59,6 +113,11 @@ struct ProductDetailView: View {
     }
 
     private func handleAddToCart() {
+        if isInCart {
+            showCart = true
+            return
+        }
+
         cart.add(product)
         buyerEngagement.trackAddToCart(product)
 
@@ -93,6 +152,57 @@ struct ProductDetailView: View {
             addedToCart = false
         }
         showCart = true
+    }
+
+    @MainActor
+    private func submitRating() async {
+        guard let order = deliveredOrderForRating,
+              let buyerEmail = order.buyerEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !buyerEmail.isEmpty else {
+            ratingErrorMessage = "You can rate this product after a delivered order is linked to your account."
+            return
+        }
+
+        guard (1...5).contains(selectedRating) else {
+            ratingErrorMessage = "Choose a star rating from 1 to 5."
+            return
+        }
+
+        ratingErrorMessage = nil
+        ratingSuccessMessage = nil
+        isSubmittingRating = true
+        defer { isSubmittingRating = false }
+
+        do {
+            let response = try await ProductReviewsAPI.submitReview(
+                orderId: order.id,
+                productId: product.id,
+                buyerEmail: buyerEmail,
+                rating: selectedRating,
+                reviewText: ratingReviewText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : ratingReviewText
+            )
+            latestAverageRating = response.averageRating
+            latestReviewCount = response.reviewCount
+            ratingSuccessMessage = "Thanks for rating this product."
+            await loadReviews()
+            catalogRefreshToken += 1
+            showRatingSheet = false
+        } catch {
+            ratingErrorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func loadReviews() async {
+        guard AppConstants.isBackendConfigured else { return }
+        do {
+            let response = try await ProductReviewsAPI.fetchReviews(for: product.id)
+            latestAverageRating = response.averageRating
+            latestReviewCount = response.reviewCount
+            loadedReviews = response.reviews
+        } catch {
+            // Keep the current summary from product data if fetching reviews fails.
+        }
     }
 
     private var isFavorited: Bool {
@@ -246,6 +356,8 @@ struct ProductDetailView: View {
                                 .foregroundStyle(.primary.opacity(0.82))
                         }
 
+                        productRatingSection
+
                         VStack(alignment: .leading, spacing: 8) {
                             ProductStatusBadge(
                                 text: product.productionNote,
@@ -376,11 +488,22 @@ struct ProductDetailView: View {
         .sheet(isPresented: $showReportListingHelp) {
             ReportListingFallbackSheet(product: product)
         }
+        .sheet(isPresented: $showRatingSheet) {
+            ProductRatingSheet(
+                productName: product.name,
+                selectedRating: $selectedRating,
+                reviewText: $ratingReviewText,
+                isSubmitting: isSubmittingRating,
+                onSubmit: {
+                    Task { await submitRating() }
+                }
+            )
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             StickyBuyBar(
                 productName: product.name,
                 priceText: Money.format(cents: product.priceCents),
-                isAdded: addedToCart,
+                isAdded: isInCart,
                 action: handleAddToCart
             )
             .padding(.horizontal, 16)
@@ -403,6 +526,9 @@ struct ProductDetailView: View {
             selectedMediaIndex = 0
             buyerEngagement.trackProductView(product)
             localProducts.registerProductView(for: product.id)
+            latestAverageRating = product.averageRating
+            latestReviewCount = product.reviewCount
+            Task { await loadReviews() }
         }
         .onDisappear {
             toastDismissTask?.cancel()
@@ -412,6 +538,74 @@ struct ProductDetailView: View {
                 product: product,
                 initialIndex: selectedMediaIndex
             )
+        }
+    }
+
+    private var productRatingSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                ProductRatingStars(rating: displayedAverageRating)
+                VStack(alignment: .leading, spacing: 2) {
+                    if displayedReviewCount > 0 {
+                        Text(String(format: "%.1f out of 5", displayedAverageRating))
+                            .font(.tbBodyStrong)
+                            .foregroundStyle(.primary.opacity(0.9))
+                        Text("\(displayedReviewCount) \(displayedReviewCount == 1 ? "rating" : "ratings")")
+                            .font(.tbCaption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("No ratings yet")
+                            .font(.tbCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if canRateProduct {
+                Button {
+                    if selectedRating == 0 {
+                        selectedRating = 5
+                    }
+                    showRatingSheet = true
+                } label: {
+                    Label("Rate this product", systemImage: "star.bubble.fill")
+                        .font(.tbCaption.weight(.semibold))
+                        .foregroundStyle(TBTheme.icyBlue)
+                }
+                .buttonStyle(.plain)
+            } else if hasPurchasedProduct {
+                Text("You can rate this product after it is delivered.")
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !displayedReviews.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Recent reviews")
+                        .font(.tbCaption.weight(.semibold))
+                        .foregroundStyle(TBTheme.deepSky)
+
+                    ForEach(displayedReviews) { review in
+                        ProductReviewCard(review: review)
+                    }
+                }
+            }
+
+            if let ratingSuccessMessage {
+                Text(ratingSuccessMessage)
+                    .font(.tbCaption)
+                    .foregroundStyle(.green)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let ratingErrorMessage {
+                Text(ratingErrorMessage)
+                    .font(.tbCaption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
@@ -612,6 +806,155 @@ private struct MediaKindPill: View {
                 Capsule()
                     .strokeBorder(.white.opacity(0.18), lineWidth: 0.8)
             )
+    }
+}
+
+private struct ProductRatingStars: View {
+    let rating: Double
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(1...5, id: \.self) { index in
+                Image(systemName: starName(for: index))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(index <= Int(rating.rounded()) ? TBTheme.accent : Color.secondary.opacity(0.35))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(String(format: "%.1f", rating)) out of 5 stars")
+    }
+
+    private func starName(for index: Int) -> String {
+        index <= Int(rating.rounded()) ? "star.fill" : "star"
+    }
+}
+
+private struct ProductRatingSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let productName: String
+    @Binding var selectedRating: Int
+    @Binding var reviewText: String
+    let isSubmitting: Bool
+    let onSubmit: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Rate \(productName)")
+                    .font(.tbSectionTitle)
+                    .foregroundStyle(TBTheme.deepSky)
+
+                Text("Your rating helps future buyers understand product quality and experience.")
+                    .font(.tbBody)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 12) {
+                    ForEach(1...5, id: \.self) { value in
+                        Button {
+                            selectedRating = value
+                        } label: {
+                            Image(systemName: value <= selectedRating ? "star.fill" : "star")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundStyle(value <= selectedRating ? TBTheme.accent : Color.secondary.opacity(0.35))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(value) star\(value == 1 ? "" : "s")")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 8)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Write a review (optional)")
+                        .font(.tbCaption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    TextField("Share a quick note about the product", text: $reviewText, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.tbBody)
+                        .lineLimit(4, reservesSpace: true)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(Color.white.opacity(0.7))
+                        .cornerRadius(TBTheme.radiusMD)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: TBTheme.radiusMD)
+                                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                        )
+                }
+
+                Button {
+                    onSubmit()
+                } label: {
+                    if isSubmitting {
+                        ProgressView()
+                            .tint(.white)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text("Submit Rating")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(PrimaryCTAButtonStyle())
+                .disabled(isSubmitting || selectedRating == 0)
+                .opacity((isSubmitting || selectedRating == 0) ? 0.6 : 1.0)
+
+                Spacer()
+            }
+            .padding(20)
+            .background(TBTheme.cloudWhite.ignoresSafeArea())
+            .navigationTitle("Product Rating")
+            #if os(iOS) || os(visionOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ProductReviewCard: View {
+    let review: ProductReview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                ProductRatingStars(rating: Double(review.rating))
+                Text(relativeDate)
+                    .font(.tbCaption)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+
+            if let reviewText = review.reviewText, !reviewText.isEmpty {
+                Text(reviewText)
+                    .font(.tbBody)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Rated \(review.rating) out of 5")
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.10), lineWidth: 0.8)
+        )
+    }
+
+    private var relativeDate: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: review.updatedAt, relativeTo: .now)
     }
 }
 
@@ -833,4 +1176,5 @@ private struct AddedToCartToast: View {
     .environmentObject(CatalogStore())
     .environmentObject(BuyerEngagementStore(eventStore: events))
     .environmentObject(LocalProductStore(eventStore: events))
+    .environmentObject(OrderStore(eventStore: events))
 }
