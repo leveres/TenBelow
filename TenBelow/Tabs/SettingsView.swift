@@ -134,6 +134,13 @@ struct SettingsView: View {
     private func switchAppMode(to role: String, launchTab: Int) {
         userRole = role
         pendingLaunchTab = launchTab
+
+        Task {
+            await MarketplaceAuthSession.syncAfterIdentityChange()
+            if role == "seller" {
+                await sellerSubscription.refresh()
+            }
+        }
     }
 }
 

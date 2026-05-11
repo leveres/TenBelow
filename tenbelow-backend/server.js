@@ -63,6 +63,7 @@ const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "";
 const ADMIN_SESSION_COOKIE_NAME = "tb_admin_session";
 const LEGACY_ADMIN_COOKIE_NAME = "tb_admin_auth";
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+const ADMIN_SESSION_TTL_SECONDS = Math.floor(ADMIN_SESSION_TTL_MS / 1000);
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ALLOWED_CORS_ORIGINS = String(process.env.CORS_ALLOWED_ORIGINS || "")
   .split(",")
@@ -539,28 +540,37 @@ function readCookieValue(cookieHeader = "", name) {
   return "";
 }
 
-const adminSessions = new Map();
-
 function createAdminSessionToken() {
-  const token = crypto.randomBytes(32).toString("hex");
-  adminSessions.set(token, Date.now() + ADMIN_SESSION_TTL_MS);
-  return token;
+  const signingSecret = AUTH_JWT_SECRET || ADMIN_API_KEY;
+  if (!signingSecret) return "";
+  return jwt.sign(
+    {
+      role: "admin",
+      sessionId: crypto.randomUUID(),
+    },
+    signingSecret,
+    {
+      algorithm: "HS256",
+      expiresIn: ADMIN_SESSION_TTL_SECONDS,
+    }
+  );
 }
 
 function isValidAdminSessionToken(token) {
   if (!token) return false;
-  const expiresAt = adminSessions.get(token);
-  if (!expiresAt) return false;
-  if (expiresAt < Date.now()) {
-    adminSessions.delete(token);
+  const signingSecret = AUTH_JWT_SECRET || ADMIN_API_KEY;
+  if (!signingSecret) return false;
+
+  try {
+    const payload = jwt.verify(token, signingSecret);
+    return payload?.role === "admin";
+  } catch {
     return false;
   }
-  return true;
 }
 
 function destroyAdminSessionToken(token) {
-  if (!token) return;
-  adminSessions.delete(token);
+  // Admin sessions are signed cookies; clearing the browser cookie logs out this device.
 }
 
 function setAdminSessionCookie(res, token) {
@@ -4140,6 +4150,59 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
     res.json({ product: mergedProduct });
   } catch (err) {
     console.error("update seller-product error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/seller-products/:sellerId/:productId/remove", sellerWriteLimiter, requireAppClient, requireAuthenticatedSeller, async (req, res) => {
+  try {
+    const sellerId = String(req.params.sellerId || "").trim();
+    const productId = String(req.params.productId || "").trim();
+    const reason = String(req.body?.reason || "seller_removed").trim();
+    if (!sellerId || !productId) {
+      return res.status(400).json({ error: "sellerId and productId are required" });
+    }
+    if (req.auth.sellerId !== sellerId) {
+      auditOwnershipMismatch(req, {
+        scope: "seller_product_remove",
+        expectedSellerId: sellerId,
+        actualSellerId: req.auth.sellerId || null,
+      });
+      return res.status(403).json({ error: "Seller product removal denied" });
+    }
+
+    const catalog = await fetchCatalog();
+    const existingProducts = Array.isArray(catalog.products) ? catalog.products : [];
+    const existingProduct = existingProducts.find((product) => product.id === productId);
+    if (!existingProduct) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    if (existingProduct.sellerId !== sellerId) {
+      auditOwnershipMismatch(req, {
+        scope: "seller_product_remove_owner",
+        expectedSellerId: existingProduct.sellerId,
+        actualSellerId: sellerId,
+      });
+      return res.status(403).json({ error: "Seller product removal denied" });
+    }
+
+    saveCatalog({
+      version: catalog.version,
+      products: existingProducts.filter((product) => product.id !== productId),
+    });
+
+    auditLog(
+      auditContext(req, {
+        action: "seller_product_remove",
+        sellerId,
+        productId,
+        reason,
+      })
+    );
+
+    res.json({ removed: true, productId, reason });
+  } catch (err) {
+    console.error("seller product remove error:", err);
     res.status(500).json({ error: err.message });
   }
 });

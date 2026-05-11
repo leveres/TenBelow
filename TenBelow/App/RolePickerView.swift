@@ -16,6 +16,7 @@ struct RolePickerView: View {
     @AppStorage("buyerFullName") private var buyerFullName = ""
     @AppStorage("buyerEmail") private var buyerEmail = ""
     @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
+    @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
     @AppStorage("sellerSellerId") private var sellerId = ""
     @AppStorage("sellerEmail") private var sellerEmail = ""
     @AppStorage("sellerBusinessName") private var sellerBusinessName = ""
@@ -600,6 +601,7 @@ struct RolePickerView: View {
             catalog.upsertSellerProfile(starterProfile)
             isCreatingSellerAccount = false
             userRole = "seller"
+            pendingLaunchTab = 1
             hasSeenOnboarding = false
         }
 

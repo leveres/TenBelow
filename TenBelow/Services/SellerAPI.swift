@@ -190,6 +190,26 @@ enum SellerAPI {
         return try decoder.decode(SellerProductResponse.self, from: data).product
     }
 
+    static func removeProduct(
+        sellerId: String,
+        productId: String,
+        reason: String
+    ) async throws {
+        let url = baseURL.appendingPathComponent("seller-products/\(sellerId)/\(productId)/remove")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+        request.httpBody = try JSONEncoder().encode(RemoveSellerProductRequest(reason: reason))
+
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            throw NSError(domain: "SellerAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+    }
+
     static func uploadMedia(
         sellerId: String,
         productId: String,

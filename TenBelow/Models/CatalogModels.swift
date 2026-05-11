@@ -31,6 +31,10 @@ struct UpsertSellerProductRequest: Codable {
     let isApproved: Bool
 }
 
+struct RemoveSellerProductRequest: Codable {
+    let reason: String
+}
+
 enum DropType: String, Codable { case weekly, monthly }
 
 struct AppConfig: Codable {

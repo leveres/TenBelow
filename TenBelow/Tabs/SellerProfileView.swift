@@ -455,6 +455,7 @@ struct SellerProfileView: View {
             pendingLaunchTab = storeTabIndex
             starterProfile.storeLocally()
             catalog.upsertSellerProfile(starterProfile)
+            await MarketplaceAuthSession.syncAfterIdentityChange()
             await refreshStatus()
             await sellerSubscription.refresh()
         } catch {

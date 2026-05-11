@@ -790,7 +790,7 @@ struct DropView: View {
 
     private var sellerStatusSubtitle: String {
         if !sellerHasWeeklyDropAccess {
-            return "When the window is open, you’ll build your drop from the seller workspace. Submitting needs an active seller plan—see Settings, or you’ll be prompted if you try to add or submit without one."
+            return "When the window is open, you’ll build your drop from the seller workspace. Submitting needs an active seller plan. See Settings, or you’ll be prompted if you try to add or submit without one."
         }
         if isActive {
             return "Your premium lineup is live this weekend. Weekly Drop only includes items priced over $10."

@@ -664,6 +664,25 @@ struct SellerProductMediaSelection {
     let selectedProductionPreviewURL: URL?
 }
 
+private enum SellerProductRemovalReason: String, CaseIterable, Identifiable {
+    case noLongerSelling = "no_longer_selling"
+    case needsChanges = "needs_changes"
+    case outOfStock = "out_of_stock"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .noLongerSelling:
+            return "No longer selling it"
+        case .needsChanges:
+            return "Needs changes first"
+        case .outOfStock:
+            return "Out of stock"
+        }
+    }
+}
+
 enum SellerMarketplaceStatus: String, Codable {
     case draft
     case pendingReview
@@ -737,6 +756,8 @@ struct SellerProductsView: View {
     @State private var hasPresentedInitialAdd = false
     @State private var syncMessage: String?
     @State private var pendingDeleteDraft: SellerProductDraft?
+    @State private var draggingProductId: String?
+    @State private var productSwipeOffset: CGFloat = 0
 
     init(
         seller: SellerProfile = .sample,
@@ -765,19 +786,7 @@ struct SellerProductsView: View {
                 }
 
                 ForEach(productDrafts) { draft in
-                    Button {
-                        selectedDraft = draft
-                    } label: {
-                        sellerProductCard(draft)
-                    }
-                    .buttonStyle(.plain)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            pendingDeleteDraft = draft
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
+                    sellerProductSwipeRow(draft)
                 }
 
                 if productDrafts.isEmpty {
@@ -870,27 +879,65 @@ struct SellerProductsView: View {
             titleVisibility: .visible,
             presenting: pendingDeleteDraft
         ) { draft in
-            Button("Delete", role: .destructive) {
-                deleteDraft(draft)
+            ForEach(SellerProductRemovalReason.allCases) { reason in
+                Button(reason.title, role: .destructive) {
+                    deleteDraft(draft, reason: reason)
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: { draft in
-            Text("Remove \(draft.name.isEmpty ? "this product" : draft.name) from My Products on this device?")
+            Text("Why are you removing \(draft.name.isEmpty ? "this product" : draft.name)?")
         }
     }
 
     private func presentAddProductFlow() async {
-        if sellerPreviewMode || sellerSubscription.hasActiveSubscription {
-            await MainActor.run { isShowingAddSheet = true }
-            return
-        }
+        await MainActor.run { isShowingAddSheet = true }
+
+        guard !sellerPreviewMode else { return }
+        await MarketplaceAuthSession.syncAfterIdentityChange()
         await sellerSubscription.refresh()
-        await sellerSubscription.purchaseMembership()
-        await MainActor.run {
-            if sellerSubscription.hasActiveSubscription {
-                isShowingAddSheet = true
-            }
+    }
+
+    private func sellerProductSwipeRow(_ draft: SellerProductDraft) -> some View {
+        sellerProductCard(draft)
+        .offset(x: draggingProductId == draft.id ? productSwipeOffset : 0)
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .onTapGesture {
+            selectedDraft = draft
         }
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 24)
+                .onChanged { value in
+                    guard value.translation.width < 0,
+                          abs(value.translation.width) > abs(value.translation.height) else { return }
+                    draggingProductId = draft.id
+                    productSwipeOffset = max(value.translation.width, -42)
+                }
+                .onEnded { value in
+                    guard value.translation.width < -56,
+                          abs(value.translation.width) > abs(value.translation.height) else {
+                        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
+                            productSwipeOffset = 0
+                            draggingProductId = nil
+                        }
+                        return
+                    }
+                    #if os(iOS)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    #endif
+                    withAnimation(.spring(response: 0.18, dampingFraction: 0.88)) {
+                        draggingProductId = draft.id
+                        productSwipeOffset = -34
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                        pendingDeleteDraft = draft
+                        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
+                            productSwipeOffset = 0
+                            draggingProductId = nil
+                        }
+                    }
+                }
+        )
     }
 
     private var headerCard: some View {
@@ -1121,15 +1168,41 @@ struct SellerProductsView: View {
         SellerProductDraft.store(productDrafts, for: seller.id)
     }
 
-    private func deleteDraft(_ draft: SellerProductDraft) {
+    private func deleteDraft(_ draft: SellerProductDraft, reason: SellerProductRemovalReason) {
         productDrafts.removeAll { $0.id == draft.id }
         persistDrafts()
         localProducts.removeDraft(productId: draft.id)
         if selectedDraft?.id == draft.id {
             selectedDraft = nil
         }
-        syncMessage = "Deleted from this device."
+        syncMessage = "Removed from My Products. Reason: \(reason.title)."
         pendingDeleteDraft = nil
+        Task {
+            await removeDraftFromServer(productId: draft.id, reason: reason)
+        }
+    }
+
+    private func removeDraftFromServer(productId: String, reason: SellerProductRemovalReason) async {
+        do {
+            await MarketplaceAuthSession.syncAfterIdentityChange()
+            try await SellerAPI.removeProduct(
+                sellerId: seller.id,
+                productId: productId,
+                reason: reason.rawValue
+            )
+            await MainActor.run {
+                catalogRefreshToken += 1
+            }
+        } catch {
+            await MainActor.run {
+                let details = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                if details.isEmpty || details == "The operation couldn’t be completed." {
+                    syncMessage = "Removed from this device. Server removal failed for now."
+                } else {
+                    syncMessage = "Removed from this device. Server removal failed for now. \(details)"
+                }
+            }
+        }
     }
 
     private func syncDraftToServer(

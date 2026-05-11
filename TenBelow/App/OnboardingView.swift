@@ -225,7 +225,7 @@ struct IntroSlidesContent: View {
 
     private var sellerFinalStepActions: some View {
         VStack(spacing: 14) {
-            Text("Explore the app first. When you add a product or drop listing, you can subscribe to seller tools—subscription is also under Settings when you need it.")
+            Text("Explore the app first. When you add a product or drop listing, you can subscribe to seller tools. Subscription is also under Settings when you need it.")
                 .font(.system(size: 14, weight: .medium, design: .rounded))
                 .foregroundStyle(Color.primary.opacity(0.78))
                 .multilineTextAlignment(.center)
