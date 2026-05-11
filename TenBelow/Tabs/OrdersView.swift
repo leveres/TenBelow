@@ -6,47 +6,63 @@
 import SwiftUI
 import AVKit
 #if os(iOS)
+import PhotosUI
 import UIKit
+import UniformTypeIdentifiers
 #endif
 
 struct OrdersView: View {
+    private enum PlaceholderSeller {
+        static let id = "SELL-01"
+        static let name = "FilamentFox"
+    }
+
+    private enum HeroMetrics {
+        static let titleImageHeight: CGFloat = 88
+        static let titleImageScale: CGFloat = 1.22
+        static let snowfallCornerRadius: CGFloat = 18
+        static let snowfallHorizontalPadding: CGFloat = 10
+        static let snowfallVerticalPadding: CGFloat = 8
+        static let snowfallFlakeCount: Int = 56
+        static let headerSpacing: CGFloat = 3
+    }
+
     @EnvironmentObject private var orderStore: OrderStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @AppStorage("userRole") private var userRole = "buyer"
     @AppStorage("buyerEmail") private var buyerEmail = ""
     @AppStorage("sellerSellerId") private var sellerId = ""
     @State private var selectedFilter: OrderListFilter = .all
+    @State private var lastOrdersRefresh = Date.distantPast
 
     /// Mode is driven by role picked at app start — no segmented control.
     private var mode: OrdersMode {
         userRole == "seller" ? .seller : .buyer
     }
 
-    /// In seller mode with no registered seller, use demo seller for preview.
+    /// In seller mode with no registered seller, status uses a placeholder seller id.
     private var effectiveSellerId: String {
         if !sellerId.isEmpty { return sellerId }
-        return "SELL-01"
+        return PlaceholderSeller.id
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if orderStore.isRefreshing, filteredOrders.isEmpty {
-                    loadingState
-                } else if filteredOrders.isEmpty {
-                    emptyState
-                } else {
-                    ordersList
-                }
+        Group {
+            if orderStore.isRefreshing, filteredOrders.isEmpty {
+                loadingState
+            } else if filteredOrders.isEmpty {
+                emptyState
+            } else {
+                ordersList
             }
-            .background(Color.blue.opacity(0.03).ignoresSafeArea())
-            .navigationTitle("")
-            #if os(iOS) || os(visionOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .task(id: "\(mode.rawValue)|\(buyerEmail)|\(sellerId)") {
-                await refreshOrders()
-            }
+        }
+        .background(Color.blue.opacity(0.03).ignoresSafeArea())
+        .navigationTitle("")
+        #if os(iOS) || os(visionOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .task(id: "\(mode.rawValue)|\(buyerEmail)|\(sellerId)") {
+            await refreshOrders()
         }
     }
 
@@ -68,100 +84,35 @@ struct OrdersView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            GlassCard(cornerRadius: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .top, spacing: 10) {
-                        SnowfallTitleContainer(cornerRadius: 22, horizontalPadding: 10, verticalPadding: 8, flakeCount: 72) {
-                            Image("OrdersTitle")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 160, height: 70)
-                        }
+        VStack(spacing: 0) {
+            ordersHeaderBlock(statusBarOrders: [], filterBinding: .constant(.all))
 
-                        Text(mode == .buyer
-                             ? "Your purchases and delivery updates."
-                             : "Manage fulfillment and customer orders.")
-                            .font(.tbBody)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
+            ScrollView {
+                VStack(spacing: 10) {
+                    Text(mode == .buyer ? "No orders yet" : "No orders to fulfill")
+                        .font(.tbSectionTitle)
+                        .foregroundStyle(TBTheme.deepSky)
 
-                    if mode == .seller, sellerId.isEmpty {
-                        Text("Preview mode: FilamentFox (SELL-01)")
-                            .font(.tbCaption)
-                            .foregroundStyle(.tertiary)
-                    }
-
-                    OrdersStatusBar(
-                        orders: [],
-                        mode: mode,
-                        sellerId: mode == .seller ? effectiveSellerId : nil,
-                        selectedFilter: .constant(.all)
-                    )
+                    Text(emptyStateMessage)
+                        .font(.tbBody)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-
-            Spacer()
-
-            Image(systemName: mode == .buyer ? "cart" : "storefront")
-                .font(.system(size: 40))
-                .foregroundStyle(TBTheme.skyBlue)
-
-            Text(mode == .buyer ? "No orders yet" : "No orders to fulfill")
-                .font(.tbSectionTitle)
-                .foregroundStyle(TBTheme.deepSky)
-
-            Text(emptyStateMessage)
-                .font(.tbBody)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 24)
-
-            Spacer()
+                .padding(.vertical, 20)
+            }
+            .accessibilityIdentifier("orders.empty.scroll")
+            .refreshable {
+                await refreshOrders(force: true)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var ordersList: some View {
         VStack(spacing: 0) {
-            GlassCard(cornerRadius: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .top, spacing: 10) {
-                        SnowfallTitleContainer(cornerRadius: 22, horizontalPadding: 10, verticalPadding: 8, flakeCount: 72) {
-                            Image("OrdersTitle")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 160, height: 70)
-                        }
-
-                        Text(mode == .buyer
-                             ? "Your purchases and delivery updates."
-                             : "Manage fulfillment and customer orders.")
-                            .font(.tbBody)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-
-                    if mode == .seller, sellerId.isEmpty {
-                        Text("Preview mode: FilamentFox (SELL-01)")
-                            .font(.tbCaption)
-                            .foregroundStyle(.tertiary)
-                    }
-
-                    OrdersStatusBar(
-                        orders: baseOrders,
-                        mode: mode,
-                        sellerId: mode == .seller ? effectiveSellerId : nil,
-                        selectedFilter: $selectedFilter
-                    )
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
+            ordersHeaderBlock(statusBarOrders: baseOrders, filterBinding: $selectedFilter)
 
             ScrollView {
                 VStack(spacing: 12) {
@@ -176,15 +127,70 @@ struct OrdersView: View {
                             OrderRowCard(order: order, products: localProducts.products)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("orders.row.\(order.id)")
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 28)
             }
             .refreshable {
-                await refreshOrders()
+                await refreshOrders(force: true)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func ordersHeaderBlock(
+        statusBarOrders: [Order],
+        filterBinding: Binding<OrderListFilter>
+    ) -> some View {
+        GlassCard(cornerRadius: 20) {
+            VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: HeroMetrics.headerSpacing) {
+                    SnowfallTitleContainer(
+                        cornerRadius: HeroMetrics.snowfallCornerRadius,
+                        horizontalPadding: HeroMetrics.snowfallHorizontalPadding,
+                        verticalPadding: HeroMetrics.snowfallVerticalPadding,
+                        flakeCount: HeroMetrics.snowfallFlakeCount,
+                        effectHorizontalInset: 14,
+                        effectVerticalInset: 12
+                    ) {
+                        Image("OrdersTitle")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .frame(height: HeroMetrics.titleImageHeight)
+                            .scaleEffect(HeroMetrics.titleImageScale)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text(mode == .buyer
+                         ? "Your purchases and delivery updates."
+                         : "Manage fulfillment and customer orders.")
+                        .font(.tbBody)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                #if DEBUG
+                if mode == .seller, sellerId.isEmpty {
+                    Text("Preview mode: \(PlaceholderSeller.name) (\(PlaceholderSeller.id))")
+                        .font(.tbCaption)
+                        .foregroundStyle(.tertiary)
+                }
+                #endif
+
+                OrdersStatusBar(
+                    orders: statusBarOrders,
+                    mode: mode,
+                    sellerId: mode == .seller ? effectiveSellerId : nil,
+                    selectedFilter: filterBinding
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+        .padding(.bottom, 8)
     }
 
     private var baseOrders: [Order] {
@@ -196,11 +202,7 @@ struct OrdersView: View {
     }
 
     private var filteredOrders: [Order] {
-        switch selectedFilter {
-        case .all: return baseOrders
-        case .active: return baseOrders.filter { $0.status != .delivered }
-        case .completed: return baseOrders.filter { $0.status == .delivered }
-        }
+        filtered(baseOrders, for: selectedFilter)
     }
 
     private var emptyStateMessage: String {
@@ -213,13 +215,43 @@ struct OrdersView: View {
         }
 
         if sellerId.isEmpty {
+            #if DEBUG
             return "Showing demo data. Add your Seller ID in Settings to view live orders."
+            #else
+            return "Enter your Seller ID in Settings to load orders for your store."
+            #endif
         }
 
         return "Orders from your store will appear here."
     }
 
-    private func refreshOrders() async {
+    private func filtered(_ orders: [Order], for filter: OrderListFilter) -> [Order] {
+        switch filter {
+        case .all:
+            return orders
+        case .active:
+            return orders.filter { !isCompletedForCurrentMode($0) }
+        case .completed:
+            return orders.filter(isCompletedForCurrentMode)
+        }
+    }
+
+    private func isCompletedForCurrentMode(_ order: Order) -> Bool {
+        switch mode {
+        case .buyer:
+            return order.status == .shipped || order.status == .delivered
+        case .seller:
+            let myShipments = order.shipments.filter { $0.sellerId == effectiveSellerId }
+            guard !myShipments.isEmpty else { return false }
+            return myShipments.allSatisfy { $0.status == .shipped || $0.status == .delivered }
+        }
+    }
+
+    private func refreshOrders(force: Bool = false) async {
+        let now = Date()
+        guard force || now.timeIntervalSince(lastOrdersRefresh) > 45 else { return }
+        lastOrdersRefresh = now
+
         switch mode {
         case .buyer:
             await orderStore.refreshBuyerOrders(email: buyerEmail)
@@ -239,10 +271,11 @@ struct OrderDetailView: View {
     let mode: OrdersMode
     /// When seller, only this seller's shipments are shown. Use first shipment's sellerId if nil (e.g. preview).
     var currentSellerId: String?
+    var fallbackOrder: Order? = nil
 
     var body: some View {
         Group {
-            if let order = orderStore.order(withId: orderId) {
+            if let order = orderStore.order(withId: orderId) ?? fallbackOrder {
                 switch mode {
                 case .buyer:
                     BuyerOrderDetailView(order: order)
@@ -265,12 +298,28 @@ struct OrderDetailView: View {
 
 // MARK: - Buyer Order Detail (tracking, delivery, receipt)
 
+private enum BuyerExchangeSheet: Identifiable {
+    case request
+    case status(String)
+
+    var id: String {
+        switch self {
+        case .request:
+            return "request"
+        case .status(let requestId):
+            return "status-\(requestId)"
+        }
+    }
+}
+
 struct BuyerOrderDetailView: View {
+    @EnvironmentObject private var catalog: CatalogStore
+    @EnvironmentObject private var exchangeStore: ExchangeStore
     @EnvironmentObject private var localProducts: LocalProductStore
-    @Environment(\.openURL) private var openURL
-    @AppStorage("buyerEmail") private var storedBuyerEmail = ""
     let order: Order
     @State private var selectedProductionPreview: ProductionPreviewEntry?
+    @State private var exchangeSheet: BuyerExchangeSheet?
+    @State private var showExchangePolicyBrowser = false
 
     var body: some View {
         ScrollView {
@@ -316,53 +365,9 @@ struct BuyerOrderDetailView: View {
                 OrderTimelineView(order: order)
                     .padding(.horizontal, 16)
 
-                if let productionPreview = primaryProductionPreview {
-                    GlassCard(cornerRadius: 20) {
-                        Button {
-                            guard isProductionPreviewUnlocked else { return }
-                            selectedProductionPreview = productionPreview
-                        } label: {
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color.white.opacity(0.8))
-                                        .frame(width: 48, height: 48)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .strokeBorder(TBTheme.skyBlue.opacity(0.16), lineWidth: 1)
-                                        )
-
-                                    Image(systemName: isProductionPreviewUnlocked ? "sparkles.tv.fill" : "clock.badge.exclamationmark")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundStyle(isProductionPreviewUnlocked ? TBTheme.icyBlue : .secondary)
-                                }
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(isProductionPreviewUnlocked ? "See how your order is being made" : "Production preview not available yet")
-                                        .font(.tbBodyStrong)
-                                        .foregroundStyle(.primary)
-
-                                    Text(isProductionPreviewUnlocked
-                                         ? "Watch a short clip from the creation process"
-                                         : "This unlocks once your order reaches processing.")
-                                        .font(.tbCaption)
-                                        .foregroundStyle(.secondary)
-                                        .multilineTextAlignment(.leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-
-                                Spacer(minLength: 8)
-
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(isProductionPreviewUnlocked ? TBTheme.icyBlue : Color.secondary.opacity(0.5))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!isProductionPreviewUnlocked)
-                        .opacity(isProductionPreviewUnlocked ? 1.0 : 0.62)
-                    }
-                    .padding(.horizontal, 16)
+                if !productionPreviewEntries.isEmpty {
+                    productionPreviewSection
+                        .padding(.horizontal, 16)
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -403,6 +408,28 @@ struct BuyerOrderDetailView: View {
         .sheet(item: $selectedProductionPreview) { preview in
             ProductionPreviewPlayerSheet(preview: preview)
         }
+        .sheet(item: $exchangeSheet) { sheet in
+            switch sheet {
+            case .request:
+                ExchangeRequestFlowSheet(
+                    order: order,
+                    items: exchangeEligibleItemContexts
+                )
+                .environmentObject(exchangeStore)
+                .environmentObject(catalog)
+            case .status(let requestId):
+                NavigationStack {
+                    ExchangeStatusScreen(exchangeRequestId: requestId)
+                        .environmentObject(exchangeStore)
+                }
+            }
+        }
+        .sheet(isPresented: $showExchangePolicyBrowser) {
+            LegalDocumentSheet(document: .exchangePolicy)
+        }
+        .task(id: order.id) {
+            _ = try? await exchangeStore.refreshRequests(for: order.id)
+        }
     }
 
     private var buyerExchangeSection: some View {
@@ -412,13 +439,41 @@ struct BuyerOrderDetailView: View {
                     .font(.headline)
                     .fontWeight(.semibold)
 
-                Text("Need a different item or size? We process changes as exchanges, not cash refunds. Read the policy, then send a request with your order number.")
+                Text("All sales are final. Eligible orders may request a one-time exchange for the same item if it arrived damaged, defective, incorrect, or materially flawed.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if let latestExchangeRequest {
+                    GlassCard(cornerRadius: 18) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ExchangeStatusPill(status: latestExchangeRequest.status)
+
+                            Text(latestExchangeRequest.productTitle)
+                                .font(.tbBodyStrong)
+                                .foregroundStyle(TBTheme.deepSky)
+
+                            Text(latestExchangeRequest.status.detailCopy)
+                                .font(.tbCaption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Button {
+                                exchangeSheet = .status(latestExchangeRequest.id)
+                            } label: {
+                                Text("Track Request")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(TBTheme.icyBlue)
+                        }
+                    }
+                }
+
                 Button {
-                    openURL(AppConstants.exchangePolicyURL)
+                    showExchangePolicyBrowser = true
                 } label: {
                     Text("Read Exchange Policy")
                         .font(.subheadline.weight(.semibold))
@@ -428,24 +483,70 @@ struct BuyerOrderDetailView: View {
                 .buttonStyle(.bordered)
                 .tint(TBTheme.icyBlue)
 
-                Button {
-                    #if os(iOS)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    #endif
-                    let email = order.buyerEmail ?? storedBuyerEmail
-                    if let url = AppConstants.exchangeRequestMailtoURL(orderId: order.id, buyerEmail: email) {
-                        openURL(url)
+                if !exchangeEligibleItemContexts.isEmpty {
+                    Button {
+                        #if os(iOS)
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        #endif
+                        exchangeSheet = .request
+                    } label: {
+                        Label("Request an Exchange", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
                     }
-                } label: {
-                    Label("Request an exchange", systemImage: "envelope.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                    .buttonStyle(.borderedProminent)
+                    .tint(TBTheme.icyBlue)
+                } else {
+                    Text(exchangeSectionUnavailableCopy)
+                        .font(.tbCaption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(TBTheme.icyBlue)
             }
         }
+    }
+
+    private var latestExchangeRequest: ExchangeRequest? {
+        exchangeStore.requests(for: order.id).first
+    }
+
+    private var exchangeItemContexts: [ExchangeOrderItemContext] {
+        order.shipments.flatMap { shipment in
+            shipment.items.map { item in
+                ExchangeOrderItemContext(
+                    orderId: order.id,
+                    shipmentId: shipment.id,
+                    sellerId: shipment.sellerId,
+                    sellerName: shipment.sellerName,
+                    item: item
+                )
+            }
+        }
+    }
+
+    private var exchangeEligibleItemContexts: [ExchangeOrderItemContext] {
+        exchangeItemContexts.filter { context in
+            let item = context.item
+            let exchangeCount = item.exchangeCount ?? 0
+            let hasActiveExchange = (item.hasExchangeRequest ?? false) && exchangeCount < catalog.config.maxExchangeCountPerOrderItem
+            let isDelivered = item.deliveredAt != nil || item.fulfillmentStatus == .delivered
+            let withinWindow: Bool = {
+                guard let exchangeEligibleUntil = item.exchangeEligibleUntil else { return true }
+                return exchangeEligibleUntil >= .now
+            }()
+            return isDelivered && withinWindow && !hasActiveExchange && exchangeCount < catalog.config.maxExchangeCountPerOrderItem
+        }
+    }
+
+    private var exchangeSectionUnavailableCopy: String {
+        if exchangeItemContexts.allSatisfy({ $0.item.deliveredAt == nil && $0.item.fulfillmentStatus != .delivered }) {
+            return "Exchanges can be requested after delivery."
+        }
+        if exchangeItemContexts.allSatisfy({ ($0.item.exchangeCount ?? 0) >= catalog.config.maxExchangeCountPerOrderItem }) {
+            return "This order has already used its one-time exchange."
+        }
+        return "Exchange eligibility is not available for this order right now."
     }
 
     private var orderLineItems: [OrderLineItem] {
@@ -457,8 +558,7 @@ struct BuyerOrderDetailView: View {
         var entries: [ProductionPreviewEntry] = []
 
         for item in orderLineItems {
-            let resolvedURL = item.productionPreviewResolvedURL ??
-                localProducts.product(withId: item.productId)?.productionPreviewURL
+            let resolvedURL = item.productionPreviewResolvedURL
 
             guard let resolvedURL else { continue }
 
@@ -477,30 +577,64 @@ struct BuyerOrderDetailView: View {
         return entries
     }
 
-    private var primaryProductionPreview: ProductionPreviewEntry? {
-        productionPreviewEntries.first
-    }
-
-    private var isProductionPreviewUnlocked: Bool {
-        if order.status != .placed {
-            return true
-        }
-
-        // Some orders may still be marked "placed" while an individual shipment has started preparing.
-        return order.shipments.contains { shipment in
-            switch shipment.status {
-            case .preparing, .shipped, .delivered:
-                return true
-            }
-        }
-    }
-
     private func formatMoney(_ cents: Int, _ currency: String) -> String {
         let value = Decimal(cents) / 100
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = currency
         return f.string(from: value as NSDecimalNumber) ?? "$\(value)"
+    }
+
+    private var productionPreviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("See your item being made")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .padding(.horizontal, 2)
+
+            ForEach(productionPreviewEntries) { preview in
+                GlassCard(cornerRadius: 20) {
+                    Button {
+                        selectedProductionPreview = preview
+                    } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.white.opacity(0.8))
+                                    .frame(width: 48, height: 48)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .strokeBorder(TBTheme.skyBlue.opacity(0.16), lineWidth: 1)
+                                    )
+
+                                Image(systemName: "sparkles.tv.fill")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(TBTheme.icyBlue)
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(preview.productName)
+                                    .font(.tbBodyStrong)
+                                    .foregroundStyle(.primary)
+
+                                Text("Watch the maker video for this item.")
+                                    .font(.tbCaption)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(TBTheme.icyBlue)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 }
 
@@ -543,12 +677,27 @@ struct SellerOrderDetailView: View {
     @EnvironmentObject private var orderStore: OrderStore
     let order: Order
     let currentSellerId: String
+    @State private var displayedOrder: Order
     @State private var pendingShipmentDraft: ShipmentTrackingDraft?
+    @State private var isShowingProductionPreviewPicker = false
+    @State private var activeProductionPreviewTarget: SellerProductionPreviewTarget?
+    @State private var selectedProductionPreviewEntry: ProductionPreviewEntry?
+    @State private var productionPreviewBusyItemIDs: Set<String> = []
     @State private var carrier = ""
     @State private var trackingNumber = ""
 
+    init(order: Order, currentSellerId: String) {
+        self.order = order
+        self.currentSellerId = currentSellerId
+        _displayedOrder = State(initialValue: order)
+    }
+
+    private var isPreviewOrder: Bool {
+        orderStore.order(withId: order.id) == nil
+    }
+
     private var myShipments: [Shipment] {
-        order.shipments.filter { $0.sellerId == currentSellerId }
+        displayedOrder.shipments.filter { $0.sellerId == currentSellerId }
     }
 
     private var hasNoShipments: Bool {
@@ -570,10 +719,10 @@ struct SellerOrderDetailView: View {
                                     .fontWeight(.semibold)
                             }
                             Spacer()
-                            OrderStatusPill(status: order.status)
+                            OrderStatusPill(status: displayedOrder.status)
                         }
 
-                        Text("Placed \(order.createdAt.formatted(date: .abbreviated, time: .omitted))")
+                        Text("Placed \(displayedOrder.createdAt.formatted(date: .abbreviated, time: .omitted))")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
 
@@ -581,13 +730,13 @@ struct SellerOrderDetailView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
 
-                        if let city = order.shipToCity, let state = order.shipToState {
+                        if let city = displayedOrder.shipToCity, let state = displayedOrder.shipToState {
                             Label("Ship to: \(city), \(state)", systemImage: "shippingbox.fill")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
                                 .foregroundStyle(.primary.opacity(0.9))
                         }
-                        if let email = order.buyerEmail {
+                        if let email = displayedOrder.buyerEmail {
                             Label("Buyer: \(email)", systemImage: "person")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -597,11 +746,19 @@ struct SellerOrderDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
 
-                OrderTimelineView(order: order)
+                OrderTimelineView(order: displayedOrder)
                     .padding(.horizontal, 16)
 
-                if let shipmentActionError = orderStore.shipmentActionError, !shipmentActionError.isEmpty {
+                if !isPreviewOrder, let shipmentActionError = orderStore.shipmentActionError, !shipmentActionError.isEmpty {
                     Text(shipmentActionError)
+                        .font(.tbCaption)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                }
+
+                if let productionPreviewActionError = orderStore.productionPreviewActionError, !productionPreviewActionError.isEmpty {
+                    Text(productionPreviewActionError)
                         .font(.tbCaption)
                         .foregroundStyle(.orange)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -624,12 +781,13 @@ struct SellerOrderDetailView: View {
                         ForEach(myShipments) { shipment in
                             VStack(alignment: .leading, spacing: 8) {
                                 ShipmentCard(shipment: shipment, mode: .seller)
+                                sellerFulfillmentWorkspace(for: shipment)
 
-                                if let nextAction = orderStore.nextAction(for: shipment, order: order) {
+                                if let nextAction = orderStore.nextAction(for: shipment, order: displayedOrder) {
                                     Button {
                                         handleShipmentAction(nextAction, for: shipment)
                                     } label: {
-                                        Label(nextAction.buttonTitle, systemImage: actionIcon(for: nextAction))
+                                        Label(actionTitle(for: nextAction), systemImage: actionIcon(for: nextAction))
                                             .font(.tbBodyStrong)
                                             .frame(maxWidth: .infinity)
                                     }
@@ -652,7 +810,7 @@ struct SellerOrderDetailView: View {
                                 .fontWeight(.semibold)
                         }
                         Spacer()
-                        Text("Order total: \(formatMoney(order.totalCents, order.currency))")
+                        Text("Order total: \(formatMoney(displayedOrder.totalCents, displayedOrder.currency))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -666,6 +824,11 @@ struct SellerOrderDetailView: View {
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .onChange(of: order) { _, newOrder in
+            if !isPreviewOrder {
+                displayedOrder = newOrder
+            }
+        }
         .sheet(item: $pendingShipmentDraft) { draft in
             ShipmentTrackingSheet(
                 sellerName: draft.sellerName,
@@ -680,19 +843,45 @@ struct SellerOrderDetailView: View {
                     guard !trimmedCarrier.isEmpty, !trimmedTrackingNumber.isEmpty else { return }
 
                     Task {
-                        await orderStore.performShipmentAction(
-                            .markShipped,
-                            orderId: draft.orderId,
-                            shipmentId: draft.shipmentId,
-                            sellerId: draft.sellerId,
-                            carrier: trimmedCarrier,
-                            trackingNumber: trimmedTrackingNumber
-                        )
+                        if isPreviewOrder {
+                            applyPreviewShipmentAction(
+                                .markShipped,
+                                shipmentId: draft.shipmentId,
+                                carrier: trimmedCarrier,
+                                trackingNumber: trimmedTrackingNumber
+                            )
+                        } else {
+                            await orderStore.performShipmentAction(
+                                .markShipped,
+                                orderId: draft.orderId,
+                                shipmentId: draft.shipmentId,
+                                sellerId: draft.sellerId,
+                                carrier: trimmedCarrier,
+                                trackingNumber: trimmedTrackingNumber
+                            )
+                        }
                         pendingShipmentDraft = nil
                     }
                 }
             )
         }
+        .sheet(item: $selectedProductionPreviewEntry) { preview in
+            ProductionPreviewPlayerSheet(preview: preview)
+        }
+        #if os(iOS)
+        .sheet(isPresented: $isShowingProductionPreviewPicker) {
+            SystemVideoLibraryPicker(
+                isPresented: $isShowingProductionPreviewPicker
+            ) { selectedURL in
+                guard let target = activeProductionPreviewTarget else { return }
+                Task {
+                    await uploadProductionPreview(from: selectedURL, for: target)
+                }
+            } onError: { message in
+                orderStore.productionPreviewActionError = message
+            }
+        }
+        #endif
     }
 
     private var myShipmentsTotalCents: Int {
@@ -720,6 +909,275 @@ struct SellerOrderDetailView: View {
         }
     }
 
+    private func actionTitle(for action: SellerShipmentAction) -> String {
+        switch action {
+        case .markShipped:
+            return "Add Tracking & Mark Shipped"
+        case .startProcessing, .markDelivered:
+            return action.buttonTitle
+        }
+    }
+
+    @ViewBuilder
+    private func sellerFulfillmentWorkspace(for shipment: Shipment) -> some View {
+        GlassCard(cornerRadius: 20) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Fulfillment workspace")
+                        .font(.tbBodyStrong)
+                        .foregroundStyle(TBTheme.deepSky)
+
+                    Text(fulfillmentGuidance(for: shipment))
+                        .font(.tbCaption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(spacing: 10) {
+                    ForEach(shipment.items) { item in
+                        sellerProductionPreviewRow(for: item, shipment: shipment)
+                    }
+                }
+
+                if let nextAction = orderStore.nextAction(for: shipment, order: displayedOrder),
+                   nextAction == .markShipped {
+                    HStack(spacing: 8) {
+                        Image(systemName: "shippingbox.and.arrow.trianglehead.clockwise")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(TBTheme.icyBlue)
+                        Text("Shipping is the final fulfillment step. Add the purchased label carrier and tracking number when you're ready to send it.")
+                            .font(.tbCaption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+        }
+    }
+
+    private func fulfillmentGuidance(for shipment: Shipment) -> String {
+        if shipment.status == .delivered {
+            return "This shipment is complete. Buyer-facing production updates stay visible in order details."
+        }
+
+        if shipment.status == .shipped {
+            return "This shipment is on the way. You can mark it delivered once fulfillment is complete."
+        }
+
+        if displayedOrder.status == .placed {
+            return "Add the private maker video whenever you're ready, then start production to confirm the order and move into the live fulfillment flow."
+        }
+
+        return "You're in production now. Add or replace the private maker video here, then finish by saving shipping details and marking the shipment as sent."
+    }
+
+    @ViewBuilder
+    private func sellerProductionPreviewRow(for item: OrderLineItem, shipment: Shipment) -> some View {
+        let existingURL = item.productionPreviewResolvedURL
+        let isBusy = productionPreviewBusyItemIDs.contains(item.id)
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.productName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    Text(productionPreviewStatusText(existingURL: existingURL, isBusy: isBusy))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(productionPreviewStatusTitle(existingURL: existingURL, isBusy: isBusy))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(productionPreviewStatusColor(existingURL: existingURL, isBusy: isBusy))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.85), in: Capsule(style: .continuous))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 0.8)
+                    )
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    activeProductionPreviewTarget = SellerProductionPreviewTarget(
+                        orderId: displayedOrder.id,
+                        shipmentId: shipment.id,
+                        sellerId: currentSellerId,
+                        orderItemId: item.id,
+                        productId: item.productId,
+                        productName: item.productName
+                    )
+                    isShowingProductionPreviewPicker = true
+                } label: {
+                    fulfillmentActionChip(
+                        title: existingURL == nil ? "Add maker video" : "Replace video",
+                        systemImage: existingURL == nil ? "video.badge.plus" : "arrow.triangle.2.circlepath"
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isBusy)
+                .opacity(isBusy ? 0.55 : 1.0)
+
+                if let existingURL {
+                    Button {
+                        selectedProductionPreviewEntry = ProductionPreviewEntry(
+                            productId: item.productId,
+                            productName: item.productName,
+                            videoURL: existingURL
+                        )
+                    } label: {
+                        fulfillmentActionChip(title: "Preview", systemImage: "play.rectangle.fill")
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(role: .destructive) {
+                        removeProductionPreview(for: item, shipment: shipment)
+                    } label: {
+                        fulfillmentActionChip(title: "Remove", systemImage: "trash")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isBusy)
+                    .opacity(isBusy ? 0.55 : 1.0)
+                }
+            }
+
+        }
+        .padding(14)
+        .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.10), lineWidth: 0.8)
+        )
+    }
+
+    private func fulfillmentActionChip(title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .foregroundStyle(TBTheme.deepSky)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.9), in: Capsule(style: .continuous))
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(TBTheme.skyBlue.opacity(0.16), lineWidth: 0.8)
+            )
+    }
+
+    private func productionPreviewStatusTitle(existingURL: URL?, isBusy: Bool) -> String {
+        if isBusy { return "Uploading" }
+        if existingURL != nil { return "Ready" }
+        return "Missing"
+    }
+
+    private func productionPreviewStatusText(existingURL: URL?, isBusy: Bool) -> String {
+        if isBusy {
+            return "Uploading the latest production update for buyer order details."
+        }
+        if existingURL != nil {
+            return "A private production update is ready for the buyer in order details."
+        }
+        return "No maker video has been added yet for this order."
+    }
+
+    private func productionPreviewStatusColor(existingURL: URL?, isBusy: Bool) -> Color {
+        if isBusy { return TBTheme.icyBlue }
+        if existingURL != nil { return .green }
+        return .orange
+    }
+
+    private func removeProductionPreview(for item: OrderLineItem, shipment: Shipment) {
+        Task {
+            productionPreviewBusyItemIDs.insert(item.id)
+            defer { productionPreviewBusyItemIDs.remove(item.id) }
+
+            if isPreviewOrder {
+                updatePreviewProductionPreview(
+                    shipmentId: shipment.id,
+                    orderItemId: item.id,
+                    productionPreviewURL: nil
+                )
+            } else {
+                await orderStore.updateOrderProductionPreview(
+                    orderId: displayedOrder.id,
+                    shipmentId: shipment.id,
+                    sellerId: currentSellerId,
+                    orderItemId: item.id,
+                    productionPreviewURL: nil,
+                    removeProductionPreview: true
+                )
+            }
+        }
+    }
+
+    private func uploadProductionPreview(from selectedVideoURL: URL, for target: SellerProductionPreviewTarget) async {
+        await MainActor.run {
+            productionPreviewBusyItemIDs.insert(target.orderItemId)
+            orderStore.productionPreviewActionError = nil
+        }
+
+        defer {
+            Task { @MainActor in
+                productionPreviewBusyItemIDs.remove(target.orderItemId)
+                activeProductionPreviewTarget = nil
+            }
+        }
+
+        do {
+            guard selectedVideoURL.isFileURL else {
+                throw NSError(
+                    domain: "OrdersView",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "We couldn't load that maker video."]
+                )
+            }
+
+            let data = try Data(contentsOf: selectedVideoURL)
+            let normalizedExtension = (selectedVideoURL.pathExtension.isEmpty ? "mov" : selectedVideoURL.pathExtension).lowercased()
+            if isPreviewOrder {
+                let previewFileURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension(normalizedExtension)
+                try data.write(to: previewFileURL, options: .atomic)
+                await MainActor.run {
+                    updatePreviewProductionPreview(
+                        shipmentId: target.shipmentId,
+                        orderItemId: target.orderItemId,
+                        productionPreviewURL: previewFileURL.absoluteString
+                    )
+                }
+            } else {
+                let uploadedURL = try await SellerAPI.uploadMedia(
+                    sellerId: target.sellerId,
+                    productId: target.productId,
+                    mediaKind: "order-maker-video",
+                    slot: target.orderItemId,
+                    fileExtension: normalizedExtension,
+                    contentType: normalizedExtension == "mp4" ? "video/mp4" : "video/quicktime",
+                    data: data
+                )
+
+                await orderStore.updateOrderProductionPreview(
+                    orderId: target.orderId,
+                    shipmentId: target.shipmentId,
+                    sellerId: target.sellerId,
+                    orderItemId: target.orderItemId,
+                    productionPreviewURL: uploadedURL
+                )
+            }
+        } catch {
+            await MainActor.run {
+                orderStore.productionPreviewActionError = error.localizedDescription
+            }
+        }
+    }
+
     private func handleShipmentAction(_ action: SellerShipmentAction, for shipment: Shipment) {
         switch action {
         case .markShipped:
@@ -732,15 +1190,183 @@ struct SellerOrderDetailView: View {
                 sellerName: shipment.sellerName
             )
         case .startProcessing, .markDelivered:
-            Task {
-                await orderStore.performShipmentAction(
-                    action,
-                    orderId: order.id,
-                    shipmentId: shipment.id,
-                    sellerId: currentSellerId
-                )
+            if isPreviewOrder {
+                applyPreviewShipmentAction(action, shipmentId: shipment.id)
+            } else {
+                Task {
+                    await orderStore.performShipmentAction(
+                        action,
+                        orderId: displayedOrder.id,
+                        shipmentId: shipment.id,
+                        sellerId: currentSellerId
+                    )
+                }
             }
         }
+    }
+
+    private func updatePreviewProductionPreview(
+        shipmentId: String,
+        orderItemId: String,
+        productionPreviewURL: String?
+    ) {
+        guard let shipmentIndex = displayedOrder.shipments.firstIndex(where: { $0.id == shipmentId }),
+              let itemIndex = displayedOrder.shipments[shipmentIndex].items.firstIndex(where: { $0.id == orderItemId })
+        else { return }
+
+        displayedOrder.shipments[shipmentIndex].items[itemIndex].productionPreviewURL = productionPreviewURL
+    }
+
+    private func applyPreviewShipmentAction(
+        _ action: SellerShipmentAction,
+        shipmentId: String,
+        carrier: String? = nil,
+        trackingNumber: String? = nil
+    ) {
+        orderStore.shipmentActionError = nil
+        guard let shipmentIndex = displayedOrder.shipments.firstIndex(where: { $0.id == shipmentId }) else { return }
+        let timestamp = Date.now
+
+        switch action {
+        case .startProcessing:
+            displayedOrder.status = .processing
+        case .markShipped:
+            displayedOrder.shipments[shipmentIndex].status = .shipped
+            displayedOrder.shipments[shipmentIndex].shippedAt = timestamp
+            displayedOrder.shipments[shipmentIndex].carrier = carrier
+            displayedOrder.shipments[shipmentIndex].trackingNumber = trackingNumber
+        case .markDelivered:
+            displayedOrder.shipments[shipmentIndex].status = .delivered
+            displayedOrder.shipments[shipmentIndex].deliveredAt = timestamp
+        }
+
+        displayedOrder.status = derivedPreviewOrderStatus(
+            from: displayedOrder.shipments,
+            current: displayedOrder.status
+        )
+    }
+
+    private func derivedPreviewOrderStatus(
+        from shipments: [Shipment],
+        current: OrderStatus
+    ) -> OrderStatus {
+        guard !shipments.isEmpty else { return current }
+
+        let deliveredCount = shipments.filter { $0.status == .delivered }.count
+        let shippedCount = shipments.filter { $0.status == .shipped }.count
+        let preparingCount = shipments.filter { $0.status == .preparing }.count
+
+        if deliveredCount == shipments.count {
+            return .delivered
+        }
+
+        if shippedCount + deliveredCount == shipments.count, shippedCount > 0 {
+            return .shipped
+        }
+
+        if shippedCount > 0 && preparingCount > 0 {
+            return .partiallyShipped
+        }
+
+        if preparingCount > 0 {
+            return .processing
+        }
+
+        return current
+    }
+}
+
+#if os(iOS)
+private struct SystemVideoLibraryPicker: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
+    let onPick: (URL) -> Void
+    let onError: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var configuration = PHPickerConfiguration(photoLibrary: .shared())
+        configuration.selectionLimit = 1
+        configuration.filter = nil
+        configuration.preferredAssetRepresentationMode = .current
+
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        private let parent: SystemVideoLibraryPicker
+
+        init(_ parent: SystemVideoLibraryPicker) {
+            self.parent = parent
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            guard let result = results.first else {
+                parent.isPresented = false
+                return
+            }
+
+            let provider = result.itemProvider
+            let movieTypeIdentifiers = [UTType.movie.identifier, UTType.video.identifier]
+            guard let movieTypeIdentifier = movieTypeIdentifiers.first(where: { provider.hasItemConformingToTypeIdentifier($0) }) else {
+                parent.onError("Please choose a video from your library.")
+                parent.isPresented = false
+                return
+            }
+
+            provider.loadFileRepresentation(forTypeIdentifier: movieTypeIdentifier) { url, error in
+                DispatchQueue.main.async {
+                    if let error {
+                        self.parent.onError(error.localizedDescription)
+                        self.parent.isPresented = false
+                        return
+                    }
+
+                    guard let url else {
+                        self.parent.onError("We couldn't load that maker video.")
+                        self.parent.isPresented = false
+                        return
+                    }
+
+                    let fileExtension = url.pathExtension.isEmpty ? "mov" : url.pathExtension
+                    let destinationURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString)
+                        .appendingPathExtension(fileExtension)
+
+                    do {
+                        if FileManager.default.fileExists(atPath: destinationURL.path) {
+                            try FileManager.default.removeItem(at: destinationURL)
+                        }
+                        try FileManager.default.copyItem(at: url, to: destinationURL)
+                        self.parent.onPick(destinationURL)
+                    } catch {
+                        self.parent.onError("We couldn't prepare that maker video.")
+                    }
+
+                    self.parent.isPresented = false
+                }
+            }
+        }
+    }
+}
+#endif
+
+private struct SellerProductionPreviewTarget: Identifiable {
+    let orderId: String
+    let shipmentId: String
+    let sellerId: String
+    let orderItemId: String
+    let productId: String
+    let productName: String
+
+    var id: String {
+        "\(orderId)|\(shipmentId)|\(orderItemId)"
     }
 }
 
@@ -859,6 +1485,3 @@ private struct ShipmentTrackingField: View {
     }
 }
 
-#Preview {
-    OrdersView()
-}

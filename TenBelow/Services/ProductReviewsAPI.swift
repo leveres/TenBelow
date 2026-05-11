@@ -46,6 +46,8 @@ enum ProductReviewsAPI {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
         request.httpBody = try JSONEncoder().encode(
             SubmitProductReviewRequest(
                 orderId: orderId,

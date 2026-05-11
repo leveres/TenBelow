@@ -11,6 +11,8 @@ enum DropAPI {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &req)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &req)
         req.httpBody = try JSONEncoder().encode(request)
 
         let (data, resp) = try await URLSession.tenBelow.data(for: req)
@@ -25,6 +27,8 @@ enum DropAPI {
         var req = URLRequest(url: url)
         req.httpMethod = "PUT"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &req)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &req)
         req.httpBody = try JSONEncoder().encode(request)
 
         let (data, resp) = try await URLSession.tenBelow.data(for: req)
@@ -36,7 +40,10 @@ enum DropAPI {
 
     static func currentDrop() async throws -> CurrentDropResponse {
         let url = baseURL.appendingPathComponent("drop/current")
-        let (data, resp) = try await URLSession.tenBelow.data(from: url)
+        var req = URLRequest(url: url)
+        AppConstants.applyAppClientAuth(to: &req)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &req)
+        let (data, resp) = try await URLSession.tenBelow.data(for: req)
         try validateResponse(data: data, resp: resp)
         return try JSONDecoder().decode(CurrentDropResponse.self, from: data)
     }
@@ -45,7 +52,10 @@ enum DropAPI {
 
     static func mySubmissions(sellerId: String) async throws -> SellerSubmissionsResponse {
         let url = baseURL.appendingPathComponent("drop/my-submissions/\(sellerId)")
-        let (data, resp) = try await URLSession.tenBelow.data(from: url)
+        var req = URLRequest(url: url)
+        AppConstants.applyAppClientAuth(to: &req)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &req)
+        let (data, resp) = try await URLSession.tenBelow.data(for: req)
         try validateResponse(data: data, resp: resp)
         return try JSONDecoder().decode(SellerSubmissionsResponse.self, from: data)
     }
@@ -56,6 +66,8 @@ enum DropAPI {
         let url = baseURL.appendingPathComponent("drop/submission/\(productId)")
         var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
+        AppConstants.applyAppClientAuth(to: &req)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &req)
 
         let (data, resp) = try await URLSession.tenBelow.data(for: req)
         try validateResponse(data: data, resp: resp)

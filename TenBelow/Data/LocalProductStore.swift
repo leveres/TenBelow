@@ -4,6 +4,7 @@ import Combine
 @MainActor
 final class LocalProductStore: ObservableObject {
     @Published private(set) var products: [Product] = []
+    @Published private(set) var productsRevision = 0
 
     private let storageKey = "localProductStore.products"
     private let eventStore: CommerceEventStore
@@ -72,6 +73,13 @@ final class LocalProductStore: ObservableObject {
         persist()
         refreshPublishedProducts()
         recordEvents(for: updatedProduct, previous: existing)
+    }
+
+    func removeDraft(productId: String) {
+        guard let index = storedProducts.firstIndex(where: { $0.id == productId }) else { return }
+        storedProducts.remove(at: index)
+        persist()
+        refreshPublishedProducts()
     }
 
     private func seedProductsFromMocks() -> [StoredProduct] {
@@ -176,6 +184,7 @@ final class LocalProductStore: ObservableObject {
 
     private func refreshPublishedProducts() {
         products = storedProducts.map(\.product)
+        productsRevision &+= 1
     }
 
     private func persist() {

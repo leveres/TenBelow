@@ -116,15 +116,3 @@ struct OnboardingPage: View {
     }
 }
 
-#Preview {
-    ZStack {
-        TBTheme.cloudWhite.ignoresSafeArea()
-        OnboardingPage(
-            imageName: "filament_image",
-            symbolName: "cube.fill",
-            title: "Fresh Ideas Start Here",
-            subtitle: "High-quality filament. Clean prints. Designed to last.",
-            isActive: true
-        )
-    }
-}

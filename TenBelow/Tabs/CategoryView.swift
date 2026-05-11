@@ -55,10 +55,10 @@ struct CategoryView: View {
                         .font(.system(size: 40))
                         .foregroundStyle(TBTheme.skyBlue)
 
-                    Text("Coming soon")
+                    Text("No listings yet")
                         .font(.headline)
 
-                    Text("We're printing up new \(displayTitle) items. Check back soon!")
+                    Text("Nothing is live in \(displayTitle) right now. Open the Shop tab to browse the full storefront, or check back after sellers add new items.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -84,13 +84,3 @@ struct CategoryView: View {
     }
 }
 
-#Preview {
-    let events = CommerceEventStore()
-    NavigationStack {
-        CategoryView(category: .desk)
-    }
-    .environmentObject(CartStore())
-    .environmentObject(CatalogStore())
-    .environmentObject(BuyerEngagementStore(eventStore: events))
-    .environmentObject(LocalProductStore(eventStore: events))
-}

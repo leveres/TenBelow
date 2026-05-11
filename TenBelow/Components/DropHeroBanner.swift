@@ -100,7 +100,3 @@ struct DropHeroBanner: View {
     }
 }
 
-#Preview {
-    DropHeroBanner(drop: MockData.currentDrop)
-        .padding()
-}

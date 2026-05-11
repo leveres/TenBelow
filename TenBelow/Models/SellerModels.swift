@@ -31,6 +31,10 @@ struct SellerMembershipStatusResponse: Codable {
     let lastSyncedAt: String?
 }
 
+struct CreateSellerMembershipCheckoutResponse: Codable {
+    let url: String
+}
+
 struct SellerStatusResponse: Codable {
     let sellerId: String
     let stripeAccountId: String
@@ -132,12 +136,16 @@ struct UpdateSellerProfileRequest: Codable {
     let displayName: String
     let handle: String
     let bio: String
+    let avatarURL: String?
+    let bannerURL: String?
     let websiteURL: String?
     let location: String
     let materials: [String]
     let processingTime: String
     let shipsInMinDays: Int
     let shipsInMaxDays: Int
+    let acceptsCustomOrders: Bool
+    let customOrderInfoURL: String?
 }
 
 extension SellerStatusResponse {
@@ -148,7 +156,7 @@ extension SellerStatusResponse {
             chargesEnabled: false,
             payoutsEnabled: false,
             detailsSubmitted: false,
-            onboardingComplete: true,
+            onboardingComplete: false,
             completedSalesCount: 0,
             totalReviewCount: 0,
             positiveReviewCount: 0,

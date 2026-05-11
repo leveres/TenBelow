@@ -17,6 +17,15 @@ private struct ShipmentActionResponse: Codable {
     let order: Order
 }
 
+private struct OrderProductionPreviewUpdateRequest: Codable {
+    let orderId: String
+    let shipmentId: String
+    let sellerId: String
+    let orderItemId: String
+    let productionPreviewURL: String?
+    let removeProductionPreview: Bool
+}
+
 enum OrdersAPI {
     private static var baseURL: URL { CheckoutAPI.baseURL }
 
@@ -58,6 +67,8 @@ enum OrdersAPI {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
         request.httpBody = try JSONEncoder().encode(
             ShipmentActionRequest(
                 orderId: orderId,
@@ -66,6 +77,42 @@ enum OrdersAPI {
                 action: action.rawValue,
                 carrier: carrier,
                 trackingNumber: trackingNumber
+            )
+        )
+
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            throw NSError(domain: "OrdersAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(ShipmentActionResponse.self, from: data).order
+    }
+
+    static func updateOrderProductionPreview(
+        orderId: String,
+        shipmentId: String,
+        sellerId: String,
+        orderItemId: String,
+        productionPreviewURL: String?,
+        removeProductionPreview: Bool = false
+    ) async throws -> Order {
+        let url = baseURL.appendingPathComponent("orders/production-preview")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+        request.httpBody = try JSONEncoder().encode(
+            OrderProductionPreviewUpdateRequest(
+                orderId: orderId,
+                shipmentId: shipmentId,
+                sellerId: sellerId,
+                orderItemId: orderItemId,
+                productionPreviewURL: productionPreviewURL,
+                removeProductionPreview: removeProductionPreview
             )
         )
 

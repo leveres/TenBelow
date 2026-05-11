@@ -44,11 +44,3 @@ struct CategoryTile: View {
     }
 }
 
-#Preview {
-    VStack(spacing: 10) {
-        ForEach(tbCategories) { cat in
-            CategoryTile(category: cat)
-        }
-    }
-    .padding()
-}

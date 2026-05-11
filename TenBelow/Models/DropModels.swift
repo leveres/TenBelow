@@ -17,11 +17,27 @@ struct DropSubmissionRequest: Codable {
     let category: String
     let imageURLs: [String]
     let demoVideoURL: String?
+    let productionPreviewURL: String?
+    let headline: String
+    let story: String
+    let bestUseCase: String
     let material: String
     let durabilityNote: String
     let careWarnings: [String]
     let shipsInMinDays: Int
     let shipsInMaxDays: Int
+}
+
+enum WeeklyDropSubmissionStatus: String, Codable, CaseIterable, Identifiable {
+    case draft
+    case ready
+    case submitted
+    case approved
+    case rejected
+    case archived
+    case live
+
+    var id: String { rawValue }
 }
 
 // MARK: - Drop Product (returned from backend)
@@ -31,20 +47,39 @@ struct DropProduct: Codable, Identifiable, Hashable {
     let sellerId: String
     let name: String
     let priceCents: Int
+    let previousPriceCents: Int?
     let category: String
     let imageURLs: [String]
     let demoVideoURL: String?
+    let productionPreviewURL: String?
+    let headline: String
+    let story: String
+    let bestUseCase: String
     let material: String
     let durabilityNote: String
     let careWarnings: [String]
     let shipsInMinDays: Int
     let shipsInMaxDays: Int
+    let approvalStatus: WeeklyDropSubmissionStatus
+    let reviewNotes: String?
+    let reviewedAt: String?
     let submittedAt: String
+    let slotNumber: Int?
 }
 
 extension DropProduct {
     var primaryImageReference: String? {
         imageURLs.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    var displayHeadline: String {
+        if !headline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return headline
+        }
+        if !story.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return story
+        }
+        return durabilityNote
     }
 }
 
@@ -93,32 +128,192 @@ extension SellerSubmissionsResponse {
                     sellerId: sellerId,
                     name: "Textured Planter",
                     priceCents: 1800,
+                    previousPriceCents: nil,
                     category: "Home",
                     imageURLs: [],
                     demoVideoURL: nil,
+                    productionPreviewURL: nil,
+                    headline: "A sculptural desktop accent for Friday's lineup.",
+                    story: "Designed as a limited-run planter with layered texture and a softer matte finish.",
+                    bestUseCase: "Perfect for styling desks, side tables, or entry shelves.",
                     material: "PLA+",
                     durabilityNote: "Indoor-friendly with reinforced walls.",
                     careWarnings: ["Avoid prolonged direct heat."],
                     shipsInMinDays: 2,
                     shipsInMaxDays: 4,
-                    submittedAt: "2026-03-08T12:00:00Z"
+                    approvalStatus: .approved,
+                    reviewNotes: nil,
+                    reviewedAt: "2026-03-08T18:00:00Z",
+                    submittedAt: "2026-03-08T12:00:00Z",
+                    slotNumber: 1
                 ),
                 DropProduct(
                     id: "preview-drop-2",
                     sellerId: sellerId,
                     name: "Desk Cable Dock",
                     priceCents: 1400,
+                    previousPriceCents: nil,
                     category: "Office",
                     imageURLs: [],
                     demoVideoURL: nil,
+                    productionPreviewURL: nil,
+                    headline: "A compact cable tray tuned for smaller work setups.",
+                    story: "Built as a Friday-exclusive desk accessory with a cleaner, more minimal profile.",
+                    bestUseCase: "Use it to organize charging cables on nightstands and desks.",
                     material: "PETG",
                     durabilityNote: "Built for everyday desk use.",
                     careWarnings: ["Wipe clean with a dry cloth."],
                     shipsInMinDays: 1,
                     shipsInMaxDays: 3,
-                    submittedAt: "2026-03-08T12:10:00Z"
+                    approvalStatus: .submitted,
+                    reviewNotes: nil,
+                    reviewedAt: nil,
+                    submittedAt: "2026-03-08T12:10:00Z",
+                    slotNumber: 2
                 )
             ]
         )
+    }
+}
+
+struct WeeklyDropDraft: Identifiable, Codable, Hashable {
+    let id: String
+    var sellerId: String
+    var name: String
+    var headline: String
+    var priceText: String
+    var category: Category
+    var story: String
+    var bestUseCase: String
+    var imageURLStrings: [String]
+    var demoVideoURLString: String
+    var productionPreviewURLString: String
+    var material: String
+    var durabilityNote: String
+    var careWarningsText: String
+    var shipsInMinDays: Int
+    var shipsInMaxDays: Int
+
+    init(
+        id: String,
+        sellerId: String,
+        name: String,
+        headline: String,
+        priceText: String,
+        category: Category,
+        story: String,
+        bestUseCase: String,
+        imageURLStrings: [String],
+        demoVideoURLString: String,
+        productionPreviewURLString: String,
+        material: String,
+        durabilityNote: String,
+        careWarningsText: String,
+        shipsInMinDays: Int,
+        shipsInMaxDays: Int
+    ) {
+        self.id = id
+        self.sellerId = sellerId
+        self.name = name
+        self.headline = headline
+        self.priceText = priceText
+        self.category = category
+        self.story = story
+        self.bestUseCase = bestUseCase
+        self.imageURLStrings = imageURLStrings
+        self.demoVideoURLString = demoVideoURLString
+        self.productionPreviewURLString = productionPreviewURLString
+        self.material = material
+        self.durabilityNote = durabilityNote
+        self.careWarningsText = careWarningsText
+        self.shipsInMinDays = shipsInMinDays
+        self.shipsInMaxDays = shipsInMaxDays
+    }
+
+    static func new(sellerId: String) -> WeeklyDropDraft {
+        WeeklyDropDraft(
+            id: "drop-\(UUID().uuidString)",
+            sellerId: sellerId,
+            name: "",
+            headline: "",
+            priceText: "",
+            category: .home,
+            story: "",
+            bestUseCase: "",
+            imageURLStrings: [],
+            demoVideoURLString: "",
+            productionPreviewURLString: "",
+            material: "",
+            durabilityNote: "",
+            careWarningsText: "",
+            shipsInMinDays: 2,
+            shipsInMaxDays: 4
+        )
+    }
+
+    init(product: DropProduct) {
+        id = product.id
+        sellerId = product.sellerId
+        name = product.name
+        headline = product.headline
+        priceText = String(format: "%.2f", Double(product.priceCents) / 100.0)
+        category = Category(rawValue: product.category) ?? .home
+        story = product.story
+        bestUseCase = product.bestUseCase
+        imageURLStrings = product.imageURLs
+        demoVideoURLString = product.demoVideoURL ?? ""
+        productionPreviewURLString = product.productionPreviewURL ?? ""
+        material = product.material
+        durabilityNote = product.durabilityNote
+        careWarningsText = product.careWarnings.joined(separator: "\n")
+        shipsInMinDays = product.shipsInMinDays
+        shipsInMaxDays = product.shipsInMaxDays
+    }
+
+    var priceCents: Int {
+        Int((Double(priceText) ?? 0) * 100)
+    }
+
+    var careWarnings: [String] {
+        careWarningsText
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    var isReadyForSubmission: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && priceCents >= DropConstants.minPriceCents
+            && !story.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !imageURLStrings.isEmpty
+            && !material.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var submissionRequest: DropSubmissionRequest {
+        DropSubmissionRequest(
+            productId: id,
+            sellerId: sellerId,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            priceCents: priceCents,
+            category: category.rawValue,
+            imageURLs: imageURLStrings,
+            demoVideoURL: demoVideoURLString.nilIfBlank,
+            productionPreviewURL: productionPreviewURLString.nilIfBlank,
+            headline: headline.trimmingCharacters(in: .whitespacesAndNewlines),
+            story: story.trimmingCharacters(in: .whitespacesAndNewlines),
+            bestUseCase: bestUseCase.trimmingCharacters(in: .whitespacesAndNewlines),
+            material: material.trimmingCharacters(in: .whitespacesAndNewlines),
+            durabilityNote: durabilityNote.trimmingCharacters(in: .whitespacesAndNewlines),
+            careWarnings: careWarnings,
+            shipsInMinDays: min(shipsInMinDays, shipsInMaxDays),
+            shipsInMaxDays: max(shipsInMinDays, shipsInMaxDays)
+        )
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

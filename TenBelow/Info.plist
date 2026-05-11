@@ -19,15 +19,22 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSApplicationCategoryType</key>
-	<string>public.app-category.utilities</string>
+	<string>public.app-category.shopping</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>TenBelow uses your photo library so sellers can choose product photos and videos for listings and drops.</string>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>TenBelow sends alerts about orders, drops, and account activity.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>TENBELOW_BACKEND_BASE_URL</key>
 	<string>$(TENBELOW_BACKEND_BASE_URL)</string>
+	<key>TENBELOW_APP_API_KEY</key>
+	<string>$(TENBELOW_APP_API_KEY)</string>
 	<key>TENBELOW_STRIPE_PUBLISHABLE_KEY</key>
 	<string>$(TENBELOW_STRIPE_PUBLISHABLE_KEY)</string>
 	<key>UIApplicationSceneManifest</key>

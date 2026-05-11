@@ -66,8 +66,9 @@ final class SellerSubscriptionStore: ObservableObject {
         transactionUpdatesTask?.cancel()
     }
 
+    /// StoreKit (App Store) **or** server-backed Stripe subscription from `GET /seller-membership-status`.
     var hasActiveSubscription: Bool {
-        entitlement.hasActiveSubscription
+        entitlement.hasActiveSubscription || (remoteStatus?.hasActiveSubscription == true)
     }
 
     var productName: String {
@@ -119,19 +120,32 @@ final class SellerSubscriptionStore: ObservableObject {
         entitlement = snapshot
         await syncMembership(snapshot)
         isRefreshing = false
+        clearDeferredMembershipReminderIfNeeded()
     }
 
+    private func clearDeferredMembershipReminderIfNeeded() {
+        guard hasActiveSubscription else { return }
+        UserDefaults.standard.set(false, forKey: "sellerSkippedMembershipAtOnboarding")
+    }
+
+    /// Presents the **system** App Store subscription sheet via StoreKit (`Product.purchase()`). In-app membership is sold through Apple only.
     func purchaseMembership() async {
         guard !isPreview else { return }
+
+        errorMessage = nil
+        isPurchasing = true
+        defer { isPurchasing = false }
+
+        await loadProduct()
+        await purchaseMembershipViaStoreKit()
+    }
+
+    private func purchaseMembershipViaStoreKit() async {
         guard let product else {
             errorMessage = "We couldn't load the seller membership from the App Store yet."
             await refresh()
             return
         }
-
-        errorMessage = nil
-        isPurchasing = true
-        defer { isPurchasing = false }
 
         do {
             let result = try await product.purchase()

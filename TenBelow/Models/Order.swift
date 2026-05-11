@@ -33,6 +33,11 @@ struct Order: Identifiable, Codable, Hashable {
     var totalCents: Int
 
     var shipments: [Shipment]
+    var exchangeEligibleUntil: Date? = nil
+    var hasExchangeRequest: Bool? = nil
+    var exchangeRequestId: String? = nil
+    var exchangeCount: Int? = nil
+    var deliveredAt: Date? = nil
 
     var totalItemsCount: Int {
         shipments.reduce(0) { $0 + $1.items.reduce(0) { $0 + $1.quantity } }
@@ -65,6 +70,13 @@ struct OrderLineItem: Identifiable, Codable, Hashable {
     /// Optional order-bound production clip URL string.
     /// This is independent from public product media/gallery.
     var productionPreviewURL: String? = nil
+    var exchangeEligibleUntil: Date? = nil
+    var hasExchangeRequest: Bool? = nil
+    var exchangeRequestId: String? = nil
+    var exchangeCount: Int? = nil
+    var fulfillmentStatus: ShipmentStatus? = nil
+    var deliveredAt: Date? = nil
+    var orderStatus: OrderStatus? = nil
 
     var productionPreviewResolvedURL: URL? {
         guard let productionPreviewURL,

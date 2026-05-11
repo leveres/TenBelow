@@ -40,7 +40,16 @@ Optional but recommended:
 
 - `RESEND_API_KEY=re_...`
 - `EMAIL_FROM=TenBelow <orders@yourdomain.com>`
+- SMTP fallback if you do not use Resend:
+  - `SMTP_HOST=smtp.yourmailhost.com`
+  - `SMTP_PORT=587`
+  - `SMTP_USER=...`
+  - `SMTP_PASS=...`
+  - `SMTP_SECURE=false` (or `true` for port 465)
 - `SELLER_SUBSCRIPTION_PRODUCT_ID=com.innovativecodeworks.com.TenBelow.seller.monthly`
+
+Buyer email/password updates now require transactional email delivery for confirmation.
+Configure either Resend or SMTP so those updates can complete successfully.
 
 ## Stripe webhook setup
 

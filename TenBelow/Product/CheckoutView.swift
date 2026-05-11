@@ -15,9 +15,9 @@ struct CheckoutView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
     @EnvironmentObject private var orderStore: OrderStore
-    @Environment(\.openURL) private var openURL
     @AppStorage("buyerFullName") private var buyerFullName = ""
     @AppStorage("buyerEmail") private var buyerEmail = ""
+    @AppStorage("buyerHasPlacedOrder") private var buyerHasPlacedOrder = false
     var onSuccess: (String) -> Void
 
     @State private var email = ""
@@ -33,15 +33,16 @@ struct CheckoutView: View {
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var orderId: String?
-    @State private var showPaymentSheet = false
-    @State private var paymentSheet: PaymentSheet?
+    /// Keeps the current `PaymentSheet` alive for the duration of UIKit presentation (see `presentPaymentSheetFromKeyWindow`).
+    @State private var paymentSheetRetainer: PaymentSheet?
+    @State private var presentedLegal: LegalDocument?
 
     private var isCheckoutReady: Bool {
-        AppConstants.isBackendConfigured && AppConstants.isStripeConfigured
+        AppConstants.hasLiveCheckoutConfiguration || AppConstants.isTestingOverridesEnabled
     }
 
     private var minimumOrderCents: Int {
-        catalog.config.minimumOrderCents
+        AppConstants.minimumOrderCents
     }
 
     private var canProceed: Bool {
@@ -55,6 +56,23 @@ struct CheckoutView: View {
             && isValidUSState(normalizedState)
             && isValidUSPostalCode(normalizedPostalCode)
             && agreedToTerms
+    }
+
+    private var checkoutBlockingReasons: [String] {
+        var reasons: [String] = []
+        if !isCheckoutReady { reasons.append(AppConstants.checkoutSetupMessage) }
+        if cart.subtotalCents < minimumOrderCents {
+            reasons.append("Minimum order is \(Money.format(cents: minimumOrderCents)).")
+        }
+        if trimmedEmail.isEmpty || !isValidEmail(trimmedEmail) { reasons.append("Enter a valid email.") }
+        if trimmedName.count < 2 { reasons.append("Enter full name.") }
+        if trimmedAddressLine1.isEmpty { reasons.append("Enter street address.") }
+        if trimmedCity.isEmpty { reasons.append("Enter city.") }
+        if !isValidUSState(normalizedState) { reasons.append("Use a 2-letter state code.") }
+        if !isValidUSPostalCode(normalizedPostalCode) { reasons.append("Enter a valid ZIP code.") }
+        if normalizedCountry != "US" { reasons.append("US shipping only right now.") }
+        if !agreedToTerms { reasons.append("Accept terms to continue.") }
+        return reasons
     }
 
     private var itemsBySeller: [(sellerId: String, items: [CartItem])] {
@@ -144,15 +162,7 @@ struct CheckoutView: View {
                 .padding(.bottom, 40)
             }
             .scrollDismissesKeyboard(.interactively)
-
-            if isSubmitting {
-                AppLoadingOverlay(
-                    title: "Preparing Payment",
-                    subtitle: "Securing your order details."
-                )
-                .transition(.opacity)
-                .zIndex(1)
-            }
+            .dynamicTypeSize(.xSmall ... .accessibility5)
         }
         .onAppear {
             errorMessage = nil
@@ -160,15 +170,10 @@ struct CheckoutView: View {
             if name.isEmpty { name = buyerFullName }
         }
 
-        if let paymentSheet {
-            content.paymentSheet(
-                isPresented: $showPaymentSheet,
-                paymentSheet: paymentSheet,
-                onCompletion: handlePaymentCompletion
-            )
-        } else {
-            content
-        }
+        content
+            .sheet(item: $presentedLegal) { document in
+                LegalDocumentSheet(document: document)
+            }
     }
 
     private var stripeSetupNotice: some View {
@@ -219,7 +224,7 @@ struct CheckoutView: View {
                             Image("Logo")
                                 .resizable()
                                 .scaledToFit()
-                                .frame(width: 34, height: 34)
+                                .frame(height: 34)
                             Text("From \(sellerDisplayName(for: group.sellerId))")
                         }
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -365,18 +370,36 @@ struct CheckoutView: View {
             Text("By placing your order, you agree to our ")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
-            Link("Terms of Service", destination: AppConstants.termsURL)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+            Button {
+                presentedLegal = .termsOfService
+            } label: {
+                Text("Terms of Service")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("checkout.policy.terms")
             Text(", ")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
-            Link("Privacy Policy", destination: AppConstants.privacyPolicyURL)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+            Button {
+                presentedLegal = .privacyPolicy
+            } label: {
+                Text("Privacy Policy")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("checkout.policy.privacy")
             Text(", and ")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
-            Link("Exchange Policy", destination: AppConstants.exchangePolicyURL)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+            Button {
+                presentedLegal = .exchangePolicy
+            } label: {
+                Text("Exchange Policy")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("checkout.policy.exchange")
             Text(".")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
@@ -402,7 +425,7 @@ struct CheckoutView: View {
                     Text(isCheckoutReady
                          ? "Pay \(Money.format(cents: cart.subtotalCents))"
                          : "Checkout Unavailable")
-                    Image(systemName: isCheckoutReady ? "lock.fill" : "clock")
+                    Image(systemName: isCheckoutReady ? "creditcard.fill" : "lock.fill")
                         .font(.caption.weight(.semibold))
                 }
                 .font(.system(size: 17, weight: .semibold, design: .rounded))
@@ -414,6 +437,8 @@ struct CheckoutView: View {
         .disabled(!canProceed || isSubmitting || cart.subtotalCents < minimumOrderCents || !isCheckoutReady)
         .opacity(canProceed && !isSubmitting && cart.subtotalCents >= minimumOrderCents && isCheckoutReady ? 1 : 0.6)
         .padding(.horizontal)
+        .accessibilityIdentifier("checkout.pay")
+        .accessibilityHint("Places your order and opens payment when checkout is ready.")
 
         if cart.subtotalCents < minimumOrderCents {
             Text("Minimum order \(Money.format(cents: minimumOrderCents)) to proceed.")
@@ -428,6 +453,18 @@ struct CheckoutView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
         }
+
+        if !isSubmitting, let firstReason = checkoutBlockingReasons.first {
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle.fill")
+                    .font(.caption)
+                Text(firstReason)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
+        }
     }
 
     // MARK: - Actions
@@ -435,8 +472,7 @@ struct CheckoutView: View {
     @MainActor
     private func createAndPresentPayment() async {
         errorMessage = nil
-        showPaymentSheet = false
-        paymentSheet = nil
+        paymentSheetRetainer = nil
 
         guard isCheckoutReady else {
             errorMessage = AppConstants.checkoutSetupMessage
@@ -483,6 +519,17 @@ struct CheckoutView: View {
             return
         }
 
+        if AppConstants.isTestingOverridesEnabled && !AppConstants.hasLiveCheckoutConfiguration {
+            isSubmitting = true
+            let simulatedOrderId = "TB-TEST-\(Int(Date().timeIntervalSince1970))"
+            do {
+                try await Task.sleep(nanoseconds: 500_000_000)
+            } catch {}
+            isSubmitting = false
+            completeSuccessfulCheckout(orderIdentifier: simulatedOrderId)
+            return
+        }
+
         isSubmitting = true
 
         let req = CreatePaymentIntentRequest(
@@ -512,18 +559,13 @@ struct CheckoutView: View {
                 configuration: configuration
             )
 
-            #if os(iOS)
-            dismissKeyboard()
-            #endif
-
-            paymentSheet = sheet
             isSubmitting = false
 
-            // Stripe's SwiftUI presenter can fail silently if the sheet is requested
-            // in the same update cycle that creates it, especially after text input.
-            DispatchQueue.main.async {
-                showPaymentSheet = true
-            }
+            #if os(iOS)
+            presentPaymentSheetFromKeyWindow(sheet)
+            #else
+            errorMessage = "Payments are only supported on iOS."
+            #endif
             return
         } catch {
             errorMessage = friendlyCheckoutErrorMessage(for: error)
@@ -533,30 +575,70 @@ struct CheckoutView: View {
 
     @MainActor
     private func handlePaymentCompletion(_ result: PaymentSheetResult) {
+        paymentSheetRetainer = nil
         switch result {
         case .completed:
             if let id = orderId {
-                let purchasedProducts = cart.items.map(\.product)
-                orderStore.placeOrder(
-                    orderId: id,
-                    items: cart.items,
-                    buyerEmail: trimmedEmail,
-                    shipToCity: trimmedCity,
-                    shipToState: normalizedState
-                )
-                buyerEngagement.trackPurchase(products: purchasedProducts)
-                Task {
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    await orderStore.refreshBuyerOrders(email: trimmedEmail)
-                }
-                onSuccess(id)
+                completeSuccessfulCheckout(orderIdentifier: id)
             }
-            cart.clear()
         case .canceled:
             break
         case .failed(let error):
             errorMessage = friendlyCheckoutErrorMessage(for: error)
         }
+    }
+
+    #if os(iOS)
+    /// Presents Stripe using UIKit. The SwiftUI `.paymentSheet` modifier can crash on recent OS/SDK builds when the view tree toggles.
+    private func presentPaymentSheetFromKeyWindow(_ sheet: PaymentSheet) {
+        dismissKeyboard()
+        DispatchQueue.main.async {
+            guard let presenter = Self.topMostViewController() else {
+                errorMessage = "Could not open the payment screen. Please try again."
+                return
+            }
+            paymentSheetRetainer = sheet
+            sheet.present(from: presenter) { result in
+                Task { @MainActor in
+                    handlePaymentCompletion(result)
+                }
+            }
+        }
+    }
+
+    private static func topMostViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let windowScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        guard let window = windowScene?.windows.first(where: \.isKeyWindow) ?? windowScene?.windows.first else {
+            return nil
+        }
+        var top = window.rootViewController
+        while let presented = top?.presentedViewController {
+            top = presented
+        }
+        return top
+    }
+    #endif
+
+    @MainActor
+    private func completeSuccessfulCheckout(orderIdentifier: String) {
+        let purchasedProducts = cart.items.map(\.product)
+        buyerEmail = trimmedEmail
+        buyerHasPlacedOrder = true
+        orderStore.placeOrder(
+            orderId: orderIdentifier,
+            items: cart.items,
+            buyerEmail: trimmedEmail,
+            shipToCity: trimmedCity,
+            shipToState: normalizedState
+        )
+        buyerEngagement.trackPurchase(products: purchasedProducts)
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await orderStore.refreshBuyerOrders(email: trimmedEmail)
+        }
+        onSuccess(orderIdentifier)
+        cart.clear()
     }
 
     #if os(iOS)
@@ -602,6 +684,20 @@ private struct CheckoutField: View {
     @Binding var text: String
     var icon: String? = nil
 
+    private var checkoutFieldAccessibilityIdentifier: String {
+        switch label {
+        case "Email": return "checkout.field.email"
+        case "Full name": return "checkout.field.fullName"
+        case "Address": return "checkout.field.addressLine1"
+        case "Apt, suite (optional)": return "checkout.field.addressLine2"
+        case "City": return "checkout.field.city"
+        case "State": return "checkout.field.state"
+        case "ZIP": return "checkout.field.postalCode"
+        case "Country": return "checkout.field.country"
+        default: return "checkout.field.other"
+        }
+    }
+
     var body: some View {
         TextField(label, text: $text)
             .textFieldStyle(.plain)
@@ -615,11 +711,7 @@ private struct CheckoutField: View {
                     .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
             )
             .autocorrectionDisabled()
+            .accessibilityIdentifier(checkoutFieldAccessibilityIdentifier)
     }
 }
 
-#Preview {
-    CheckoutView(onSuccess: { _ in })
-        .environmentObject(CartStore())
-        .environmentObject(CatalogStore())
-}

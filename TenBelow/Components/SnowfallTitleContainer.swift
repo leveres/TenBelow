@@ -5,43 +5,38 @@ import SwiftUI
 /// Same snowfall system as weekly-drop title art; use behind glass or on colored card backgrounds.
 struct SnowfallParticleCanvas: View {
     var flakeCount: Int = 88
+    var animates: Bool = true
 
     var body: some View {
-        let flakes = (0..<flakeCount).map(TitleSnowParticle.init(seed:))
+        let flakes = (0..<min(max(flakeCount, 0), 32)).map(TitleSnowParticle.init(seed:))
 
         GeometryReader { _ in
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
-                let time = CGFloat(timeline.date.timeIntervalSinceReferenceDate)
-
-                Canvas { context, size in
-                    for flake in flakes {
-                        let travel = size.height + (flake.size * 2.0)
-                        let y = (time * flake.speed + flake.phase * travel)
-                            .truncatingRemainder(dividingBy: travel) - flake.size
-
-                        let baseX = flake.x * size.width
-                        let drift = sin((time * flake.driftFrequency) + flake.phase * .pi * 2.0) * flake.driftAmount
-                        let x = min(max(baseX + drift, -flake.size), size.width + flake.size)
-
-                        let rect = CGRect(x: x, y: y, width: flake.size, height: flake.size)
-
-                        // Use a blurred bloom instead of a larger opaque ellipse.
-                        // The previous approach could read as a "ring" around each flake on saturated cards.
-                        context.drawLayer { layerContext in
-                            layerContext.blendMode = .plusLighter
-                            layerContext.addFilter(.blur(radius: max(0.9, flake.size * 0.55)))
-                            layerContext.fill(
-                                Path(ellipseIn: rect),
-                                with: .color(.white.opacity(flake.opacity * 0.38))
-                            )
-                        }
-
-                        context.fill(
-                            Path(ellipseIn: rect),
-                            with: .color(.white.opacity(min(flake.opacity + 0.36, 1.0)))
-                        )
-                    }
+            if animates {
+                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: false)) { timeline in
+                    snowCanvas(flakes: flakes, time: CGFloat(timeline.date.timeIntervalSinceReferenceDate))
                 }
+            } else {
+                snowCanvas(flakes: flakes, time: 0)
+            }
+        }
+    }
+
+    private func snowCanvas(flakes: [TitleSnowParticle], time: CGFloat) -> some View {
+        Canvas { context, size in
+            for flake in flakes {
+                let travel = size.height + (flake.size * 2.0)
+                let y = (time * flake.speed + flake.phase * travel)
+                    .truncatingRemainder(dividingBy: travel) - flake.size
+
+                let baseX = flake.x * size.width
+                let drift = sin((time * flake.driftFrequency) + flake.phase * .pi * 2.0) * flake.driftAmount
+                let x = min(max(baseX + drift, -flake.size), size.width + flake.size)
+
+                let rect = CGRect(x: x, y: y, width: flake.size, height: flake.size)
+                context.fill(
+                    Path(ellipseIn: rect),
+                    with: .color(.white.opacity(min(flake.opacity + 0.28, 1.0)))
+                )
             }
         }
     }
@@ -71,7 +66,9 @@ struct SnowfallTitleContainer<Content: View>: View {
                     )
                     .allowsHitTesting(false)
             }
-        .fixedSize()
+        // Allow the container to grow horizontally with its parent (e.g. full-width Settings / Shop headers)
+        // while still hugging vertical height to the artwork.
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

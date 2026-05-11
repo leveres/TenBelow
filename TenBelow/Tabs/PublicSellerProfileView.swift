@@ -7,7 +7,6 @@ struct PublicSellerProfileView: View {
     let seller: SellerProfile
     let products: [Product]
     var previewDraftIDs: Set<String> = []
-    var showsDraftPreviewBanner: Bool = false
     var avatarNamespace: Namespace.ID? = nil
 
     @EnvironmentObject private var cart: CartStore
@@ -16,12 +15,12 @@ struct PublicSellerProfileView: View {
     @EnvironmentObject private var buyerSellerThreads: BuyerSellerThreadStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @Environment(\.openURL) private var openURL
-    @AppStorage("userRole") private var userRole = ""
-    @State private var isLoading = true
     @State private var currentProductPage = 0
     @State private var messageThreadSeller: SellerProfile?
+    @State private var pendingExternalWebsiteURL: URL?
     #if os(iOS)
     @State private var showShareSheet = false
+    @State private var showCustomOrderSheet = false
     #endif
 
     private let productsPerPage = 4
@@ -55,11 +54,12 @@ struct PublicSellerProfileView: View {
     }
 
     private var resolvedSeller: SellerProfile {
-        resolvedSellerProfile(
+        let resolved = resolvedSellerProfile(
             sellerId: seller.id,
             storefrontProducts: sellerProducts,
             remoteProfiles: catalog.sellerProfiles
-        ) ?? seller
+        )
+        return resolved?.mergingFallback(seller) ?? seller
     }
 
     private var totalProductPages: Int {
@@ -80,24 +80,7 @@ struct PublicSellerProfileView: View {
     }
 
     var body: some View {
-        ZStack {
-            Group {
-                if isLoading {
-                    skeletonContent
-                } else {
-                    loadedContent
-                }
-            }
-
-            if isLoading {
-                AppLoadingOverlay(
-                    title: "Loading Store",
-                    subtitle: "Getting this seller's profile and products ready."
-                )
-                .transition(.opacity)
-                .zIndex(1)
-            }
-        }
+        loadedContent
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(red: 0.96, green: 0.98, blue: 1.0).ignoresSafeArea())
         .navigationTitle("")
@@ -106,7 +89,6 @@ struct PublicSellerProfileView: View {
         .toolbar(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .toolbar(.hidden, for: .tabBar)
         .navigationDestination(item: $messageThreadSeller) { profile in
             SellerMessagesView(seller: profile)
         }
@@ -114,12 +96,35 @@ struct PublicSellerProfileView: View {
         .sheet(isPresented: $showShareSheet) {
             ActivityView(items: [sellerShareText])
         }
-        #endif
-        .task {
-            await reloadProfile()
+        .sheet(isPresented: $showCustomOrderSheet) {
+            BuyerCustomOrderRequestSheet(seller: resolvedSeller)
         }
+        #endif
         .onChange(of: sellerProducts.count) { _, _ in
             currentProductPage = min(currentProductPage, max(totalProductPages - 1, 0))
+        }
+        .confirmationDialog(
+            "Open seller website?",
+            isPresented: Binding(
+                get: { pendingExternalWebsiteURL != nil },
+                set: { shouldShow in
+                    if !shouldShow {
+                        pendingExternalWebsiteURL = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Open in Safari") {
+                guard let pendingExternalWebsiteURL else { return }
+                openURL(pendingExternalWebsiteURL)
+                self.pendingExternalWebsiteURL = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingExternalWebsiteURL = nil
+            }
+        } message: {
+            Text("You're leaving TenBelow to visit a seller-managed website in Safari.")
         }
     }
 
@@ -127,23 +132,13 @@ struct PublicSellerProfileView: View {
 
     private var bannerHeader: some View {
         ZStack(alignment: .bottom) {
-            bannerGradient
-                .frame(height: 90)
-                .overlay(
-                    LinearGradient(
-                        colors: [
-                            .white.opacity(0.10),
-                            .clear,
-                            Color.black.opacity(0.04)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+            bannerBackground
+                .frame(height: 84)
+                .clipped()
 
             HStack(alignment: .bottom, spacing: TBTheme.spacingLG) {
                 profileAvatar
-                    .offset(y: 14)
+                    .offset(y: 10)
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
@@ -180,23 +175,37 @@ struct PublicSellerProfileView: View {
                 Spacer()
             }
             .padding(.horizontal, TBTheme.spacingLG)
-            .padding(.bottom, 10)
+            .padding(.bottom, 8)
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, 6)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(resolvedSeller.displayName), \(resolvedSeller.handle), \(sellerProducts.count) products, \(formattedLikes) likes")
     }
 
-    private var bannerGradient: some View {
-        LinearGradient(
-            colors: [
-                Color(red: 0.30, green: 0.58, blue: 0.96),
-                Color(red: 0.48, green: 0.72, blue: 0.98),
-                Color(red: 0.83, green: 0.91, blue: 1.0)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+    private var bannerBackground: some View {
+        ZStack {
+            StorefrontImageView(reference: resolvedSeller.bannerURL?.absoluteString, contentMode: .fill) {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.30, green: 0.58, blue: 0.96),
+                        Color(red: 0.48, green: 0.72, blue: 0.98),
+                        Color(red: 0.83, green: 0.91, blue: 1.0)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+
+            LinearGradient(
+                colors: [
+                    .white.opacity(0.10),
+                    .clear,
+                    Color.black.opacity(0.04)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
     }
 
     @ViewBuilder
@@ -216,23 +225,27 @@ struct PublicSellerProfileView: View {
                 .frame(width: 50, height: 50)
                 .shadow(color: Color.black.opacity(0.08), radius: 10, y: 4)
 
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [.white, Color(red: 0.90, green: 0.95, blue: 1.0)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            StorefrontImageView(reference: resolvedSeller.avatarURL?.absoluteString, contentMode: .fill) {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.white, Color(red: 0.90, green: 0.95, blue: 1.0)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-                .frame(width: 44, height: 44)
-                .overlay(
-                    Circle()
-                        .stroke(Color.black.opacity(0.04), lineWidth: 0.8)
-                )
-
-            Text(avatarInitials)
-                .font(.system(size: 19, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color(red: 0.24, green: 0.47, blue: 0.78))
+                    .overlay {
+                        Text(avatarInitials)
+                            .font(.system(size: 19, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color(red: 0.24, green: 0.47, blue: 0.78))
+                    }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .stroke(Color.black.opacity(0.04), lineWidth: 0.8)
+            )
         }
         .accessibilityHidden(true)
     }
@@ -300,18 +313,9 @@ struct PublicSellerProfileView: View {
                     let gridColumnSpacing: CGFloat = 12
                     let gridRowSpacing: CGFloat = 10
                     let sectionStackSpacing: CGFloat = 10
-                    let paginationChromeHeight: CGFloat = 40
-                    let gridBudget = max(
-                        200,
-                        geo.size.height - paginationChromeHeight - sectionStackSpacing
-                    )
-
-                    let rowCount = max(1, Int(ceil(Double(currentPageProducts.count) / 2.0)))
-                    let totalRowSpacing = CGFloat(max(0, rowCount - 1)) * gridRowSpacing
-                    let rawRowCellHeight = (gridBudget - totalRowSpacing) / CGFloat(rowCount)
-                    let rowCellHeight = min(max(rawRowCellHeight, 188), 260)
-                    let textAndChromeReserve: CGFloat = 54
-                    let artworkHeight = min(max(104, rowCellHeight - textAndChromeReserve), 178)
+                    let tileWidth = max((geo.size.width - gridColumnSpacing) / 2, 0)
+                    let artworkHeight = min(max(tileWidth * 0.72, 96), 128)
+                    let rowCellHeight = artworkHeight + 58
 
                     VStack(spacing: sectionStackSpacing) {
                         LazyVGrid(
@@ -381,11 +385,23 @@ struct PublicSellerProfileView: View {
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(height: gridSectionHeight(for: currentPageProducts.count))
                 .animation(.easeInOut(duration: 0.2), value: currentProductPage)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func gridSectionHeight(for productCount: Int) -> CGFloat {
+        let rowCount = max(1, Int(ceil(Double(productCount) / 2.0)))
+        let rowHeight: CGFloat = 186
+        let rowSpacing: CGFloat = 10
+        let paginationHeight: CGFloat = 40
+        let stackSpacing: CGFloat = 10
+        return (CGFloat(rowCount) * rowHeight)
+            + (CGFloat(max(0, rowCount - 1)) * rowSpacing)
+            + paginationHeight
+            + stackSpacing
     }
 
     private func paginationArrow(systemName: String) -> some View {
@@ -433,13 +449,12 @@ struct PublicSellerProfileView: View {
                 .font(.subheadline)
                 .foregroundStyle(.primary)
                 .lineSpacing(2)
-                .lineLimit(4)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let url = resolvedSeller.websiteURL {
                 Button {
-                    openURL(url)
+                    pendingExternalWebsiteURL = url
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "link")
@@ -453,59 +468,147 @@ struct PublicSellerProfileView: View {
                 }
                 .buttonStyle(.plain)
             }
-
         }
     }
 
     private var actionSection: some View {
-        HStack(spacing: 8) {
-            if userRole != "seller" {
-                Button {
-                    _ = buyerEngagement.toggleFollow(sellerId: seller.id)
-                } label: {
-                    Label(isSellerFollowed ? "Following" : "Follow", systemImage: isSellerFollowed ? "checkmark.circle.fill" : "plus.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(isSellerFollowed ? TBTheme.skyBlue : Color(red: 0.24, green: 0.47, blue: 0.78))
-                .controlSize(.small)
-                Button {
-                    messageThreadSeller = resolvedSeller
-                } label: {
-                    Label("Message", systemImage: "bubble.left.and.bubble.right.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color(red: 0.24, green: 0.47, blue: 0.78))
-                .controlSize(.small)
+        ViewThatFits(in: .horizontal) {
+            actionButtonRow(showIcons: true)
+            actionButtonRow(showIcons: false)
+        }
+    }
+
+    private func actionButtonRow(showIcons: Bool) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                _ = buyerEngagement.toggleFollow(sellerId: seller.id)
+            } label: {
+                actionPillLabel(
+                    title: isSellerFollowed ? "Following" : "Follow",
+                    systemImage: isSellerFollowed ? "checkmark.circle.fill" : "plus.circle.fill",
+                    showIcon: showIcons,
+                    isSelected: isSellerFollowed
+                )
             }
+            .buttonStyle(.plain)
+
+            Button {
+                messageThreadSeller = resolvedSeller
+            } label: {
+                actionPillLabel(
+                    title: "Message",
+                    systemImage: "bubble.left.and.bubble.right.fill",
+                    showIcon: showIcons
+                )
+            }
+            .buttonStyle(.plain)
+
+            #if os(iOS)
+            if resolvedSeller.acceptsCustomOrders {
+                Button {
+                    showCustomOrderSheet = true
+                } label: {
+                    actionPillLabel(
+                        title: "Custom",
+                        systemImage: "pencil.and.outline",
+                        showIcon: showIcons
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Request custom")
+            }
+            #endif
 
             #if os(iOS)
             Button {
                 showShareSheet = true
             } label: {
-                Label("Share", systemImage: "square.and.arrow.up")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
+                actionPillLabel(
+                    title: "Share",
+                    systemImage: "square.and.arrow.up",
+                    showIcon: showIcons
+                )
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(.plain)
             #else
             ShareLink(item: sellerShareText, subject: Text(resolvedSeller.displayName), message: Text(sellerShareText)) {
-                Label("Share", systemImage: "square.and.arrow.up")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
+                actionPillLabel(
+                    title: "Share",
+                    systemImage: "square.and.arrow.up",
+                    showIcon: showIcons
+                )
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(.plain)
             #endif
         }
+    }
+
+    private func actionPillLabel(
+        title: String,
+        systemImage: String,
+        showIcon: Bool,
+        isSelected: Bool = false
+    ) -> some View {
+        Group {
+            if showIcon {
+                Label(title, systemImage: systemImage)
+                    .labelStyle(.titleAndIcon)
+            } else {
+                Text(title)
+            }
+        }
+        .font(.system(size: 12, weight: .semibold, design: .rounded))
+        .foregroundStyle(isSelected ? TBTheme.deepSky : TBTheme.bannerCTAForeground)
+        .lineLimit(1)
+        .minimumScaleFactor(0.72)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background {
+            ZStack {
+                Capsule(style: .continuous)
+                    .fill(.ultraThinMaterial)
+                Capsule(style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(isSelected ? 0.34 : 0.28),
+                                .white.opacity(isSelected ? 0.14 : 0.10),
+                                TBTheme.skyBlue.opacity(isSelected ? 0.12 : 0.08),
+                                .white.opacity(0.04)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Capsule(style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.42), .clear],
+                            startPoint: .top,
+                            endPoint: UnitPoint(x: 0.5, y: 0.55)
+                        )
+                    )
+            }
+        }
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.95),
+                            TBTheme.skyBlue.opacity(isSelected ? 0.68 : 0.55),
+                            TBTheme.deepSky.opacity(isSelected ? 0.38 : 0.28)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: TBTheme.deepSky.opacity(0.10), radius: 2, y: 1)
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 5)
+        .shadow(color: .white.opacity(0.45), radius: 1, y: -1)
     }
 
     private var sellerShareText: String {
@@ -516,33 +619,6 @@ struct PublicSellerProfileView: View {
         return "\(resolvedSeller.displayName) on TenBelow\n\(resolvedSeller.handle)"
     }
 
-    private var draftPreviewBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles.rectangle.stack.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(TBTheme.icyBlue)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Previewing saved seller listings")
-                    .font(.tbBodyStrong)
-                    .foregroundStyle(TBTheme.deepSky)
-
-                Text("Showing your saved draft products.")
-                    .font(.tbCaption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer()
-        }
-        .padding(14)
-        .background(.white.opacity(0.74), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
-        )
-    }
-
     private var formattedLikes: String {
         let count = resolvedSeller.likeCount
         if count >= 1000 {
@@ -551,7 +627,7 @@ struct PublicSellerProfileView: View {
         return "\(count)"
     }
 
-    // MARK: - Loading & Skeleton
+    // MARK: - Content
 
     private var loadedContent: some View {
         GeometryReader { geometry in
@@ -562,10 +638,6 @@ struct PublicSellerProfileView: View {
                 VStack(spacing: 5) {
                     badgeRow
                         .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if showsDraftPreviewBanner {
-                        draftPreviewBanner
-                    }
 
                     aboutCard
 
@@ -581,59 +653,6 @@ struct PublicSellerProfileView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        }
-    }
-
-    private var skeletonContent: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(TBTheme.skyLight.opacity(0.6))
-                .frame(height: 112)
-
-            RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                .fill(TBTheme.skyLight.opacity(0.4))
-                .frame(height: 28)
-                .padding(.horizontal, TBTheme.spacingLG)
-                .padding(.top, TBTheme.spacingMD)
-
-            RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                .fill(TBTheme.skyLight.opacity(0.35))
-                .frame(height: 52)
-                .padding(.horizontal, TBTheme.spacingLG)
-                .padding(.top, TBTheme.spacingMD)
-
-            RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                .fill(TBTheme.skyLight.opacity(0.35))
-                .frame(height: 44)
-                .padding(.horizontal, TBTheme.spacingLG)
-                .padding(.top, TBTheme.spacingMD)
-
-            VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
-                RoundedRectangle(cornerRadius: TBTheme.radiusMD)
-                    .fill(TBTheme.skyLight.opacity(0.35))
-                    .frame(height: 16)
-
-                RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                    .fill(TBTheme.skyLight.opacity(0.35))
-                    .frame(height: 200)
-            }
-            .padding(.horizontal, TBTheme.spacingLG)
-            .padding(.top, TBTheme.spacingLG)
-
-            Spacer(minLength: 0)
-        }
-        .redacted(reason: .placeholder)
-    }
-
-    private func reloadProfile() async {
-        await MainActor.run {
-            isLoading = true
-        }
-
-        try? await Task.sleep(nanoseconds: 600_000_000) // 0.6s shimmer-style pause
-
-        await MainActor.run {
-            isLoading = false
         }
     }
 }
@@ -952,210 +971,6 @@ private struct SellerProfileProductTile: View {
     }
 }
 
-private struct SellerMessagesView: View {
-    let seller: SellerProfile
-
-    @EnvironmentObject private var threadStore: BuyerSellerThreadStore
-    @State private var draftMessage = ""
-    @State private var hasBootstrappedThread = false
-
-    private var threadMessages: [BuyerSellerThreadMessage] {
-        threadStore.messages(for: seller.id)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        messageHeaderCard
-
-                        ForEach(threadMessages) { message in
-                            SellerMessageBubble(message: message)
-                                .id(message.id)
-                        }
-                    }
-                    .padding(.horizontal, TBTheme.spacingLG)
-                    .padding(.top, 8)
-                    .padding(.bottom, 24)
-                }
-                .onChange(of: threadMessages.count) { _, _ in
-                    guard let last = threadMessages.last else { return }
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
-            }
-        }
-        .background(Color(red: 0.972, green: 0.981, blue: 0.993).ignoresSafeArea())
-        .navigationTitle("Messages")
-        #if os(iOS) || os(visionOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .safeAreaInset(edge: .bottom) {
-            messageComposer
-        }
-        .onAppear {
-            guard !hasBootstrappedThread else { return }
-            hasBootstrappedThread = true
-            threadStore.bootstrapThreadIfNeeded(sellerId: seller.id, sellerDisplayName: seller.displayName)
-        }
-    }
-
-    private var messageHeaderCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Message \(seller.displayName)")
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                .foregroundStyle(.primary.opacity(0.88))
-
-            Text("Ask about materials, shipping, or custom options.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineSpacing(2)
-
-            HStack(spacing: 8) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 11, weight: .semibold))
-                Text("Typical reply within a few hours")
-                    .font(.caption)
-            }
-            .foregroundStyle(.secondary.opacity(0.9))
-        }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.96))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.05), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.03), radius: 10, y: 4)
-    }
-
-    private var messageComposer: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                TextField("Write a message...", text: $draftMessage, axis: .vertical)
-                    .lineLimit(1...3)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(Color.white.opacity(0.98), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.black.opacity(0.05), lineWidth: 1)
-                    )
-
-                Button {
-                    sendMessage()
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 42, height: 42)
-                        .background(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.36, green: 0.60, blue: 0.93),
-                                    Color(red: 0.24, green: 0.47, blue: 0.78)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            in: Circle()
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.55 : 1)
-            }
-
-            Text("Messages in this preview are saved on this device.")
-                .font(.tbCaption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, TBTheme.spacingLG)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
-        .background(
-            Color.white.opacity(0.92)
-                .ignoresSafeArea(edges: .bottom)
-        )
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.black.opacity(0.05))
-                .frame(height: 1)
-        }
-    }
-
-    private func sendMessage() {
-        let trimmed = draftMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        threadStore.appendBuyerMessage(sellerId: seller.id, text: trimmed)
-        draftMessage = ""
-    }
-}
-
-private struct SellerMessageBubble: View {
-    let message: BuyerSellerThreadMessage
-
-    var body: some View {
-        VStack(alignment: message.isFromBuyer ? .trailing : .leading, spacing: 4) {
-            HStack {
-                if message.isFromBuyer { Spacer(minLength: 40) }
-
-                Text(message.text)
-                    .font(.body)
-                    .foregroundStyle(message.isFromBuyer ? .white : .primary.opacity(0.84))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(messageBubbleFill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(
-                                message.isFromBuyer ? Color.clear : TBTheme.skyBlue.opacity(0.10),
-                                lineWidth: 1
-                            )
-                    )
-
-                if !message.isFromBuyer { Spacer(minLength: 40) }
-            }
-
-            Text(message.timestampLabel)
-                .font(.tbCaption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
-        }
-    }
-
-    private var messageBubbleFill: AnyShapeStyle {
-        if message.isFromBuyer {
-            return AnyShapeStyle(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.36, green: 0.60, blue: 0.93),
-                        Color(red: 0.24, green: 0.47, blue: 0.78)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-        }
-
-        return AnyShapeStyle(
-            LinearGradient(
-                colors: [
-                    .white.opacity(0.98),
-                    Color(red: 0.965, green: 0.982, blue: 1.0)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-    }
-}
-
 // MARK: - Seller All Products (full grid via See All)
 
 private struct SellerAllProductsView: View {
@@ -1233,32 +1048,4 @@ private struct FlowLayout: Layout {
 
 // MARK: - Preview
 
-#Preview("Public Profile") {
-    let events = CommerceEventStore()
-    NavigationStack {
-        PublicSellerProfileView(
-            seller: .sample,
-            products: MockData.products
-        )
-        .environmentObject(CartStore())
-        .environmentObject(CatalogStore())
-        .environmentObject(BuyerEngagementStore(eventStore: events))
-        .environmentObject(BuyerSellerThreadStore())
-        .environmentObject(LocalProductStore(eventStore: events))
-    }
-}
 
-#Preview("Empty Seller") {
-    let events = CommerceEventStore()
-    NavigationStack {
-        PublicSellerProfileView(
-            seller: .sampleSecond,
-            products: []
-        )
-        .environmentObject(CartStore())
-        .environmentObject(CatalogStore())
-        .environmentObject(BuyerEngagementStore(eventStore: events))
-        .environmentObject(BuyerSellerThreadStore())
-        .environmentObject(LocalProductStore(eventStore: events))
-    }
-}

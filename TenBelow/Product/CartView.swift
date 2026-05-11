@@ -21,13 +21,13 @@ struct CartView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     @State private var phase: CheckoutPhase = .cart
     @State private var receiptItems: [CartItem] = []
     @State private var cartUpdateMessage: String?
+    @State private var presentedLegal: LegalDocument?
 
     private var minimumOrderCents: Int {
-        catalog.config.minimumOrderCents
+        AppConstants.minimumOrderCents
     }
 
     private var phaseTitle: String {
@@ -163,6 +163,9 @@ struct CartView: View {
                         .foregroundStyle(.red)
                     }
                 }
+            }
+            .sheet(item: $presentedLegal) { document in
+                LegalDocumentSheet(document: document)
             }
             .background(
                 LinearGradient(
@@ -308,7 +311,7 @@ struct CartView: View {
                                 Image("Logo")
                                     .resizable()
                                     .scaledToFit()
-                                    .frame(width: 34, height: 34)
+                                    .frame(height: 34)
                                 Text("Ships from \(sellerDisplayName(for: group.sellerId))")
                                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                                     .foregroundStyle(TBTheme.skyBlue)
@@ -392,11 +395,11 @@ struct CartView: View {
 
     private var policyLinks: some View {
         HStack(spacing: 16) {
-            Button("Terms") { openURL(AppConstants.termsURL) }
+            Button("Terms") { presentedLegal = .termsOfService }
             Text("·").foregroundStyle(.tertiary)
-            Button("Privacy") { openURL(AppConstants.privacyPolicyURL) }
+            Button("Privacy") { presentedLegal = .privacyPolicy }
             Text("·").foregroundStyle(.tertiary)
-            Button("Exchanges") { openURL(AppConstants.exchangePolicyURL) }
+            Button("Exchanges") { presentedLegal = .exchangePolicy }
         }
         .font(.system(size: 12, weight: .medium, design: .rounded))
         .foregroundStyle(.secondary)
@@ -476,9 +479,3 @@ private struct CartRow: View {
     }
 }
 
-#Preview {
-    CartView()
-        .environmentObject(CartStore())
-        .environmentObject(CatalogStore())
-        .environmentObject(LocalProductStore(eventStore: CommerceEventStore()))
-}

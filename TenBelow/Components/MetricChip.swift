@@ -44,12 +44,3 @@ struct MetricChip: View {
     }
 }
 
-#Preview {
-    HStack(spacing: 12) {
-        MetricChip(title: "Products", value: "12", icon: "cube.fill")
-        MetricChip(title: "Orders", value: "48", icon: "shippingbox.fill")
-        MetricChip(title: "Rating", value: "4.9", icon: "star.fill")
-    }
-    .padding()
-    .background(TBTheme.cloudWhite)
-}

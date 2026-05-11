@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct WeeklyDropView: View {
+    /// Switches main tab to Shop (buyer) or Store gateway (seller); see `MainTabView.MainTab`.
+    @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
     @State private var showProductionPreview: Bool = false
 
     var body: some View {
@@ -16,7 +18,7 @@ struct WeeklyDropView: View {
                     .padding(.horizontal, 16)
 
                 // Product spotlight
-                WeeklyDropSpotlightCard()
+                WeeklyDropSpotlightCard(onShopNow: { pendingLaunchTab = 1 })
                     .padding(.horizontal, 16)
 
                 // Craft story
@@ -27,6 +29,9 @@ struct WeeklyDropView: View {
                 .padding(.bottom, 28)
             }
         }
+        // Avoid layout jumps during tab/sheet/nav transitions by measuring hero parallax
+        // in a stable coordinate space instead of `.global`.
+        .coordinateSpace(name: "weeklyDropScroll")
         .background(Color.blue.opacity(0.03).ignoresSafeArea())
         .navigationTitle("Weekly Drop")
         #if os(iOS) || os(visionOS)
@@ -34,22 +39,30 @@ struct WeeklyDropView: View {
         #endif
         .sheet(isPresented: $showProductionPreview) {
             NavigationStack {
-                // Placeholder sheet content; hook actual video later.
-                VStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 16) {
                     Image(systemName: "sparkles.tv.fill")
                         .font(.system(size: 42, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text("Production preview coming soon")
+                        .foregroundStyle(TBTheme.icyBlue)
+                        .frame(maxWidth: .infinity)
+
+                    Text("How maker videos work")
                         .font(.headline)
-                    Text("Wire this to your production preview video when available.")
+
+                    Text("This screen is a design showcase. After you buy on TenBelow, sellers can attach a short maker or production clip to your order when they fulfill it. You will find it in Order details under “See your item being made” when your seller provides one.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding()
-                .navigationTitle("Production Preview")
+                .navigationTitle("Production preview")
                 #if os(iOS) || os(visionOS)
                 .navigationBarTitleDisplayMode(.inline)
                 #endif
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showProductionPreview = false }
+                    }
+                }
             }
         }
     }
@@ -63,7 +76,7 @@ private struct WeeklyDropHero: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             GeometryReader { proxy in
-                let minY = proxy.frame(in: .global).minY
+                let minY = proxy.frame(in: .named("weeklyDropScroll")).minY
                 Image("WeeklyDropHero")
                     .resizable()
                     .scaledToFill()
@@ -167,6 +180,7 @@ private struct WeeklyDropStatusStrip: View {
 // MARK: - Spotlight Card
 
 private struct WeeklyDropSpotlightCard: View {
+    let onShopNow: () -> Void
     @State private var isPressed: Bool = false
     @State private var shimmer: Bool = false
 
@@ -217,13 +231,11 @@ private struct WeeklyDropSpotlightCard: View {
                     .foregroundStyle(.secondary)
 
                 HStack {
-                    Text("$24.00")
+                    Text("$10")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(TBTheme.deepSky)
                     Spacer()
-                    Button {
-                        // TODO: Hook to product detail or add-to-cart
-                    } label: {
+                    Button(action: onShopNow) {
                         ZStack {
                             Label("Shop now", systemImage: "sparkles")
                                 .font(.tbBodyStrong)
@@ -313,8 +325,3 @@ private struct PremiumGlassBadge: View {
     }
 }
 
-#Preview {
-    NavigationStack {
-        WeeklyDropView()
-    }
-}

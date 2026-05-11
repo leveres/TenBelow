@@ -6,36 +6,45 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @Environment(\.openURL) private var openURL
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
     @AppStorage("userRole") private var userRole = ""
     @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
     @AppStorage("sellerAccountCreated") private var sellerAccountCreated = false
-    @State private var showSellerMembershipSheet = false
-
+    #if DEBUG
+    @AppStorage(AppConstants.testingModeUserDefaultsKey) private var testingModeEnabled = false
+    @AppStorage("buyerDropPreviewMode") private var buyerDropPreviewMode = false
+    #endif
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    SnowfallTitleContainer(cornerRadius: 24, horizontalPadding: 12, verticalPadding: 10, flakeCount: 68) {
+                    SnowfallTitleContainer(
+                        cornerRadius: 26,
+                        horizontalPadding: 8,
+                        verticalPadding: 14,
+                        flakeCount: 78,
+                        effectHorizontalInset: 18,
+                        effectVerticalInset: 16
+                    ) {
                         Image("SettingsTitle")
                             .resizable()
                             .scaledToFit()
-                            .frame(height: 52)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 108)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 4, trailing: 12))
                 }
 
                 if userRole == "seller" {
                     Section("Seller membership") {
-                        SellerMembershipSummaryCard {
-                            showSellerMembershipSheet = true
+                        NavigationLink {
+                            SellerSubscriptionView()
+                                .environmentObject(sellerSubscription)
+                        } label: {
+                            Label("Manage seller membership", systemImage: "creditcard")
                         }
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                        .listRowSeparator(.hidden)
                     }
                 }
 
@@ -46,11 +55,19 @@ struct SettingsView: View {
                         Label("Notification settings", systemImage: "bell.badge")
                     }
 
-                    if sellerAccountCreated, userRole != "seller" {
-                        Button {
-                            switchAppMode(to: "seller", launchTab: 1)
-                        } label: {
-                            Label("Switch to seller mode", systemImage: "arrow.triangle.2.circlepath.circle.fill")
+                    if userRole != "seller" {
+                        if sellerAccountCreated {
+                            Button {
+                                switchAppMode(to: "seller", launchTab: 1)
+                            } label: {
+                                Label("Switch to seller mode", systemImage: "arrow.triangle.2.circlepath.circle.fill")
+                            }
+                        } else {
+                            NavigationLink {
+                                SellOnTenBelowLandingView()
+                            } label: {
+                                Label("Become a seller", systemImage: "storefront")
+                            }
                         }
                     }
 
@@ -61,31 +78,45 @@ struct SettingsView: View {
                             Label("Switch to buyer mode", systemImage: "arrow.triangle.2.circlepath.circle")
                         }
                     }
-
-                    NavigationLink {
-                        SellOnTenBelowGatewayView()
-                    } label: {
-                        Label(sellerAccountCreated ? "Manage seller account" : "Become a seller", systemImage: "storefront")
-                    }
                 }
 
                 Section("Legal") {
-                    Button("View terms of service") {
-                        openURL(AppConstants.termsURL)
+                    NavigationLink("View terms of service") {
+                        LegalDocumentView(document: .termsOfService)
                     }
 
-                    Button("View IP policy") {
-                        openURL(AppConstants.ipPolicyURL)
+                    NavigationLink("View privacy policy") {
+                        LegalDocumentView(document: .privacyPolicy)
                     }
 
-                    Button("View DMCA policy") {
-                        openURL(AppConstants.dmcaURL)
+                    NavigationLink("View DMCA policy") {
+                        LegalDocumentView(document: .dmcaPolicy)
                     }
 
-                    Button("View seller agreement") {
-                        openURL(AppConstants.sellerAgreementURL)
+                    NavigationLink("View seller agreement") {
+                        LegalDocumentView(document: .sellerAgreement)
+                    }
+
+                    NavigationLink("View exchange policy") {
+                        LegalDocumentView(document: .exchangePolicy)
                     }
                 }
+
+                #if DEBUG
+                Section {
+                    Toggle("Testing mode (relaxed checkout)", isOn: $testingModeEnabled)
+                    Toggle("Sample Drop lineup (Drop tab)", isOn: $buyerDropPreviewMode)
+                    DebugBackendURLField()
+                } header: {
+                    Text("Developer")
+                } footer: {
+                    Text(
+                        "Testing mode allows checkout and related flows without a live backend URL and Stripe publishable key, using simulated behavior where applicable. "
+                            + "For a real iPhone, run the full backend on your Mac and set “Backend URL (this device)” to http://YOUR_MAC_LAN_IP:3000 (same Wi‑Fi). "
+                            + "Match BACKEND_URL in TenBelow/tenbelow-backend/.env to that URL so /media links resolve."
+                    )
+                }
+                #endif
             }
             .contentMargins(.top, 4, for: .scrollContent)
             .background(TBTheme.cloudWhite)
@@ -93,10 +124,6 @@ struct SettingsView: View {
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .sheet(isPresented: $showSellerMembershipSheet) {
-                SellerSubscriptionView()
-                    .environmentObject(sellerSubscription)
-            }
             .task(id: userRole) {
                 guard userRole == "seller" else { return }
                 await sellerSubscription.refresh()
@@ -110,19 +137,41 @@ struct SettingsView: View {
     }
 }
 
-#Preview {
-    let events = CommerceEventStore()
-    let engagement = BuyerEngagementStore(eventStore: events)
-    let products = LocalProductStore(eventStore: events)
-    let orders = OrderStore(eventStore: events)
-    return SettingsView()
-        .environmentObject(
-            NotificationStore(
-                eventStore: events,
-                buyerEngagement: engagement,
-                localProducts: products,
-                orderStore: orders
-            )
-        )
-        .environmentObject(SellerSubscriptionStore.previewInactive)
+#if DEBUG
+private struct DebugBackendURLField: View {
+    @AppStorage(AppConstants.debugBackendBaseURLOverrideKey) private var overrideURL = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Backend URL (this device)")
+                .font(.subheadline.weight(.semibold))
+
+            TextField("http://192.168.1.12:3000", text: $overrideURL)
+                #if os(iOS)
+                .keyboardType(.URL)
+                .textContentType(.URL)
+                #endif
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            Button("Clear override (use Xcode plist URL)") {
+                overrideURL = ""
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.borderless)
+
+            if let active = AppConstants.backendBaseURL {
+                Text("Active: \(active.absoluteString)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No backend URL — enable Testing mode or set an override.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
 }
+#endif
+

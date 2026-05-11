@@ -29,6 +29,8 @@ struct Product: Identifiable, Hashable {
     let durabilityNote: String
     let careWarnings: [String]
     let shipsInDays: ClosedRange<Int>
+    let createdAt: Date
+    let previousPriceCents: Int?
 
     init(
         id: String,
@@ -47,7 +49,9 @@ struct Product: Identifiable, Hashable {
         productionNote: String,
         durabilityNote: String,
         careWarnings: [String],
-        shipsInDays: ClosedRange<Int>
+        shipsInDays: ClosedRange<Int>,
+        createdAt: Date = .now,
+        previousPriceCents: Int? = nil
     ) {
         self.id = id
         self.sellerId = sellerId
@@ -66,24 +70,82 @@ struct Product: Identifiable, Hashable {
         self.durabilityNote = durabilityNote
         self.careWarnings = careWarnings
         self.shipsInDays = shipsInDays
+        self.createdAt = createdAt
+        self.previousPriceCents = previousPriceCents
     }
 }
 
 extension Product {
+    var isRecentlyAdded: Bool {
+        Date.now.timeIntervalSince(createdAt) <= 60 * 60 * 24 * 7
+    }
+
+    var hasPriceDrop: Bool {
+        guard let previousPriceCents else { return false }
+        return previousPriceCents > priceCents
+    }
+
+    var hasCreatorClip: Bool {
+        demoVideoURL != nil
+    }
+
+    var hasMakerVideo: Bool {
+        productionPreviewURL != nil
+    }
+
     var primaryImageReference: String? {
         imageNames.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     static func mediaURL(for reference: String?) -> URL? {
-        guard let trimmed = reference?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !trimmed.isEmpty,
-              let url = URL(string: trimmed),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme)
-        else {
-            return nil
+        resolvedHTTPMediaURL(for: reference, allowFileURLs: false)
+    }
+
+    /// Same references as `imageNames` / `imageURLStrings`, but includes local `file://` URLs so previews can load before upload.
+    static func previewMediaURL(for reference: String?) -> URL? {
+        resolvedHTTPMediaURL(for: reference, allowFileURLs: true)
+    }
+
+    /// Builds a loadable URL for catalog image references: absolute http(s)/file, or host-relative `/media/...` against `AppConstants.backendBaseURL`.
+    /// Rewrites `localhost` / `127.0.0.1` to the configured API host when they differ (common when the API base uses a LAN IP but stored URLs still say localhost).
+    private static func resolvedHTTPMediaURL(for reference: String?, allowFileURLs: Bool) -> URL? {
+        let trimmed = reference?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return nil }
+
+        if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() {
+            if ["http", "https"].contains(scheme) {
+                return rewriteLocalhostMediaURLIfNeeded(url)
+            }
+            if allowFileURLs && scheme == "file" {
+                return url
+            }
         }
-        return url
+
+        if trimmed.hasPrefix("/"), let base = AppConstants.backendBaseURL,
+           let absolute = URL(string: trimmed, relativeTo: base)?.absoluteURL {
+            return rewriteLocalhostMediaURLIfNeeded(absolute)
+        }
+
+        return nil
+    }
+
+    private static func rewriteLocalhostMediaURLIfNeeded(_ url: URL) -> URL {
+        guard let configured = AppConstants.backendBaseURL,
+              let configuredHost = configured.host?.lowercased(),
+              let urlHost = url.host?.lowercased(),
+              ["localhost", "127.0.0.1"].contains(urlHost),
+              configuredHost != urlHost
+        else {
+            return url
+        }
+
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url
+        }
+        components.scheme = configured.scheme
+        components.host = configured.host
+        components.port = configured.port
+        return components.url ?? url
     }
 }
 

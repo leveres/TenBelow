@@ -51,8 +51,16 @@ struct ProductDetailView: View {
         return storefrontProducts.filter { $0.sellerId == product.sellerId }
     }
 
+    private var featuredVideoURL: URL? {
+        product.demoVideoURL
+    }
+
+    private var featuredVideoLabel: String {
+        "Creator clip"
+    }
+
     private var mediaCount: Int {
-        product.imageNames.count + (product.demoVideoURL == nil ? 0 : 1)
+        product.imageNames.count + (featuredVideoURL == nil ? 0 : 1)
     }
 
     private var isInCart: Bool {
@@ -91,6 +99,10 @@ struct ProductDetailView: View {
         guard let order = deliveredOrderForRating else { return false }
         let normalizedBuyerEmail = order.buyerEmail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return !normalizedBuyerEmail.isEmpty
+    }
+
+    private var hasFeaturedVideo: Bool {
+        featuredVideoURL != nil
     }
 
     private var displayedReviews: [ProductReview] {
@@ -226,7 +238,7 @@ struct ProductDetailView: View {
                     productDetailImagePage(name: name, index: index)
                 }
 
-                if let url = product.demoVideoURL {
+                if let url = featuredVideoURL {
                     productDetailVideoPage(url: url)
                 }
             }
@@ -329,8 +341,8 @@ struct ProductDetailView: View {
                 .accessibilityLabel("View media full screen")
             }
 
-            if product.demoVideoURL != nil, selectedMediaIndex == product.imageNames.count {
-                MediaKindPill(label: "Video")
+            if featuredVideoURL != nil, selectedMediaIndex == product.imageNames.count {
+                MediaKindPill(label: featuredVideoLabel)
             }
         }
         .padding(16)
@@ -405,6 +417,10 @@ struct ProductDetailView: View {
                                 .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
                         )
                         .shadow(color: .black.opacity(0.03), radius: 10, y: 5)
+                    }
+
+                    if hasFeaturedVideo {
+                        watchHowItsMadeSection
                     }
 
                     // Durability note
@@ -608,6 +624,47 @@ struct ProductDetailView: View {
             }
         }
     }
+
+    private var watchHowItsMadeSection: some View {
+        GlassCard(cornerRadius: 22, showsBorder: false) {
+            Button {
+                selectedMediaIndex = product.imageNames.count
+                showFullscreenMedia = true
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(TBTheme.skyLight.opacity(0.32))
+                            .frame(width: 48, height: 48)
+
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(TBTheme.icyBlue)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(featuredVideoLabel == "Creator clip" ? "Watch Creator Clip" : "Watch Maker Video")
+                            .font(.tbHeadline)
+                            .foregroundStyle(TBTheme.deepSky)
+
+                        Text("Open the product \(featuredVideoLabel.lowercased()) in full screen.")
+                            .font(.tbCaption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.8))
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(featuredVideoLabel == "Creator clip" ? "Watch creator clip" : "Watch maker video")
+            .accessibilityHint("Opens the product video in full screen.")
+        }
+    }
+
 }
 
 // MARK: - Full screen product media (photos + demo video)
@@ -731,39 +788,10 @@ private struct StickyBuyBar: View {
     let action: () -> Void
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 14) {
-                productInfo
-                Spacer(minLength: 12)
-                buyButton
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                productInfo
-                buyButton
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(.white.opacity(0.72), lineWidth: 0.8)
-        )
-        .shadow(color: .black.opacity(0.04), radius: 12, y: 6)
-    }
-
-    private var productInfo: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(productName)
-                .font(.tbProductTitleSM)
-                .tbProductNameTitleStyle()
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-
-            Text(priceText)
-                .font(.tbProductPriceSM)
-                .foregroundStyle(.primary.opacity(0.82))
-        }
+        // Keep add-to-cart affordance consistent with list rows: a single long capsule button,
+        // rather than a floating card that can feel like a modal the first time.
+        buyButton
+            .frame(maxWidth: .infinity)
     }
 
     private var buyButton: some View {
@@ -771,10 +799,15 @@ private struct StickyBuyBar: View {
             HStack(spacing: 6) {
                 Image(systemName: isAdded ? "checkmark" : "cart.badge.plus")
                     .font(.system(size: 13, weight: .semibold))
-                Text(isAdded ? "Added" : "Add to Cart")
+                Text(buttonTitle)
                     .font(.body.weight(.semibold))
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Text("• \(priceText)")
+                    .font(.body.weight(.semibold))
+                    .opacity(0.92)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
@@ -789,6 +822,10 @@ private struct StickyBuyBar: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private var buttonTitle: String {
+        isAdded ? "Added" : "Add to Cart"
     }
 }
 
@@ -964,25 +1001,12 @@ private struct SellerAttributionRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.white.opacity(0.96), TBTheme.skyLight.opacity(0.5)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Circle()
-                            .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 0.8)
-                    )
-
-                Text(initials)
-                    .font(.tbMeta)
-                    .foregroundStyle(TBTheme.deepSky)
-            }
+            avatar
+                .frame(width: 40, height: 40)
+                .overlay(
+                    Circle()
+                        .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 0.8)
+                )
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
@@ -1019,9 +1043,34 @@ private struct SellerAttributionRow: View {
         )
     }
 
-    private var initials: String {
-        let chars = seller.displayName.split(separator: " ").prefix(2).compactMap { $0.first }
-        return chars.isEmpty ? "TB" : String(chars)
+    @ViewBuilder
+    private var avatar: some View {
+        if let avatarURL = seller.avatarURL {
+            StorefrontImageView(reference: avatarURL.absoluteString, contentMode: .fill) {
+                avatarPlaceholder
+            }
+            .clipShape(Circle())
+        } else {
+            avatarPlaceholder
+        }
+    }
+
+    private var avatarPlaceholder: some View {
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [.white.opacity(0.96), TBTheme.skyLight.opacity(0.5)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Image(systemName: "person.crop.circle.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(TBTheme.deepSky.opacity(0.7))
+        }
     }
 }
 
@@ -1167,14 +1216,3 @@ private struct AddedToCartToast: View {
     }
 }
 
-#Preview {
-    let events = CommerceEventStore()
-    NavigationStack {
-        ProductDetailView(product: MockData.products[0])
-    }
-    .environmentObject(CartStore())
-    .environmentObject(CatalogStore())
-    .environmentObject(BuyerEngagementStore(eventStore: events))
-    .environmentObject(LocalProductStore(eventStore: events))
-    .environmentObject(OrderStore(eventStore: events))
-}

@@ -24,6 +24,7 @@ struct AppRootView: View {
     @AppStorage("buyerEmail") private var buyerEmail = ""
     @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
     @AppStorage("buyerCheckoutPreference") private var buyerCheckoutPreference = "guest"
+    @AppStorage("buyerHasPlacedOrder") private var buyerHasPlacedOrder = false
     #endif
 
     var body: some View {
@@ -40,8 +41,8 @@ struct AppRootView: View {
                 .zIndex(1)
             }
         }
-        .animation(.easeInOut(duration: 0.35), value: hasSeenOnboarding)
-        .task(id: cartSyncFingerprint) {
+        .task(id: cartSyncTaskKey) {
+            guard !showSplash else { return }
             let availableProducts = resolvedStorefrontProducts(
                 remoteProducts: catalog.products,
                 fallbackProducts: localProducts.products
@@ -50,6 +51,7 @@ struct AppRootView: View {
         }
         #if os(iOS)
         .task(id: "\(userRole)|\(sellerSellerId)|\(buyerEmail)|\(buyerAccountCreated)") {
+            await MarketplaceAuthSession.syncAfterIdentityChange()
             await PushDeviceRegistration.syncAfterIdentityChange()
         }
         .task(id: notificationPromptFingerprint) {
@@ -84,14 +86,8 @@ struct AppRootView: View {
         }
     }
 
-    private var cartSyncFingerprint: String {
-        let remoteFingerprint = catalog.products
-            .map { "\($0.id):\($0.priceCents):\($0.isActive):\($0.isApproved)" }
-            .joined(separator: "|")
-        let fallbackFingerprint = localProducts.products
-            .map { "\($0.id):\($0.priceCents)" }
-            .joined(separator: "|")
-        return "\(remoteFingerprint)#\(fallbackFingerprint)"
+    private var cartSyncTaskKey: String {
+        "\(showSplash)|\(catalog.contentRevision)|\(localProducts.productsRevision)"
     }
 
     #if os(iOS)
@@ -102,27 +98,13 @@ struct AppRootView: View {
             return sellerAccountCreated && !sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
 
-        if buyerAccountCreated {
-            return !buyerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-
-        return buyerCheckoutPreference == "guest"
+        return buyerHasPlacedOrder && !buyerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var notificationPromptFingerprint: String {
-        "\(hasSeenOnboarding)|\(userRole)|\(sellerAccountCreated)|\(sellerSellerId)|\(buyerAccountCreated)|\(buyerEmail)|\(buyerCheckoutPreference)"
+        "\(hasSeenOnboarding)|\(userRole)|\(sellerAccountCreated)|\(sellerSellerId)|\(buyerAccountCreated)|\(buyerEmail)|\(buyerCheckoutPreference)|\(buyerHasPlacedOrder)"
     }
     #endif
 }
 
-#Preview("Main App") {
-    AppRootView()
-        .environmentObject(CartStore())
-        .environmentObject(CatalogStore())
-        .environmentObject(LocalProductStore(eventStore: CommerceEventStore()))
-        .environmentObject(SellerSubscriptionStore.previewActive)
-}
 
-#Preview("Onboarding") {
-    OnboardingView()
-}

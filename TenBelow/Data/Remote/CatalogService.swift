@@ -11,10 +11,11 @@ enum CatalogService {
     }
 
     /// Fetch → Cache → Fallback. Returns whether data came from the live server.
-    static func loadProducts() async -> CatalogLoadResult {
+    /// - Parameter urlSession: Injected for tests (e.g. stubbed `URLProtocol`); production uses `URLSession.tenBelow`.
+    static func loadProducts(urlSession: URLSession = .tenBelow) async -> CatalogLoadResult {
         // 1. Try remote
         if AppConstants.isBackendConfigured {
-            if let response = try? await URLSession.tenBelow.decode(
+            if let response = try? await urlSession.decode(
                 CatalogResponse.self,
                 from: catalogURL
             ) {

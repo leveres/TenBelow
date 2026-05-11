@@ -9,7 +9,7 @@ import UIKit
 #endif
 
 struct RolePickerView: View {
-    @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var catalog: CatalogStore
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("userRole") private var userRole = ""
     @AppStorage("buyerCheckoutPreference") private var buyerCheckoutPreference = BuyerCheckoutPreference.guest.rawValue
@@ -21,6 +21,7 @@ struct RolePickerView: View {
     @AppStorage("sellerBusinessName") private var sellerBusinessName = ""
     @AppStorage("sellerAccountCreated") private var sellerAccountCreated = false
     @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
+    private let startsInSellerAccount: Bool
     @State private var step: RolePickerStep = .roleSelection
     @State private var buyerNameInput = ""
     @State private var buyerEmailInput = ""
@@ -29,11 +30,14 @@ struct RolePickerView: View {
     @State private var sellerBusinessNameInput = ""
     @State private var buyerErrorMessage: String?
     @State private var sellerErrorMessage: String?
-    @State private var sellerKeyboardHeight: CGFloat = 0
     @State private var isCreatingBuyerAccount = false
     @State private var isCreatingSellerAccount = false
-    @State private var isTransitioningToOnboarding = false
     @FocusState private var focusedSellerField: SellerAccountFieldFocus?
+
+    init(startInSellerAccount: Bool = false) {
+        startsInSellerAccount = startInSellerAccount
+        _step = State(initialValue: startInSellerAccount ? .sellerAccount : .roleSelection)
+    }
 
     var body: some View {
         ZStack {
@@ -68,12 +72,9 @@ struct RolePickerView: View {
                     }
                 }
             }
-            .opacity(isTransitioningToOnboarding ? 0.12 : 1.0)
-            .blur(radius: isTransitioningToOnboarding ? 10 : 0)
-            .scaleEffect(isTransitioningToOnboarding ? 1.015 : 1.0)
-            .allowsHitTesting(!(isCreatingBuyerAccount || isCreatingSellerAccount || isTransitioningToOnboarding))
+            .allowsHitTesting(!(isCreatingBuyerAccount || isCreatingSellerAccount))
 
-            if isCreatingBuyerAccount || isCreatingSellerAccount || isTransitioningToOnboarding {
+            if isCreatingBuyerAccount || isCreatingSellerAccount {
                 AppLoadingOverlay(
                     title: loadingOverlayTitle,
                     subtitle: loadingOverlaySubtitle
@@ -83,24 +84,15 @@ struct RolePickerView: View {
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: step)
-        .animation(.spring(response: 0.55, dampingFraction: 0.9), value: isTransitioningToOnboarding)
     }
 
     private var loadingOverlayTitle: String {
-        if isTransitioningToOnboarding {
-            return "Loading Onboarding"
-        }
-
         return isCreatingSellerAccount ? "Creating Seller Account" : "Setting Up Your Account"
     }
 
     private var loadingOverlaySubtitle: String {
-        if isTransitioningToOnboarding {
-            return "Getting your welcome experience ready."
-        }
-
         return isCreatingSellerAccount
-            ? "Preparing your seller profile and onboarding."
+            ? "Saving your seller account."
             : "Saving your buyer details and preferences."
     }
 
@@ -239,6 +231,7 @@ struct RolePickerView: View {
 
             VStack(spacing: 8) {
                 Button {
+                    dismissSellerKeyboard()
                     Task { await createSellerAccount() }
                 } label: {
                     if isCreatingSellerAccount {
@@ -266,50 +259,26 @@ struct RolePickerView: View {
     }
 
     private var sellerAccountScreen: some View {
-        GeometryReader { _ in
-            let keyboardLift = min(max(sellerKeyboardHeight - 34, 0) * 0.24, 76)
+        VStack(spacing: 0) {
+            Spacer().frame(height: 18)
 
-            VStack(spacing: 0) {
-                Spacer().frame(height: 18)
+            sellerAccountHeader
 
-                sellerAccountHeader
+            VStack(spacing: 10) {
+                sellerAccountContent
+            }
+            .padding(.top, 14)
 
-                VStack(spacing: 10) {
-                    compactSellerSetupCard
-                    sellerAccountContent
-                }
-                .padding(.top, 14)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, sellerKeyboardHeight > 0 ? 12 : 0)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .offset(y: sellerKeyboardHeight > 0 ? -keyboardLift : 0)
-            .animation(.spring(response: 0.34, dampingFraction: 0.88), value: sellerKeyboardHeight)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                dismissSellerKeyboard()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-                updateSellerKeyboard(with: notification)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-                    sellerKeyboardHeight = 0
-                }
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button(focusedSellerField == .businessName ? "Done" : "Next") {
-                        advanceSellerField()
-                    }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(TBTheme.deepSky)
-                }
-            }
+            Spacer(minLength: 0)
         }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            dismissSellerKeyboard()
+        }
+        // Keep the screen from sliding up with the keyboard; users scroll the form by focus if needed.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private var sellerAccountHeader: some View {
@@ -332,72 +301,6 @@ struct RolePickerView: View {
                 )
                 .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: 560)
-    }
-
-    private var compactSellerSetupCard: some View {
-        HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(.white.opacity(0.95))
-                    .frame(width: 34, height: 34)
-
-                Image(systemName: "storefront")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(TBTheme.deepSky)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Simple setup")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(TBTheme.deepSky)
-
-                Text("Create your seller account first. Membership is separate and can be activated when you're ready to publish.")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.primary.opacity(0.82))
-                    .lineSpacing(4)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    .white.opacity(0.44),
-                                    .white.opacity(0.18),
-                                    TBTheme.skyLight.opacity(0.10)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            .white.opacity(0.90),
-                            .white.opacity(0.36),
-                            TBTheme.skyBlue.opacity(0.18)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        )
-        .shadow(color: .white.opacity(0.18), radius: 4, y: -1)
-        .shadow(color: TBTheme.deepSky.opacity(0.08), radius: 14, y: 6)
         .frame(maxWidth: 560)
     }
 
@@ -609,6 +512,10 @@ struct RolePickerView: View {
     }
 
     private func createSellerAccount() async {
+        await MainActor.run {
+            dismissSellerKeyboard()
+        }
+
         let trimmedSellerId = normalizedSellerID(sellerIdInput)
         let trimmedEmail = sellerEmailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let trimmedBusinessName = sellerBusinessNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -637,41 +544,67 @@ struct RolePickerView: View {
         }
 
         do {
-            let response = try await SellerAPI.createAccount(
+            // Membership is purchased in-app via StoreKit (`SellerSubscriptionStore`). We do not open Stripe Connect onboarding here—that flow remains available from the seller dashboard for payouts when needed.
+            try await SellerAPI.createAccount(
                 sellerId: trimmedSellerId,
                 email: trimmedEmail,
                 businessName: trimmedBusinessName.isEmpty ? nil : trimmedBusinessName
             )
 
-            await MainActor.run {
-                sellerId = trimmedSellerId
-                sellerEmail = trimmedEmail
-                sellerBusinessName = trimmedBusinessName
-                sellerAccountCreated = true
-                isCreatingSellerAccount = false
-            }
-
-            await MainActor.run {
-                transitionToOnboarding(as: "seller")
-            }
-
-            if let url = URL(string: response.onboardingUrl) {
-                await MainActor.run {
-                    openURL(url)
-                }
-            }
+            await applyCreatedSellerRegistration(
+                trimmedSellerId: trimmedSellerId,
+                trimmedEmail: trimmedEmail,
+                trimmedBusinessName: trimmedBusinessName,
+                useOfflinePreview: false
+            )
         } catch {
             await MainActor.run {
-                sellerId = trimmedSellerId
-                sellerEmail = trimmedEmail
-                sellerBusinessName = trimmedBusinessName
-                sellerAccountCreated = true
-                sellerPreviewMode = true
-                sellerErrorMessage = nil
+                sellerAccountCreated = false
+                sellerPreviewMode = false
+                #if DEBUG
+                let localhostHint: String = {
+                    guard let host = AppConstants.backendBaseURL?.host?.lowercased() else { return "" }
+                    if host == "localhost" || host == "127.0.0.1" {
+                        return " On a real iPhone, open Settings → Developer and set Backend URL to http://<your Mac’s LAN IP>:3000, or use the same Wi‑Fi and your Mac’s IP (not localhost)."
+                    }
+                    return ""
+                }()
+                #else
+                let localhostHint = ""
+                #endif
+                sellerErrorMessage = "We couldn't create your seller account right now. Connect the backend and try again. \(error.localizedDescription)\(localhostHint)"
                 isCreatingSellerAccount = false
-                transitionToOnboarding(as: "seller")
             }
         }
+    }
+
+    private func applyCreatedSellerRegistration(
+        trimmedSellerId: String,
+        trimmedEmail: String,
+        trimmedBusinessName: String,
+        useOfflinePreview: Bool
+    ) async {
+        let starterProfile = SellerProfile.starterProfile(
+            sellerId: trimmedSellerId,
+            businessName: trimmedBusinessName
+        )
+
+        await MainActor.run {
+            sellerId = trimmedSellerId
+            sellerEmail = trimmedEmail
+            sellerBusinessName = trimmedBusinessName
+            sellerAccountCreated = true
+            sellerPreviewMode = useOfflinePreview
+            sellerErrorMessage = nil
+            starterProfile.storeLocally()
+            catalog.upsertSellerProfile(starterProfile)
+            isCreatingSellerAccount = false
+            userRole = "seller"
+            hasSeenOnboarding = false
+        }
+
+        await MarketplaceAuthSession.syncAfterIdentityChange()
+        await PushDeviceRegistration.syncAfterIdentityChange()
     }
 
     private func isValidEmail(_ email: String) -> Bool {
@@ -692,18 +625,8 @@ struct RolePickerView: View {
     }
 
     private func transitionToOnboarding(as role: String) {
-        guard !isTransitioningToOnboarding else { return }
-
-        withAnimation(.easeInOut(duration: 0.22)) {
-            isTransitioningToOnboarding = true
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.76) {
-            withAnimation(.easeInOut(duration: 0.28)) {
-                userRole = role
-                hasSeenOnboarding = false
-            }
-        }
+        userRole = role
+        hasSeenOnboarding = false
     }
 
     private func roleCard(icon: String, title: String, description: String, action: @escaping () -> Void) -> some View {
@@ -1025,10 +948,6 @@ struct RolePickerView: View {
         .padding(.vertical, 12)
     }
 
-    private func advanceSellerField() {
-        advanceSellerField(from: focusedSellerField)
-    }
-
     private func advanceSellerField(from field: SellerAccountFieldFocus?) {
         switch field {
         case .sellerId:
@@ -1046,30 +965,6 @@ struct RolePickerView: View {
         focusedSellerField = nil
         #if os(iOS)
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        #endif
-    }
-
-    private func updateSellerKeyboard(with notification: Notification) {
-        #if os(iOS)
-        guard
-            let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-        else {
-            return
-        }
-
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let screenHeight = (scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)?
-            .screen.bounds.height ?? 0
-        let overlap: CGFloat
-        if screenHeight > 0 {
-            overlap = max(0, screenHeight - endFrame.minY)
-        } else {
-            // No foreground scene (rare): fall back to visible keyboard height.
-            overlap = max(0, endFrame.height)
-        }
-        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-            sellerKeyboardHeight = overlap
-        }
         #endif
     }
 
@@ -1189,6 +1084,3 @@ private enum SellerAccountFieldFocus: Hashable {
     case businessName
 }
 
-#Preview {
-    RolePickerView()
-}

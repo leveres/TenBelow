@@ -20,7 +20,9 @@ struct MainTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var notifications: NotificationStore
+    @EnvironmentObject private var orderStore: OrderStore
     @AppStorage("userRole") private var userRole = ""
+    @AppStorage("sellerSellerId") private var sellerSellerId = ""
     @AppStorage("shouldShowHomeEntrySplash") private var shouldShowHomeEntrySplash = false
     @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
@@ -29,6 +31,9 @@ struct MainTabView: View {
     @State private var hasMetMinimumEntrySplashTime = false
     @State private var selectedTab: MainTab = .home
     @State private var lastCatalogRefresh = Date.distantPast
+    @State private var lastSellerOrdersRefresh = Date.distantPast
+    @State private var hasPerformedInitialRefresh = false
+    @State private var hasCompletedInitialLoad = false
 
     var body: some View {
         ZStack {
@@ -47,7 +52,12 @@ struct MainTabView: View {
             }
         }
         .animation(.easeInOut(duration: 0.5), value: shouldDisplayLoadingOverlay)
-        .task { await refreshCatalog(force: true) }
+        .task {
+            guard !hasPerformedInitialRefresh else { return }
+            hasPerformedInitialRefresh = true
+            await refreshCatalog(force: true)
+            hasCompletedInitialLoad = true
+        }
         .onAppear {
             if shouldShowHomeEntrySplash {
                 shouldShowHomeEntrySplash = false
@@ -75,6 +85,10 @@ struct MainTabView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await refreshCatalog() }
+            Task { await refreshSellerOrdersForTabBadgeIfNeeded() }
+        }
+        .task(id: "\(userRole)|\(sellerSellerId)") {
+            await refreshSellerOrdersForTabBadgeIfNeeded()
         }
     }
 
@@ -110,9 +124,12 @@ struct MainTabView: View {
                 .tag(MainTab.drop)
                 .tabItem { Label("Drop", systemImage: "flame") }
 
-            OrdersView()
+            NavigationStack {
+                OrdersView()
+            }
                 .tag(MainTab.orders)
                 .tabItem { Label("Orders", systemImage: "shippingbox") }
+                .badge(ordersTabBadge)
 
             SettingsView()
                 .tag(MainTab.settings)
@@ -128,12 +145,43 @@ struct MainTabView: View {
         return "\(min(unread, 99))"
     }
 
+    /// Seller-only: orders that still need fulfillment steps (start production, ship, or mark delivered).
+    private var ordersTabBadge: String? {
+        guard userRole == "seller" else { return nil }
+        let count = sellerOrdersNeedingAttentionCount
+        guard count > 0 else { return nil }
+        return "\(min(count, 99))"
+    }
+
+    private var sellerOrdersNeedingAttentionCount: Int {
+        let sid = sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sid.isEmpty else { return 0 }
+
+        return orderStore.orders.filter { order in
+            order.shipments.contains { shipment in
+                guard shipment.sellerId == sid else { return false }
+                return orderStore.nextAction(for: shipment, order: order) != nil
+            }
+        }.count
+    }
+
+    @MainActor
+    private func refreshSellerOrdersForTabBadgeIfNeeded() async {
+        guard userRole == "seller" else { return }
+        let sid = sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sid.isEmpty else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastSellerOrdersRefresh) >= 45 else { return }
+        lastSellerOrdersRefresh = now
+        await orderStore.refreshSellerOrders(sellerId: sid)
+    }
+
     private var shouldDisplayLoadingOverlay: Bool {
         if isEntrySplashActive {
             return true
         }
 
-        return showsLoadingOverlay && catalog.isLoading
+        return showsLoadingOverlay && !hasCompletedInitialLoad && catalog.isLoading
     }
 
     private func refreshCatalog(force: Bool = false) async {
@@ -145,25 +193,16 @@ struct MainTabView: View {
     }
 
     private func dismissEntrySplashIfReady() {
-        guard isShowingEntrySplash, hasMetMinimumEntrySplashTime, !catalog.isLoading else { return }
+        guard isShowingEntrySplash, hasMetMinimumEntrySplashTime else { return }
+
+        let launchTab = MainTab(rawValue: pendingLaunchTab) ?? .home
 
         withAnimation(.easeInOut(duration: 0.26)) {
             isShowingEntrySplash = false
-        }
-
-        if let launchTab = MainTab(rawValue: pendingLaunchTab) {
             selectedTab = launchTab
-        } else {
-            selectedTab = .home
         }
 
         pendingLaunchTab = MainTab.home.rawValue
     }
 }
 
-#Preview {
-    MainTabView()
-        .environmentObject(CartStore())
-        .environmentObject(CatalogStore())
-        .environmentObject(SellerSubscriptionStore.previewActive)
-}

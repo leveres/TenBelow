@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TenBelow Admin Review</title>
+    <link rel="stylesheet" href="/admin/assets/admin-review.css?v=3" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Internal Admin</p>
+          <h1>Review Queue</h1>
+          <p class="subcopy">
+            Review submitted seller listings, preview media, and monitor incoming
+            exchange requests from one admin surface.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <label id="adminKeyField" class="field">
+            <span>Admin key</span>
+            <input id="adminKey" type="password" placeholder="Optional if ADMIN_API_KEY is unset" />
+          </label>
+          <button id="loginButton" class="secondary-button" type="button">Unlock admin</button>
+          <button id="logoutButton" class="secondary-button hidden" type="button">Sign out</button>
+          <label class="field field-small">
+            <span>Status</span>
+            <select id="statusFilter">
+              <option value="submitted">Submitted</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="archived">Archived</option>
+              <option value="">All non-approved</option>
+            </select>
+          </label>
+          <button id="refreshButton" class="primary-button" type="button">Refresh queue</button>
+        </div>
+      </header>
+
+      <section class="queue-summary">
+        <div class="summary-card">
+          <span class="summary-label">Visible queue</span>
+          <strong id="queueCount">0</strong>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">Current filter</span>
+          <strong id="queueFilterLabel">Submitted</strong>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">Status</span>
+          <strong id="feedbackText">Ready</strong>
+        </div>
+      </section>
+
+      <section class="queue-section">
+        <div class="audit-heading">
+          <div>
+            <h2>Product Review Queue</h2>
+            <p class="audit-subcopy">Approve, reject, or archive submitted listings from one compact queue.</p>
+          </div>
+        </div>
+
+        <section id="emptyState" class="empty-state hidden">
+          <h2>No products in this queue</h2>
+          <p>Submitted products will appear here as soon as sellers send them for review.</p>
+        </section>
+
+        <section id="queueGrid" class="queue-grid"></section>
+      </section>
+
+      <section class="exchange-section">
+        <div class="audit-heading">
+          <div>
+            <h2>Exchange Requests</h2>
+            <p class="audit-subcopy">Read-only Phase 1 queue with buyer proof, timeline, and eligibility context.</p>
+          </div>
+          <div class="exchange-actions">
+            <label class="field field-small">
+              <span>Status</span>
+              <select id="exchangeStatusFilter">
+                <option value="">All</option>
+                <option value="awaiting_buyer_proof">Awaiting proof</option>
+                <option value="submitted">Submitted</option>
+                <option value="under_review">Under review</option>
+                <option value="approved">Approved</option>
+                <option value="denied">Denied</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </label>
+            <button id="refreshExchangeButton" class="secondary-button" type="button">Refresh exchanges</button>
+          </div>
+        </div>
+
+        <section class="queue-summary queue-summary-tight">
+          <div class="summary-card">
+            <span class="summary-label">Exchange queue</span>
+            <strong id="exchangeQueueCount">0</strong>
+          </div>
+        </section>
+
+        <div class="exchange-layout">
+          <div>
+            <div id="exchangeQueueEmpty" class="empty-state hidden">
+              <h2>No exchange requests</h2>
+              <p>Buyer exchange requests will appear here after submission.</p>
+            </div>
+            <div id="exchangeQueueList" class="exchange-queue-list"></div>
+          </div>
+          <aside id="exchangeDetailPanel" class="exchange-detail-panel">
+            <p class="audit-empty">Select an exchange request to inspect its buyer proof and timeline.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="audit-section">
+        <div class="audit-heading">
+          <h2>Audit Trail</h2>
+          <button id="refreshAuditButton" class="secondary-button" type="button">Refresh audit</button>
+        </div>
+        <p class="audit-subcopy">Newest events first. Includes request id, action, route, and IP.</p>
+        <div class="security-metrics">
+          <div class="metric-card">
+            <span class="metric-label">Auth failures</span>
+            <strong id="metricAuthFailures">0</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Ownership mismatches</span>
+            <strong id="metricOwnershipMismatches">0</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Top scope</span>
+            <strong id="metricTopScope">-</strong>
+          </div>
+        </div>
+        <div id="auditLogList" class="audit-log-list"></div>
+      </section>
+
+      <section class="operations-grid">
+        <p id="auditScanMeta" class="audit-subcopy audit-scan-meta-banner hidden"></p>
+        <section class="ops-section">
+          <div class="audit-heading">
+            <h2>Incident Response</h2>
+            <button id="refreshIncidentsButton" class="secondary-button" type="button">Refresh incidents</button>
+          </div>
+          <p class="audit-subcopy">Trigger safe synthetic alerts, acknowledge active incidents, and review recent escalations.</p>
+
+          <div class="ops-controls">
+            <label class="field field-small">
+              <span>Test severity</span>
+              <select id="alertTestSeverity">
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Test message</span>
+              <input id="alertTestMessage" type="text" value="Synthetic admin-triggered security alert test." />
+            </label>
+            <button id="triggerAlertTestButton" class="primary-button" type="button">Trigger alert test</button>
+          </div>
+
+          <div class="ops-filters">
+            <label class="field">
+              <span>Search incidents</span>
+              <input id="incidentSearchInput" type="text" placeholder="Search code, trigger, note, or state" />
+            </label>
+            <label class="field field-small">
+              <span>State</span>
+              <select id="incidentStateFilter">
+                <option value="">All</option>
+                <option value="open">Open</option>
+                <option value="acknowledged">Acknowledged</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="incidentHistoryList" class="history-list"></div>
+          <div class="ops-pagination" aria-label="Incident pagination">
+            <button type="button" id="incidentPrevPage" class="secondary-button">Previous</button>
+            <span id="incidentPageInfo" class="page-info"></span>
+            <button type="button" id="incidentNextPage" class="secondary-button">Next</button>
+          </div>
+        </section>
+
+        <section class="ops-section">
+          <div class="audit-heading">
+            <h2>Snapshot Restore</h2>
+            <button id="refreshSnapshotsButton" class="secondary-button" type="button">Refresh snapshots</button>
+          </div>
+          <p class="audit-subcopy">Preview restore diffs before applying them, then review restore history below.</p>
+
+          <div class="ops-controls">
+            <label class="field field-small">
+              <span>Snapshot key</span>
+              <select id="snapshotKey">
+                <option value="products">products</option>
+                <option value="config">config</option>
+                <option value="sellers">sellers</option>
+                <option value="buyers">buyers</option>
+                <option value="orders">orders</option>
+                <option value="drops">drops</option>
+                <option value="productReviews">productReviews</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Snapshot</span>
+              <select id="snapshotSelect"></select>
+            </label>
+            <button id="previewRestoreButton" class="secondary-button" type="button">Preview restore</button>
+            <button id="restoreSnapshotButton" class="primary-button" type="button">Restore snapshot</button>
+          </div>
+
+          <div class="ops-controls">
+            <label class="field">
+              <span>Compare with snapshot</span>
+              <select id="compareSnapshotSelect"></select>
+            </label>
+            <button id="compareSnapshotsButton" class="secondary-button" type="button">Compare snapshots</button>
+          </div>
+
+          <div class="ops-filters">
+            <label class="field">
+              <span>Search restore history</span>
+              <input id="restoreSearchInput" type="text" placeholder="Search key, snapshot id, or changed keys" />
+            </label>
+            <label class="field field-small">
+              <span>Type</span>
+              <select id="restoreTypeFilter">
+                <option value="">All</option>
+                <option value="admin_snapshot_restore">Restore</option>
+                <option value="admin_snapshot_restore_dry_run">Dry run</option>
+                <option value="admin_snapshot_compare">Compare</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="snapshotPreview" class="snapshot-preview">
+            <p class="audit-empty">Choose a snapshot to preview its diff.</p>
+          </div>
+
+          <div id="restoreHistoryList" class="history-list"></div>
+          <div class="ops-pagination" aria-label="Restore history pagination">
+            <button type="button" id="restorePrevPage" class="secondary-button">Previous</button>
+            <span id="restorePageInfo" class="page-info"></span>
+            <button type="button" id="restoreNextPage" class="secondary-button">Next</button>
+          </div>
+        </section>
+      </section>
+
+    </main>
+
+    <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-label="Product media preview">
+      <button id="lightboxPrev" class="lightbox-nav lightbox-prev" type="button" aria-label="Previous image">‹</button>
+      <button id="lightboxNext" class="lightbox-nav lightbox-next" type="button" aria-label="Next image">›</button>
+      <button id="lightboxClose" class="lightbox-close" type="button" aria-label="Close preview">Close</button>
+      <div class="lightbox-content">
+        <img id="lightboxImage" class="lightbox-image" alt="" />
+        <div id="lightboxThumbs" class="lightbox-thumbnails"></div>
+      </div>
+    </div>
+
+    <template id="productCardTemplate">
+      <article class="product-card">
+        <div class="card-media">
+          <img class="product-image" alt="" />
+          <div class="media-pill">Marketplace review</div>
+          <div class="media-count hidden"></div>
+          <div class="media-thumbnails"></div>
+        </div>
+
+        <div class="card-summary">
+          <div class="card-heading">
+            <div>
+              <p class="seller-name"></p>
+              <h2 class="product-name"></h2>
+            </div>
+            <span class="status-pill"></span>
+          </div>
+
+          <div class="meta-grid">
+            <div>
+              <span class="meta-label">Price</span>
+              <strong class="product-price"></strong>
+            </div>
+            <div>
+              <span class="meta-label">Category</span>
+              <strong class="product-category"></strong>
+            </div>
+            <div>
+              <span class="meta-label">Material</span>
+              <strong class="product-material"></strong>
+            </div>
+            <div>
+              <span class="meta-label">Submitted</span>
+              <strong class="product-submitted"></strong>
+            </div>
+          </div>
+
+          <p class="product-note"></p>
+        </div>
+
+        <div class="card-review">
+          <label class="notes-field">
+            <span>Review notes</span>
+            <textarea rows="2" placeholder="Optional approval or rejection note"></textarea>
+          </label>
+
+          <div class="card-actions">
+            <button class="approve-button" type="button">Approve</button>
+            <button class="reject-button" type="button">Reject</button>
+            <button class="archive-button" type="button">Archive</button>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <script type="module" src="/admin/assets/admin-review.js?v=2"></script>
+  </body>
+</html>

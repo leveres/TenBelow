@@ -10,7 +10,7 @@ import SwiftUI
 struct AnimatedLogoView: View {
     @State private var shimmerOffset: CGFloat = -1.0
     @State private var glowPulse = false
-    @State private var snowflakes: [Snowflake] = (0..<30).map { _ in Snowflake() }
+    @State private var snowflakes: [Snowflake] = (0..<18).map { _ in Snowflake() }
 
     var body: some View {
         ZStack {
@@ -109,7 +109,7 @@ private struct SnowCanvas: View {
     }
 
     private func startSnow() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 24.0, repeats: true) { _ in
             for i in snowflakes.indices {
                 snowflakes[i].y += snowflakes[i].speed
                 snowflakes[i].x += snowflakes[i].drift
@@ -127,10 +127,3 @@ private struct SnowCanvas: View {
     }
 }
 
-#Preview {
-    ZStack {
-        Color.black.ignoresSafeArea()
-        AnimatedLogoView()
-            .padding(40)
-    }
-}

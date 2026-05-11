@@ -24,6 +24,7 @@ final class OrderStore: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published var refreshError: String?
     @Published var shipmentActionError: String?
+    @Published var productionPreviewActionError: String?
 
     private let storageKey = "orderStore.orders"
     private let eventStore: CommerceEventStore
@@ -114,6 +115,13 @@ final class OrderStore: ObservableObject {
         orders.insert(order, at: 0)
         persist()
 
+        let firstProduct = items.first?.product
+        let trimmedName = firstProduct?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let firstProductName = trimmedName.isEmpty ? "your order" : trimmedName
+        let hasMakerVideo = shipments
+            .flatMap(\.items)
+            .contains { ($0.productionPreviewURL?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) }
+
         eventStore.record(
             CommerceEvent(
                 kind: .orderPlaced,
@@ -121,7 +129,9 @@ final class OrderStore: ObservableObject {
                 orderId: order.id,
                 metadata: [
                     "sellerCount": "\(shipments.count)",
-                    "itemCount": "\(order.totalItemsCount)"
+                    "itemCount": "\(order.totalItemsCount)",
+                    "firstProductName": firstProductName,
+                    "hasMakerVideo": hasMakerVideo ? "1" : "0"
                 ]
             )
         )
@@ -237,6 +247,74 @@ final class OrderStore: ObservableObject {
         }
     }
 
+    func updateOrderProductionPreview(
+        orderId: String,
+        shipmentId: String,
+        sellerId: String,
+        orderItemId: String,
+        productionPreviewURL: String?,
+        removeProductionPreview: Bool = false
+    ) async {
+        productionPreviewActionError = nil
+        do {
+            let updatedOrder = try await OrdersAPI.updateOrderProductionPreview(
+                orderId: orderId,
+                shipmentId: shipmentId,
+                sellerId: sellerId,
+                orderItemId: orderItemId,
+                productionPreviewURL: productionPreviewURL,
+                removeProductionPreview: removeProductionPreview
+            )
+            upsertOrder(updatedOrder)
+        } catch {
+            productionPreviewActionError = error.localizedDescription
+        }
+    }
+
+    func applyExchangeRequests(_ exchangeRequests: [ExchangeRequest], to orderId: String) {
+        guard let orderIndex = orders.firstIndex(where: { $0.id == orderId }) else { return }
+
+        var order = orders[orderIndex]
+        let requestsByItemID = Dictionary(grouping: exchangeRequests, by: \.orderItemId)
+        let latestOrderRequest = exchangeRequests.max { lhs, rhs in
+            lhs.updatedAt < rhs.updatedAt
+        }
+
+        for shipmentIndex in order.shipments.indices {
+            let shipment = order.shipments[shipmentIndex]
+            for itemIndex in shipment.items.indices {
+                let item = shipment.items[itemIndex]
+                let itemRequests = requestsByItemID[item.id] ?? []
+                let latestItemRequest = itemRequests.max { lhs, rhs in
+                    lhs.updatedAt < rhs.updatedAt
+                }
+                let completedCount = itemRequests.reduce(0) { partial, request in
+                    partial + (request.status.countsTowardExchangeLimit ? 1 : 0)
+                }
+                let hasActiveRequest = itemRequests.contains { $0.status.isActive }
+
+                order.shipments[shipmentIndex].items[itemIndex].hasExchangeRequest = hasActiveRequest || completedCount > 0
+                order.shipments[shipmentIndex].items[itemIndex].exchangeRequestId = latestItemRequest?.id
+                order.shipments[shipmentIndex].items[itemIndex].exchangeCount = completedCount
+                order.shipments[shipmentIndex].items[itemIndex].deliveredAt = item.deliveredAt ?? shipment.deliveredAt
+                order.shipments[shipmentIndex].items[itemIndex].fulfillmentStatus = item.fulfillmentStatus ?? shipment.status
+                order.shipments[shipmentIndex].items[itemIndex].orderStatus = item.orderStatus ?? order.status
+            }
+        }
+
+        let completedOrderCount = exchangeRequests.reduce(0) { partial, request in
+            partial + (request.status.countsTowardExchangeLimit ? 1 : 0)
+        }
+
+        order.hasExchangeRequest = exchangeRequests.contains(where: { $0.status.isActive }) || completedOrderCount > 0
+        order.exchangeRequestId = latestOrderRequest?.id
+        order.exchangeCount = completedOrderCount
+        order.deliveredAt = order.deliveredAt ?? order.shipments.compactMap(\.deliveredAt).max()
+
+        orders[orderIndex] = order
+        persist()
+    }
+
     private var buyerIdentityKey: String {
         let userDefaults = UserDefaults.standard
         let email = userDefaults.string(forKey: "buyerEmail")?
@@ -276,7 +354,7 @@ final class OrderStore: ObservableObject {
                     unitPriceCents: item.product.priceCents,
                     quantity: item.quantity,
                     thumbnailURL: item.product.imageNames.first,
-                    productionPreviewURL: item.product.productionPreviewURL?.absoluteString
+                    productionPreviewURL: nil
                 )
             }
         )
@@ -316,6 +394,7 @@ final class OrderStore: ObservableObject {
     }
 
     private func mergeServerOrders(_ serverOrders: [Order]) {
+        let previousById = Dictionary(uniqueKeysWithValues: orders.map { ($0.id, $0) })
         var mergedById = Dictionary(uniqueKeysWithValues: serverOrders.map { ($0.id, $0) })
         for localOrder in orders where mergedById[localOrder.id] == nil {
             mergedById[localOrder.id] = localOrder
@@ -323,9 +402,14 @@ final class OrderStore: ObservableObject {
 
         orders = mergedById.values.sorted { $0.createdAt > $1.createdAt }
         persist()
+
+        for order in serverOrders {
+            emitEventsIfNeeded(for: order, previous: previousById[order.id])
+        }
     }
 
     private func upsertOrder(_ order: Order) {
+        let previousOrder = orders.first(where: { $0.id == order.id })
         if let existingIndex = orders.firstIndex(where: { $0.id == order.id }) {
             orders[existingIndex] = order
         } else {
@@ -334,5 +418,73 @@ final class OrderStore: ObservableObject {
 
         orders.sort { $0.createdAt > $1.createdAt }
         persist()
+        emitEventsIfNeeded(for: order, previous: previousOrder)
+    }
+
+    private func emitEventsIfNeeded(for order: Order, previous: Order?) {
+        // Use Optional.map — do not call flatMap on String (that iterates Characters).
+        let buyerIdentity = order.buyerEmail
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .flatMap { $0.isEmpty ? nil : "buyer:\($0)" }
+
+        if previous == nil {
+            let lineItems = order.shipments.flatMap(\.items)
+            let trimmedFirst = lineItems.first?.productName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let firstProductName = trimmedFirst.isEmpty ? "your order" : trimmedFirst
+            let hasMakerVideo = lineItems.contains { line in
+                guard let s = line.productionPreviewURL?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+                return !s.isEmpty
+            }
+            eventStore.record(
+                CommerceEvent(
+                    kind: .orderPlaced,
+                    buyerIdentity: buyerIdentity,
+                    orderId: order.id,
+                    metadata: [
+                        "sellerCount": "\(order.shipments.count)",
+                        "itemCount": "\(order.totalItemsCount)",
+                        "firstProductName": firstProductName,
+                        "hasMakerVideo": hasMakerVideo ? "1" : "0"
+                    ]
+                )
+            )
+        }
+
+        if previous != nil, previous?.status != order.status {
+            eventStore.record(
+                CommerceEvent(
+                    kind: .orderStatusUpdated,
+                    buyerIdentity: buyerIdentity,
+                    orderId: order.id,
+                    sellerId: order.shipments.first?.sellerId,
+                    metadata: [
+                        "status": order.status.rawValue
+                    ]
+                )
+            )
+        }
+
+        let previousShipmentsByID = Dictionary(uniqueKeysWithValues: (previous?.shipments ?? []).map { ($0.id, $0) })
+        for shipment in order.shipments {
+            let previousShipment = previousShipmentsByID[shipment.id]
+            guard previous != nil else { continue }
+            guard previousShipment?.status != shipment.status else { continue }
+
+            eventStore.record(
+                CommerceEvent(
+                    kind: .shipmentStatusUpdated,
+                    buyerIdentity: buyerIdentity,
+                    productId: shipment.items.first?.productId,
+                    orderId: order.id,
+                    shipmentId: shipment.id,
+                    sellerId: shipment.sellerId,
+                    metadata: [
+                        "shipmentStatus": shipment.status.rawValue,
+                        "productName": shipment.items.first?.productName ?? "your item",
+                        "buyerUserId": buyerIdentity ?? ""
+                    ]
+                )
+            )
+        }
     }
 }

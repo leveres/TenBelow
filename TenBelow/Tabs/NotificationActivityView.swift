@@ -7,6 +7,7 @@ import SwiftUI
 private enum NotificationDestination: Identifiable, Hashable {
     case product(Product)
     case order(String)
+    case exchange(String)
 
     var id: String {
         switch self {
@@ -14,11 +15,13 @@ private enum NotificationDestination: Identifiable, Hashable {
             return "product:\(product.id)"
         case .order(let orderId):
             return "order:\(orderId)"
+        case .exchange(let exchangeRequestId):
+            return "exchange:\(exchangeRequestId)"
         }
     }
 }
 
-/// In-app activity history for the current account, combining favorites and notifications.
+/// Buyer hub for saved favorites and in-app notifications (sellers see notifications only).
 struct NotificationActivityView: View {
     @EnvironmentObject private var notificationStore: NotificationStore
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
@@ -54,28 +57,12 @@ struct NotificationActivityView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 20) {
                 if showsBuyerFavoritesSection {
                     favoritesSection
                 }
 
-                activitySectionHeader
-
-                if notifications.isEmpty, !(showsBuyerFavoritesSection && !favoriteProducts.isEmpty) {
-                    ContentUnavailableView(
-                        "No activity yet",
-                        systemImage: "tray",
-                        description: Text(emptyActivityDescription)
-                    )
-                    .padding(.top, 28)
-                } else {
-                    LazyVStack(spacing: 12) {
-                        ForEach(notifications) { notification in
-                            notificationRow(notification)
-                        }
-                    }
-                    .padding(.top, 4)
-                }
+                notificationsSection
             }
             .padding(.horizontal, 16)
             .padding(.top, 6)
@@ -92,14 +79,16 @@ struct NotificationActivityView: View {
                     mode: userRole == "seller" ? .seller : .buyer,
                     currentSellerId: userRole == "seller" ? activeSellerId : nil
                 )
+            case .exchange(let exchangeRequestId):
+                ExchangeStatusScreen(exchangeRequestId: exchangeRequestId)
             }
         }
     }
 
-    private var emptyActivityDescription: String {
+    private var emptyNotificationsDescription: String {
         userRole == "seller"
-            ? "Orders, favorites, and reminders appear here."
-            : "Favorites, price drops, new listings, and order updates appear here."
+            ? "Orders and account updates appear here when there’s something new."
+            : "Order updates, price drops, and alerts you’ve turned on appear here."
     }
 
     private var activeSellerId: String {
@@ -113,7 +102,7 @@ struct NotificationActivityView: View {
                 .font(.tbHeadline)
                 .foregroundStyle(TBTheme.icyBlue)
 
-            Text("Saved items stay here for quick access alongside your notifications.")
+            Text("Saved items stay here for quick access.")
                 .font(.tbCaption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -148,16 +137,32 @@ struct NotificationActivityView: View {
         }
     }
 
-    private var activitySectionHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Recent activity")
+    private var notificationsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Notifications")
                 .font(.tbHeadline)
                 .foregroundStyle(TBTheme.icyBlue)
 
-            Text("Tap an item for details. Change notification types in Settings → Notification settings.")
+            Text("Tap a notification for details. Change types in Settings → Notification settings.")
                 .font(.tbCaption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if notifications.isEmpty {
+                ContentUnavailableView(
+                    "No notifications yet",
+                    systemImage: "bell",
+                    description: Text(emptyNotificationsDescription)
+                )
+                .padding(.top, 12)
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(notifications) { notification in
+                        notificationRow(notification)
+                    }
+                }
+                .padding(.top, 4)
+            }
         }
     }
 
@@ -166,15 +171,7 @@ struct NotificationActivityView: View {
             open(notification)
         } label: {
             HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(TBTheme.skyLight.opacity(0.62))
-                        .frame(width: 40, height: 40)
-
-                    Image(systemName: icon(for: notification.type))
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(TBTheme.deepSky)
-                }
+                notificationThumbnail(notification)
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(alignment: .top, spacing: 8) {
@@ -204,22 +201,80 @@ struct NotificationActivityView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(14)
-            .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(10)
+            .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(notification.isRead ? TBTheme.skyBlue.opacity(0.10) : TBTheme.accent.opacity(0.22), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
+            .shadow(color: .black.opacity(0.03), radius: 8, y: 3)
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(notificationAccessibilityLabel(notification))
         .accessibilityHint("Opens this notification.")
     }
 
+    @ViewBuilder
+    private func notificationThumbnail(_ notification: AppNotification) -> some View {
+        if let product = productForNotification(notification) {
+            StorefrontImageView(reference: product.primaryImageReference, contentMode: .fill) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(TBTheme.skyLight.opacity(0.30))
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            }
+            .frame(width: 36, height: 36)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(.white.opacity(0.55), lineWidth: 1)
+            )
+        } else if let seller = sellerForNotification(notification) {
+            StorefrontImageView(reference: seller.avatarURL?.absoluteString, contentMode: .fill) {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.white, Color(red: 0.90, green: 0.95, blue: 1.0)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay {
+                        Text(sellerAvatarInitials(for: seller))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color(red: 0.24, green: 0.47, blue: 0.78))
+                    }
+            }
+            .frame(width: 36, height: 36)
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .stroke(Color.black.opacity(0.05), lineWidth: 0.8)
+            )
+        } else {
+            ZStack {
+                Circle()
+                    .fill(TBTheme.skyLight.opacity(0.62))
+                    .frame(width: 36, height: 36)
+
+                Image(systemName: icon(for: notification.type))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(TBTheme.deepSky)
+            }
+        }
+    }
+
     private func open(_ notification: AppNotification) {
         notificationStore.markAsRead(notification.id)
+
+        if let product = productForNotification(notification) {
+            selectedDestination = .product(product)
+            return
+        }
 
         if let orderId = notification.relatedOrderId,
            orderStore.order(withId: orderId) != nil {
@@ -227,11 +282,11 @@ struct NotificationActivityView: View {
             return
         }
 
-        if let productId = notification.relatedProductId,
-           let product = localProducts.product(withId: productId) {
-            selectedDestination = .product(product)
+        if let exchangeRequestId = notification.relatedExchangeRequestId {
+            selectedDestination = .exchange(exchangeRequestId)
             return
         }
+
     }
 
     private func icon(for type: NotificationType) -> String {
@@ -244,6 +299,8 @@ struct NotificationActivityView: View {
             return "cart.fill.badge.plus"
         case .orderStatusUpdate:
             return "truck.box.fill"
+        case .exchangeUpdate:
+            return "arrow.triangle.2.circlepath.circle.fill"
         case .itemFavorited:
             return "heart.fill"
         case .system:
@@ -260,6 +317,30 @@ struct NotificationActivityView: View {
     private func notificationAccessibilityLabel(_ notification: AppNotification) -> String {
         let readState = notification.isRead ? "Read" : "Unread"
         return "\(readState). \(notification.title). \(notification.message). \(relativeTimestamp(for: notification.createdAt))."
+    }
+
+    private func productForNotification(_ notification: AppNotification) -> Product? {
+        guard let productId = notification.relatedProductId else { return nil }
+        return storefrontProducts.first(where: { $0.id == productId }) ?? localProducts.product(withId: productId)
+    }
+
+    private func sellerForNotification(_ notification: AppNotification) -> SellerProfile? {
+        guard let sellerId = notification.relatedSellerId else { return nil }
+        return resolvedSellerProfile(
+            sellerId: sellerId,
+            storefrontProducts: storefrontProducts.filter { $0.sellerId == sellerId },
+            remoteProfiles: catalog.sellerProfiles
+        )
+    }
+
+    private func sellerAvatarInitials(for seller: SellerProfile) -> String {
+        let words = seller.displayName.split(whereSeparator: \.isWhitespace)
+        let initials = words.prefix(2).compactMap { $0.first }.map(String.init)
+        if !initials.isEmpty {
+            return initials.joined().uppercased()
+        }
+        let fallback = seller.handle.replacingOccurrences(of: "@", with: "")
+        return String(fallback.prefix(2)).uppercased()
     }
 }
 

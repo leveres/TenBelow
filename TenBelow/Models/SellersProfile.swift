@@ -12,8 +12,10 @@ struct SellerProfile: Identifiable, Hashable, Codable {
     let displayName: String
     let handle: String
     let bio: String
-    let avatarURL: URL?
-    let bannerURL: URL?
+    /// Raw value from the API (often `/media/...`). Resolved lazily so host-relative paths work once `TENBELOW_BACKEND_BASE_URL` is configured.
+    let avatarMediaReference: String?
+    /// Same resolution rules as `avatarMediaReference`.
+    let bannerMediaReference: String?
     let websiteURL: URL?
     let location: String
     let shipsInDays: ClosedRange<Int>
@@ -28,28 +30,54 @@ struct SellerProfile: Identifiable, Hashable, Codable {
     let pageViewCount: Int
     let designLicense: String
     let isVerified: Bool
+    /// When true, buyers see a control on the public storefront to submit a custom-order request.
+    let acceptsCustomOrders: Bool
+    /// Optional URL (e.g. guidelines, portfolio, or intake form) shown in the custom-order sheet.
+    let customOrderInfoURL: URL?
     let joinedAt: Date
+
+    var avatarURL: URL? {
+        Self.resolveMediaReference(avatarMediaReference)
+    }
+
+    var bannerURL: URL? {
+        Self.resolveMediaReference(bannerMediaReference)
+    }
+
+    private static func resolveMediaReference(_ raw: String?) -> URL? {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        return Product.previewMediaURL(for: trimmed)
+    }
+
+    private static func mergedOptionalMediaRef(_ primary: String?, _ fallback: String?) -> String? {
+        let p = primary?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !p.isEmpty { return primary }
+        let f = fallback?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return f.isEmpty ? nil : fallback
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, displayName, handle, bio, avatarURL, bannerURL, websiteURL
         case location, materials, processingTime
         case productCount, orderCount, totalReviewCount, positiveReviewCount, rating, likeCount, pageViewCount, designLicense, isVerified, joinedAt
         case shipsInMinDays, shipsInMaxDays
+        case acceptsCustomOrders, customOrderInfoURL
     }
 
     init(id: String, displayName: String, handle: String, bio: String,
-         avatarURL: URL? = nil, bannerURL: URL? = nil, websiteURL: URL? = nil,
+         avatarMediaReference: String? = nil, bannerMediaReference: String? = nil, websiteURL: URL? = nil,
          location: String, shipsInDays: ClosedRange<Int>,
          materials: [String], processingTime: String,
          productCount: Int, orderCount: Int, totalReviewCount: Int = 0, positiveReviewCount: Int = 0, rating: Double,
          likeCount: Int = 0, pageViewCount: Int = 0, designLicense: String = "Original",
-         isVerified: Bool, joinedAt: Date) {
+         isVerified: Bool, acceptsCustomOrders: Bool = false, customOrderInfoURL: URL? = nil, joinedAt: Date) {
         self.id = id
         self.displayName = displayName
         self.handle = handle
         self.bio = bio
-        self.avatarURL = avatarURL
-        self.bannerURL = bannerURL
+        self.avatarMediaReference = avatarMediaReference
+        self.bannerMediaReference = bannerMediaReference
         self.websiteURL = websiteURL
         self.location = location
         self.shipsInDays = shipsInDays
@@ -64,6 +92,8 @@ struct SellerProfile: Identifiable, Hashable, Codable {
         self.pageViewCount = pageViewCount
         self.designLicense = designLicense
         self.isVerified = isVerified
+        self.acceptsCustomOrders = acceptsCustomOrders
+        self.customOrderInfoURL = customOrderInfoURL
         self.joinedAt = joinedAt
     }
 
@@ -73,24 +103,29 @@ struct SellerProfile: Identifiable, Hashable, Codable {
         displayName = try c.decode(String.self, forKey: .displayName)
         handle = try c.decode(String.self, forKey: .handle)
         bio = try c.decode(String.self, forKey: .bio)
-        if let url = try c.decodeIfPresent(URL.self, forKey: .avatarURL) {
-            avatarURL = url
-        } else if let urlString = try c.decodeIfPresent(String.self, forKey: .avatarURL) {
-            avatarURL = URL(string: urlString)
+        // Keep raw strings; `avatarURL` / `bannerURL` resolve via `Product.previewMediaURL` on each read
+        // so the same build works if the API base URL becomes available later.
+        if let raw = try c.decodeIfPresent(String.self, forKey: .avatarURL) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            avatarMediaReference = trimmed.isEmpty ? nil : trimmed
         } else {
-            avatarURL = nil
+            avatarMediaReference = nil
         }
-        if let url = try c.decodeIfPresent(URL.self, forKey: .bannerURL) {
-            bannerURL = url
-        } else if let urlString = try c.decodeIfPresent(String.self, forKey: .bannerURL) {
-            bannerURL = URL(string: urlString)
+        if let raw = try c.decodeIfPresent(String.self, forKey: .bannerURL) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            bannerMediaReference = trimmed.isEmpty ? nil : trimmed
         } else {
-            bannerURL = nil
+            bannerMediaReference = nil
         }
-        if let url = try c.decodeIfPresent(URL.self, forKey: .websiteURL) {
-            websiteURL = url
-        } else if let urlString = try c.decodeIfPresent(String.self, forKey: .websiteURL) {
-            websiteURL = URL(string: urlString)
+        if let raw = try c.decodeIfPresent(String.self, forKey: .websiteURL) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                websiteURL = nil
+            } else if let absolute = URL(string: trimmed), absolute.scheme != nil {
+                websiteURL = absolute
+            } else {
+                websiteURL = Product.previewMediaURL(for: trimmed)
+            }
         } else {
             websiteURL = nil
         }
@@ -106,6 +141,17 @@ struct SellerProfile: Identifiable, Hashable, Codable {
         pageViewCount = try c.decodeIfPresent(Int.self, forKey: .pageViewCount) ?? 0
         designLicense = try c.decodeIfPresent(String.self, forKey: .designLicense) ?? "Original"
         isVerified = try c.decode(Bool.self, forKey: .isVerified)
+        acceptsCustomOrders = try c.decodeIfPresent(Bool.self, forKey: .acceptsCustomOrders) ?? false
+        if let raw = try c.decodeIfPresent(String.self, forKey: .customOrderInfoURL) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                customOrderInfoURL = nil
+            } else {
+                customOrderInfoURL = URL(string: trimmed) ?? Product.previewMediaURL(for: trimmed)
+            }
+        } else {
+            customOrderInfoURL = nil
+        }
         if let date = try c.decodeIfPresent(Date.self, forKey: .joinedAt) {
             joinedAt = date
         } else {
@@ -133,8 +179,12 @@ struct SellerProfile: Identifiable, Hashable, Codable {
         try c.encode(displayName, forKey: .displayName)
         try c.encode(handle, forKey: .handle)
         try c.encode(bio, forKey: .bio)
-        if let url = avatarURL { try c.encode(url.absoluteString, forKey: .avatarURL) }
-        if let url = bannerURL { try c.encode(url.absoluteString, forKey: .bannerURL) }
+        if let ref = avatarMediaReference, !ref.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try c.encode(ref.trimmingCharacters(in: .whitespacesAndNewlines), forKey: .avatarURL)
+        }
+        if let ref = bannerMediaReference, !ref.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try c.encode(ref.trimmingCharacters(in: .whitespacesAndNewlines), forKey: .bannerURL)
+        }
         if let url = websiteURL { try c.encode(url.absoluteString, forKey: .websiteURL) }
         try c.encode(location, forKey: .location)
         try c.encode(materials, forKey: .materials)
@@ -148,6 +198,8 @@ struct SellerProfile: Identifiable, Hashable, Codable {
         try c.encode(pageViewCount, forKey: .pageViewCount)
         try c.encode(designLicense, forKey: .designLicense)
         try c.encode(isVerified, forKey: .isVerified)
+        try c.encode(acceptsCustomOrders, forKey: .acceptsCustomOrders)
+        if let url = customOrderInfoURL { try c.encode(url.absoluteString, forKey: .customOrderInfoURL) }
         let iso = ISO8601DateFormatter()
         try c.encode(iso.string(from: joinedAt), forKey: .joinedAt)
         try c.encode(shipsInDays.lowerBound, forKey: .shipsInMinDays)
@@ -184,8 +236,8 @@ extension SellerProfile {
         displayName: "PrintCraft Studio",
         handle: "@printcraft",
         bio: "Handcrafted 3D-printed home and desk accessories. Every piece is printed fresh to order with premium filament. Based in Austin, TX.",
-        avatarURL: nil,
-        bannerURL: nil,
+        avatarMediaReference: nil,
+        bannerMediaReference: nil,
         websiteURL: URL(string: "https://printcraft.example.com"),
         location: "Austin, TX",
         shipsInDays: 2...4,
@@ -200,6 +252,8 @@ extension SellerProfile {
         pageViewCount: 18400,
         designLicense: "Original Designs",
         isVerified: true,
+        acceptsCustomOrders: true,
+        customOrderInfoURL: nil,
         joinedAt: ISO8601DateFormatter().date(from: "2025-11-01T00:00:00Z")!
     )
 
@@ -213,8 +267,8 @@ extension SellerProfile {
         displayName: "Nozzle Works",
         handle: "@nozzleworks",
         bio: "Precision-printed car and tech accessories. Engineered for a snug fit every time.",
-        avatarURL: nil,
-        bannerURL: nil,
+        avatarMediaReference: nil,
+        bannerMediaReference: nil,
         websiteURL: nil,
         location: "Denver, CO",
         shipsInDays: 2...5,
@@ -229,12 +283,18 @@ extension SellerProfile {
         pageViewCount: 6100,
         designLicense: "CC BY-NC",
         isVerified: false,
+        acceptsCustomOrders: false,
+        customOrderInfoURL: nil,
         joinedAt: ISO8601DateFormatter().date(from: "2026-01-15T00:00:00Z")!
     )
 }
 
 private enum SellerProfileLocalStore {
     static let storageKey = "sellerLocalProfileData"
+}
+
+private enum BuyerEngagementSnapshotStore {
+    static let storageKey = "buyerEngagementStore.snapshots"
 }
 
 enum SellerVerificationStore {
@@ -254,6 +314,40 @@ enum SellerVerificationStore {
 }
 
 extension SellerProfile {
+    static func starterProfile(sellerId: String, businessName: String) -> SellerProfile {
+        let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBusinessName = businessName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedDisplayName = trimmedBusinessName.isEmpty
+            ? inferredSellerDisplayName(from: trimmedSellerId)
+            : trimmedBusinessName
+
+        return SellerProfile(
+            id: trimmedSellerId,
+            displayName: resolvedDisplayName,
+            handle: "@\(trimmedSellerId)",
+            bio: "",
+            avatarMediaReference: nil,
+            bannerMediaReference: nil,
+            websiteURL: nil,
+            location: "",
+            shipsInDays: 3...7,
+            materials: [],
+            processingTime: "Made to order",
+            productCount: 0,
+            orderCount: 0,
+            totalReviewCount: 0,
+            positiveReviewCount: 0,
+            rating: 0,
+            likeCount: 0,
+            pageViewCount: 0,
+            designLicense: "Original",
+            isVerified: false,
+            acceptsCustomOrders: false,
+            customOrderInfoURL: nil,
+            joinedAt: .now
+        )
+    }
+
     static func locallyStoredProfile() -> SellerProfile? {
         guard let data = UserDefaults.standard.data(forKey: SellerProfileLocalStore.storageKey) else {
             return nil
@@ -281,8 +375,8 @@ extension SellerProfile {
             displayName: resolvedDisplayName,
             handle: resolvedHandle,
             bio: base.bio,
-            avatarURL: base.avatarURL,
-            bannerURL: base.bannerURL,
+            avatarMediaReference: base.avatarMediaReference,
+            bannerMediaReference: base.bannerMediaReference,
             websiteURL: base.websiteURL,
             location: base.location,
             shipsInDays: base.shipsInDays,
@@ -297,6 +391,8 @@ extension SellerProfile {
             pageViewCount: base.pageViewCount,
             designLicense: base.designLicense,
             isVerified: base.isVerified,
+            acceptsCustomOrders: base.acceptsCustomOrders,
+            customOrderInfoURL: base.customOrderInfoURL,
             joinedAt: base.joinedAt
         )
     }
@@ -317,11 +413,15 @@ func resolvedSellerProfile(
 
     let sellerProducts = storefrontProducts.filter { $0.sellerId == trimmedSellerId }
     let baseProfile: SellerProfile?
+    let storedProfile = SellerProfile.locallyStoredProfile().flatMap { profile in
+        profile.id == trimmedSellerId ? profile : nil
+    }
+    let remoteProfile = remoteProfiles.first(where: { $0.id == trimmedSellerId })
 
-    if let storedProfile = SellerProfile.locallyStoredProfile(), storedProfile.id == trimmedSellerId {
+    if let remoteProfile {
+        baseProfile = remoteProfile.mergingFallback(storedProfile)
+    } else if let storedProfile {
         baseProfile = storedProfile
-    } else if let remoteProfile = remoteProfiles.first(where: { $0.id == trimmedSellerId }) {
-        baseProfile = remoteProfile
     } else {
         baseProfile = SellerProfile.mockLookup(id: trimmedSellerId)
     }
@@ -338,14 +438,15 @@ func resolvedSellerProfile(
     let materials = Array(Set(sellerProducts.map(\.material))).sorted()
     let totalViews = sellerProducts.reduce(0) { $0 + $1.pageViewCount }
     let totalLikes = sellerProducts.reduce(0) { $0 + $1.favoriteCount }
+    let totalFollowers = persistedFollowerCount(forSellerId: trimmedSellerId)
 
     return SellerProfile(
         id: trimmedSellerId,
         displayName: inferredName,
         handle: "@\(trimmedSellerId.replacingOccurrences(of: " ", with: "").lowercased())",
         bio: "Independent TenBelow seller creating 3D-printed products.",
-        avatarURL: nil,
-        bannerURL: nil,
+        avatarMediaReference: nil,
+        bannerMediaReference: nil,
         websiteURL: nil,
         location: "TenBelow",
         shipsInDays: shipLowerBound...shipUpperBound,
@@ -356,10 +457,12 @@ func resolvedSellerProfile(
         totalReviewCount: 0,
         positiveReviewCount: 0,
         rating: 0,
-        likeCount: totalLikes,
+        likeCount: totalLikes + totalFollowers,
         pageViewCount: totalViews,
         designLicense: "Original Designs",
         isVerified: false,
+        acceptsCustomOrders: false,
+        customOrderInfoURL: nil,
         joinedAt: .now
     )
 }
@@ -396,7 +499,62 @@ private func inferredSellerDisplayName(from sellerId: String) -> String {
         .joined(separator: " ")
 }
 
-private extension SellerProfile {
+extension SellerProfile {
+    /// Label for product cards when a resolved profile isn’t available (e.g. catalog key mismatch).
+    static func fallbackDisplayName(forSellerId sellerId: String) -> String {
+        let trimmed = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Seller" }
+        return inferredSellerDisplayName(from: trimmed)
+    }
+}
+
+extension SellerProfile {
+    func mergingFallback(_ fallback: SellerProfile?) -> SellerProfile {
+        guard let fallback else { return self }
+
+        let resolvedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fallback.displayName
+            : displayName
+        let resolvedHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fallback.handle
+            : handle
+        let resolvedBio = bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fallback.bio
+            : bio
+        let resolvedLocation = location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fallback.location
+            : location
+        let resolvedProcessingTime = processingTime.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fallback.processingTime
+            : processingTime
+
+        return SellerProfile(
+            id: id,
+            displayName: resolvedDisplayName,
+            handle: resolvedHandle,
+            bio: resolvedBio,
+            avatarMediaReference: Self.mergedOptionalMediaRef(avatarMediaReference, fallback.avatarMediaReference),
+            bannerMediaReference: Self.mergedOptionalMediaRef(bannerMediaReference, fallback.bannerMediaReference),
+            websiteURL: websiteURL ?? fallback.websiteURL,
+            location: resolvedLocation,
+            shipsInDays: shipsInDays,
+            materials: materials.isEmpty ? fallback.materials : materials,
+            processingTime: resolvedProcessingTime,
+            productCount: max(productCount, fallback.productCount),
+            orderCount: max(orderCount, fallback.orderCount),
+            totalReviewCount: max(totalReviewCount, fallback.totalReviewCount),
+            positiveReviewCount: max(positiveReviewCount, fallback.positiveReviewCount),
+            rating: max(rating, fallback.rating),
+            likeCount: max(likeCount, fallback.likeCount),
+            pageViewCount: max(pageViewCount, fallback.pageViewCount),
+            designLicense: designLicense.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback.designLicense : designLicense,
+            isVerified: isVerified || fallback.isVerified,
+            acceptsCustomOrders: acceptsCustomOrders || fallback.acceptsCustomOrders,
+            customOrderInfoURL: customOrderInfoURL ?? fallback.customOrderInfoURL,
+            joinedAt: joinedAt
+        )
+    }
+
     func applyingStorefrontProducts(_ products: [Product]) -> SellerProfile {
         guard !products.isEmpty else { return self }
 
@@ -405,14 +563,15 @@ private extension SellerProfile {
         let materials = Array(Set(products.map(\.material))).sorted()
         let aggregatedViews = products.reduce(0) { $0 + $1.pageViewCount }
         let aggregatedLikes = products.reduce(0) { $0 + $1.favoriteCount }
+        let aggregatedFollowers = persistedFollowerCount(forSellerId: id)
 
         return SellerProfile(
             id: id,
             displayName: displayName,
             handle: handle,
             bio: bio,
-            avatarURL: avatarURL,
-            bannerURL: bannerURL,
+            avatarMediaReference: avatarMediaReference,
+            bannerMediaReference: bannerMediaReference,
             websiteURL: websiteURL,
             location: location,
             shipsInDays: shipLowerBound...shipUpperBound,
@@ -423,11 +582,27 @@ private extension SellerProfile {
             totalReviewCount: totalReviewCount,
             positiveReviewCount: positiveReviewCount,
             rating: rating,
-            likeCount: max(likeCount, aggregatedLikes),
+            likeCount: max(likeCount, aggregatedLikes + aggregatedFollowers),
             pageViewCount: max(pageViewCount, aggregatedViews),
             designLicense: designLicense,
             isVerified: isVerified,
+            acceptsCustomOrders: acceptsCustomOrders,
+            customOrderInfoURL: customOrderInfoURL,
             joinedAt: joinedAt
         )
+    }
+}
+
+private func persistedFollowerCount(forSellerId sellerId: String) -> Int {
+    let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedSellerId.isEmpty else { return 0 }
+
+    let snapshots: [String: BuyerEngagementSnapshot] = LocalCodableStore.load(
+        key: BuyerEngagementSnapshotStore.storageKey,
+        default: [:]
+    )
+
+    return snapshots.values.reduce(0) { count, snapshot in
+        count + (snapshot.followedSellerIDs.contains(trimmedSellerId) ? 1 : 0)
     }
 }

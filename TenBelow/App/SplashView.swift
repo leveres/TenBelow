@@ -56,7 +56,3 @@ struct SplashView: View {
     }
 }
 
-#Preview {
-    SplashView()
-        .environmentObject(CartStore())
-}

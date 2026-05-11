@@ -1,5 +1,16 @@
 import Foundation
 import Combine
+import os
+
+private let inboxNotificationLogger = Logger(subsystem: "com.innovativecodeworks.com.TenBelow", category: "InboxNotifications")
+
+/// `UserDefaults` keys used only for resolving the **in-app notification inbox** identity (must stay aligned with `@AppStorage` elsewhere).
+private enum InboxIdentityDefaults {
+    static let userRole = "userRole"
+    static let sellerSellerId = "sellerSellerId"
+    static let buyerAccountCreated = "buyerAccountCreated"
+    static let buyerEmail = "buyerEmail"
+}
 
 @MainActor
 final class NotificationStore: ObservableObject {
@@ -42,15 +53,16 @@ final class NotificationStore: ObservableObject {
 
     var currentUserId: String {
         let userDefaults = UserDefaults.standard
-        let userRole = userDefaults.string(forKey: "userRole") ?? "buyer"
+        let userRole = userDefaults.string(forKey: InboxIdentityDefaults.userRole) ?? "buyer"
 
         if userRole == "seller" {
-            let sellerId = userDefaults.string(forKey: "sellerSellerId")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let sellerId = userDefaults.string(forKey: InboxIdentityDefaults.sellerSellerId)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return Self.sellerUserId(for: sellerId.isEmpty ? "SELL-01" : sellerId)
         }
 
-        let buyerAccountCreated = userDefaults.bool(forKey: "buyerAccountCreated")
-        let buyerEmail = userDefaults.string(forKey: "buyerEmail")?
+        let buyerAccountCreated = userDefaults.bool(forKey: InboxIdentityDefaults.buyerAccountCreated)
+        let buyerEmail = userDefaults.string(forKey: InboxIdentityDefaults.buyerEmail)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
 
@@ -101,21 +113,31 @@ final class NotificationStore: ObservableObject {
             handlePriceDrop(event)
         case .productCreated:
             handleNewProduct(event)
+        case .productUpdated:
+            handleProductUpdated(event)
         case .orderPlaced:
             handleNewOrder(event)
         case .orderStatusUpdated:
             handleBuyerOrderStatusUpdate(event)
+        case .shipmentStatusUpdated:
+            handleShipmentStatusUpdate(event)
         case .productFavorited:
             handleProductFavorited(event)
+        case .exchangeSubmitted:
+            handleExchangeSubmitted(event)
+        case .exchangeStatusUpdated:
+            handleExchangeStatusUpdated(event)
         default:
             break
         }
     }
 
     private func handlePriceDrop(_ event: CommerceEvent) {
-        guard let productId = event.productId,
-              let product = localProducts.product(withId: productId)
-        else { return }
+        guard let productId = event.productId else { return }
+        let product = localProducts.product(withId: productId)
+        let productName = product?.name ?? event.metadata["name"] ?? "A product you viewed"
+        let sellerId = event.sellerId ?? product?.sellerId
+        let currentPriceCents = Int(event.metadata["newPriceCents"] ?? "") ?? product?.priceCents ?? 0
 
         let recipients = buyerEngagement.snapshotsByIdentity.compactMap { userId, snapshot -> String? in
             if snapshot.favoriteProductIDs.contains(productId) {
@@ -138,9 +160,10 @@ final class NotificationStore: ObservableObject {
                     userId: userId,
                     type: .priceDrop,
                     title: "Price Drop 🔥",
-                    message: "\(product.name) just dropped to \(Money.format(cents: product.priceCents)). Grab it before it's gone.",
-                    relatedProductId: product.id,
-                    relatedSellerId: product.sellerId
+                    message: "\(productName) just dropped to \(Money.format(cents: currentPriceCents)). Grab it before it's gone.",
+                    relatedProductId: productId,
+                    relatedSellerId: sellerId,
+                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "priceDrop.\(userId)")
                 )
             )
         }
@@ -148,14 +171,16 @@ final class NotificationStore: ObservableObject {
 
     private func handleNewProduct(_ event: CommerceEvent) {
         guard let sellerId = event.sellerId,
-              let productId = event.productId,
-              let product = localProducts.product(withId: productId)
+              let productId = event.productId
         else { return }
 
-        let sellerName = resolvedSellerProfile(
-            sellerId: sellerId,
-            storefrontProducts: localProducts.products
-        )?.displayName ?? sellerId
+        let product = localProducts.product(withId: productId)
+        let productName = product?.name ?? event.metadata["name"] ?? "a new upload"
+        let sellerName = event.metadata["sellerName"] ??
+            resolvedSellerProfile(
+                sellerId: sellerId,
+                storefrontProducts: localProducts.products
+            )?.displayName ?? sellerId
 
         let recipients = buyerEngagement.snapshotsByIdentity.compactMap { userId, snapshot -> String? in
             if snapshot.followedSellerIDs.contains(sellerId) {
@@ -177,9 +202,10 @@ final class NotificationStore: ObservableObject {
                     userId: userId,
                     type: .newProduct,
                     title: "New Drop from \(sellerName)",
-                    message: "They just added \(product.name) under $10. Check it out.",
-                    relatedProductId: product.id,
-                    relatedSellerId: sellerId
+                    message: "They just added \(productName). Check it out.",
+                    relatedProductId: productId,
+                    relatedSellerId: sellerId,
+                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "newProduct.\(userId)")
                 )
             )
         }
@@ -201,7 +227,47 @@ final class NotificationStore: ObservableObject {
                     message: "You just received an order for \(firstItemName).",
                     relatedProductId: shipment.items.first?.productId,
                     relatedOrderId: order.id,
-                    relatedSellerId: shipment.sellerId
+                    relatedSellerId: shipment.sellerId,
+                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "orderPlaced.seller.\(shipment.id)")
+                )
+            )
+        }
+
+        if let buyerKey = event.buyerIdentity, buyerKey != Self.guestUserId {
+            let lineItems = order.shipments.flatMap(\.items)
+            let metaName = event.metadata["firstProductName"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let firstName: String = {
+                if let metaName, !metaName.isEmpty { return metaName }
+                let fromOrder = lineItems.first?.productName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return fromOrder.isEmpty ? "your order" : fromOrder
+            }()
+
+            let hasMakerVideo: Bool = {
+                if event.metadata["hasMakerVideo"] == "1" { return true }
+                return lineItems.contains { line in
+                    guard let s = line.productionPreviewURL?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+                    return !s.isEmpty
+                }
+            }()
+
+            let buyerMessage: String
+            if hasMakerVideo {
+                buyerMessage = "Order confirmed — production updates for \(firstName) will appear in Order details when they become available."
+            } else {
+                buyerMessage = "Order confirmed — we’ll keep you updated on \(firstName)."
+            }
+
+            appendNotification(
+                AppNotification(
+                    userId: buyerKey,
+                    type: .orderStatusUpdate,
+                    title: "Order confirmed",
+                    message: buyerMessage,
+                    relatedProductId: lineItems.first?.productId,
+                    relatedOrderId: order.id,
+                    relatedSellerId: order.shipments.first?.sellerId,
+                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "orderPlaced.buyer.\(order.id)")
                 )
             )
         }
@@ -217,8 +283,7 @@ final class NotificationStore: ObservableObject {
         let hasProductionPreview = order.shipments
             .flatMap(\.items)
             .contains { item in
-                item.productionPreviewURL != nil ||
-                localProducts.product(withId: item.productId)?.productionPreviewURL != nil
+                item.productionPreviewURL != nil
             }
 
         let status = event.metadata["status"] ?? order.status.rawValue
@@ -228,7 +293,9 @@ final class NotificationStore: ObservableObject {
         case OrderStatus.processing.rawValue:
             content = (
                 "Your order is being made 👀",
-                "Your \(firstItemName) is now in production." + (hasProductionPreview ? " Watch how it's made." : "")
+                hasProductionPreview
+                    ? "Your \(firstItemName) is now in production. Check Order details for updates."
+                    : "Your \(firstItemName) is now in production."
             )
         case OrderStatus.shipped.rawValue, OrderStatus.partiallyShipped.rawValue:
             content = (
@@ -255,9 +322,92 @@ final class NotificationStore: ObservableObject {
                 message: content.message,
                 relatedProductId: order.shipments.first?.items.first?.productId,
                 relatedOrderId: order.id,
-                relatedSellerId: event.sellerId
+                relatedSellerId: event.sellerId,
+                dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "buyerOrderStatus.\(orderId).\(status)")
             )
         )
+    }
+
+    private func handleShipmentStatusUpdate(_ event: CommerceEvent) {
+        guard let orderId = event.orderId else { return }
+        let buyerIdentity =
+            orderStore.order(withId: orderId).flatMap { order in
+                order.buyerEmail
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .flatMap { $0.isEmpty ? nil : Self.buyerUserId(for: $0) }
+            } ?? event.metadata["buyerUserId"].flatMap { $0.isEmpty ? nil : $0 }
+        guard let buyerIdentity else { return }
+
+        let shipmentStatus = event.metadata["shipmentStatus"] ?? "updated"
+        let itemName = event.metadata["productName"] ?? "your item"
+        let title: String
+        let message: String
+
+        switch shipmentStatus {
+        case ShipmentStatus.shipped.rawValue:
+            title = "Shipment update"
+            message = "\(itemName) is on the way."
+        case ShipmentStatus.delivered.rawValue:
+            title = "Delivered"
+            message = "\(itemName) was delivered."
+        default:
+            title = "Production update"
+            message = "\(itemName) is now being prepared."
+        }
+
+        let shipmentDisc = event.shipmentId ?? event.metadata["shipmentId"] ?? "na"
+        appendNotification(
+            AppNotification(
+                userId: buyerIdentity,
+                type: .orderStatusUpdate,
+                title: title,
+                message: message,
+                relatedProductId: event.productId,
+                relatedOrderId: orderId,
+                relatedSellerId: event.sellerId,
+                dedupeKey: Self.inboxDedupeKey(
+                    eventId: event.id,
+                    semantic: "shipmentStatus.\(orderId).\(shipmentDisc).\(shipmentStatus)"
+                )
+            )
+        )
+    }
+
+    private func handleProductUpdated(_ event: CommerceEvent) {
+        guard event.metadata["update"] == "makerVideoReady",
+              let productId = event.productId
+        else { return }
+
+        let matchingOrders = orderStore.orders.filter { order in
+            order.shipments.contains { shipment in
+                shipment.items.contains { $0.productId == productId }
+            }
+        }
+
+        for order in matchingOrders {
+            guard let buyerEmail = order.buyerEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                  !buyerEmail.isEmpty else { continue }
+
+            let productName = event.metadata["name"] ??
+                order.shipments
+                    .flatMap(\.items)
+                    .first(where: { $0.productId == productId })?
+                    .productName ??
+                "your item"
+
+            appendNotification(
+                AppNotification(
+                    userId: Self.buyerUserId(for: buyerEmail),
+                    type: .orderStatusUpdate,
+                    title: "Production update is ready",
+                    message: "A new production update for \(productName) is now available in your order details.",
+                    relatedProductId: productId,
+                    relatedOrderId: order.id,
+                    relatedSellerId: event.sellerId,
+                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "makerVideoReady.\(order.id)")
+                )
+            )
+        }
     }
 
     private func handleProductFavorited(_ event: CommerceEvent) {
@@ -273,7 +423,84 @@ final class NotificationStore: ObservableObject {
                 title: "Your product is getting attention 👀",
                 message: "\(product.name) was just saved by a buyer.",
                 relatedProductId: product.id,
-                relatedSellerId: sellerId
+                relatedSellerId: sellerId,
+                dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "itemFavorited.\(productId)")
+            )
+        )
+    }
+
+    private func handleExchangeSubmitted(_ event: CommerceEvent) {
+        guard let buyerIdentity = event.buyerIdentity,
+              let exchangeRequestId = event.metadata["exchangeRequestId"] else { return }
+
+        let status = event.metadata["status"] ?? ExchangeRequestStatus.submitted.rawValue
+        let reason = event.metadata["reasonCode"] ?? ""
+        let readableReason = ExchangeReasonCode.allCases.first(where: { $0.rawValue == reason })?.title ?? "issue"
+
+        appendNotification(
+            AppNotification(
+                userId: buyerIdentity,
+                type: .exchangeUpdate,
+                title: "Exchange Submitted",
+                message: "Your exchange request for \(readableReason.lowercased()) is now \(status.replacingOccurrences(of: "_", with: " ")).",
+                relatedProductId: event.productId,
+                relatedOrderId: event.orderId,
+                relatedSellerId: event.sellerId,
+                relatedExchangeRequestId: exchangeRequestId,
+                dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "exchangeSubmitted.\(exchangeRequestId)")
+            )
+        )
+    }
+
+    private func handleExchangeStatusUpdated(_ event: CommerceEvent) {
+        guard let buyerIdentity = event.buyerIdentity,
+              let exchangeRequestId = event.metadata["exchangeRequestId"] else { return }
+
+        let status = event.metadata["status"] ?? ""
+        let title: String
+        let message: String
+
+        switch status {
+        case ExchangeRequestStatus.awaitingBuyerProof.rawValue:
+            title = "More Info Needed"
+            message = "Add more proof to keep your exchange request moving."
+        case ExchangeRequestStatus.approved.rawValue:
+            title = "Exchange Approved"
+            message = "Your replacement request was approved."
+        case ExchangeRequestStatus.denied.rawValue:
+            title = "Exchange Update"
+            message = "Your exchange request was denied."
+        case ExchangeRequestStatus.replacementPreparing.rawValue:
+            title = "Replacement Preparing"
+            message = "Your replacement item is being prepared."
+        case ExchangeRequestStatus.replacementShipped.rawValue:
+            title = "Replacement Shipped"
+            message = "Your replacement item is on the way."
+        case ExchangeRequestStatus.replacementDelivered.rawValue:
+            title = "Replacement Delivered"
+            message = "Your replacement item was delivered."
+        case ExchangeRequestStatus.cancelled.rawValue:
+            title = "Exchange Cancelled"
+            message = "Your exchange request was cancelled."
+        default:
+            title = "Exchange Update"
+            message = "Your exchange request status changed."
+        }
+
+        appendNotification(
+            AppNotification(
+                userId: buyerIdentity,
+                type: .exchangeUpdate,
+                title: title,
+                message: message,
+                relatedProductId: event.productId,
+                relatedOrderId: event.orderId,
+                relatedSellerId: event.sellerId,
+                relatedExchangeRequestId: exchangeRequestId,
+                dedupeKey: Self.inboxDedupeKey(
+                    eventId: event.id,
+                    semantic: "exchangeStatus.\(exchangeRequestId).\(status)"
+                )
             )
         )
     }
@@ -288,15 +515,6 @@ final class NotificationStore: ObservableObject {
                 guard orderAge >= threshold else { continue }
 
                 let sellerUserId = Self.sellerUserId(for: shipment.sellerId)
-                let alreadyCreated = notifications.contains {
-                    $0.userId == sellerUserId &&
-                    $0.relatedOrderId == order.id &&
-                    $0.relatedSellerId == shipment.sellerId &&
-                    $0.type == .system &&
-                    $0.title == "Action Needed"
-                }
-
-                guard !alreadyCreated else { continue }
 
                 appendNotification(
                     AppNotification(
@@ -306,7 +524,8 @@ final class NotificationStore: ObservableObject {
                         message: "Update your order status to keep buyers informed.",
                         relatedProductId: shipment.items.first?.productId,
                         relatedOrderId: order.id,
-                        relatedSellerId: shipment.sellerId
+                        relatedSellerId: shipment.sellerId,
+                        dedupeKey: "actionNeeded.stalePreparing.\(order.id).\(shipment.id)"
                     )
                 )
             }
@@ -314,21 +533,34 @@ final class NotificationStore: ObservableObject {
     }
 
     private func appendNotification(_ notification: AppNotification) {
-        let alreadyExists = notifications.contains {
-            $0.userId == notification.userId &&
-            $0.type == notification.type &&
-            $0.relatedOrderId == notification.relatedOrderId &&
-            $0.relatedProductId == notification.relatedProductId &&
-            $0.relatedSellerId == notification.relatedSellerId &&
-            $0.title == notification.title &&
-            $0.message == notification.message
+        let alreadyExists: Bool
+        if let dedupeKey = notification.dedupeKey {
+            alreadyExists = notifications.contains { $0.dedupeKey == dedupeKey }
+        } else {
+            alreadyExists = notifications.contains {
+                $0.userId == notification.userId &&
+                $0.type == notification.type &&
+                $0.relatedOrderId == notification.relatedOrderId &&
+                $0.relatedProductId == notification.relatedProductId &&
+                $0.relatedSellerId == notification.relatedSellerId &&
+                $0.title == notification.title &&
+                $0.message == notification.message
+            }
         }
 
-        guard !alreadyExists else { return }
-        guard NotificationPreferences.isTypeEnabled(notification.type) else { return }
+        guard !alreadyExists else {
+            inboxNotificationLogger.debug("skip duplicate inbox row (dedupeKey=\(notification.dedupeKey ?? "nil", privacy: .public))")
+            return
+        }
+        guard NotificationPreferences.isTypeEnabled(notification.type) else {
+            inboxNotificationLogger.debug("skip type disabled in prefs (\(notification.type.rawValue, privacy: .public))")
+            return
+        }
 
         notifications.insert(notification, at: 0)
         persistNotifications()
+        let deliveryChannelCount = deliveries.count
+        inboxNotificationLogger.debug("appended \(notification.type.rawValue, privacy: .public) deliveries=\(deliveryChannelCount, privacy: .public)")
         deliveries.forEach { $0.deliver(notification) }
     }
 
@@ -349,4 +581,8 @@ final class NotificationStore: ObservableObject {
     }
 
     static let guestUserId = "guest"
+
+    private static func inboxDedupeKey(eventId: String, semantic: String) -> String {
+        "\(eventId)|\(semantic)"
+    }
 }

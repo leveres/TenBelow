@@ -67,7 +67,3 @@ struct ShippingProgressBar: View {
     }
 }
 
-#Preview {
-    ShippingProgressBar(subtotalCents: 1500, freeShippingThresholdCents: 2000)
-        .padding()
-}

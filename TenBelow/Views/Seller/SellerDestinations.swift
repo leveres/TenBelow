@@ -7,6 +7,8 @@ import UIKit
 
 struct AddProductView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var catalog: CatalogStore
+    @EnvironmentObject private var localProducts: LocalProductStore
 
     let title: String
     let onSave: (SellerProductDraft, SellerProductMediaSelection) -> Void
@@ -15,7 +17,6 @@ struct AddProductView: View {
     @State private var selectedImageItems: [PhotosPickerItem] = []
     @State private var selectedVideoItem: PhotosPickerItem?
     @State private var selectedProductionPreviewItem: PhotosPickerItem?
-    @State private var selectedImages: [UIImage] = []
     @State private var selectedVideoURL: URL?
     @State private var selectedProductionPreviewURL: URL?
     @State private var isShowingVideoPreview = false
@@ -32,6 +33,35 @@ struct AddProductView: View {
         _draft = State(initialValue: initialDraft)
     }
 
+    private let premiumListingThresholdCents = DropConstants.minPriceCents
+
+    private var storefrontProducts: [Product] {
+        resolvedStorefrontProducts(
+            remoteProducts: catalog.products,
+            fallbackProducts: localProducts.products
+        )
+    }
+
+    private var currentSellerProfile: SellerProfile? {
+        resolvedSellerProfile(
+            sellerId: draft.sellerId,
+            storefrontProducts: storefrontProducts.filter { $0.sellerId == draft.sellerId },
+            remoteProfiles: catalog.sellerProfiles
+        )
+    }
+
+    private var isPremiumListing: Bool {
+        draft.priceCents >= premiumListingThresholdCents
+    }
+
+    private var canListPremiumProduct: Bool {
+        currentSellerProfile?.showsVerifiedBadge == true
+    }
+
+    private var premiumListingBlocked: Bool {
+        isPremiumListing && !canListPremiumProduct
+    }
+
     private var canSave: Bool {
         !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         draft.priceCents > 0 &&
@@ -39,7 +69,12 @@ struct AddProductView: View {
         !draft.productionNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !draft.durabilityNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !draft.warningLines.isEmpty &&
-        draft.shipsInMaxDays >= draft.shipsInMinDays
+        draft.shipsInMaxDays >= draft.shipsInMinDays &&
+        !premiumListingBlocked
+    }
+
+    private var remainingPhotoSlots: Int {
+        max(0, 6 - draft.imageURLStrings.count)
     }
 
     var body: some View {
@@ -71,6 +106,7 @@ struct AddProductView: View {
             }
         }
         .onChange(of: selectedImageItems) { _, items in
+            guard !items.isEmpty else { return }
             Task { await loadSelectedImages(from: items) }
         }
         .onChange(of: selectedVideoItem) { _, item in
@@ -117,6 +153,17 @@ struct AddProductView: View {
 
                 sellerFormField("Price", text: $draft.priceText)
                     .keyboardType(.decimalPad)
+
+                if premiumListingBlocked {
+                    Text("Listings over \(Money.format(cents: premiumListingThresholdCents - 1)) require seller verification before they can be submitted.")
+                        .font(.tbCaption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if isPremiumListing {
+                    Text("Verified seller pricing unlocked.")
+                        .font(.tbCaption)
+                        .foregroundStyle(.green)
+                }
 
                 Picker("Category", selection: $draft.category) {
                     ForEach(Category.allCases) { category in
@@ -179,7 +226,7 @@ struct AddProductView: View {
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .foregroundStyle(TBTheme.deepSky)
 
-                Text("Add up to 6 photos and one short product clip.")
+                Text("Add up to 6 photos, one public creator clip, and one private maker video for orders.")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
 
@@ -191,53 +238,24 @@ struct AddProductView: View {
 
                 PhotosPicker(
                     selection: $selectedImageItems,
-                    maxSelectionCount: 6,
+                    maxSelectionCount: max(remainingPhotoSlots, 1),
                     matching: .images,
                     photoLibrary: .shared()
                 ) {
                     mediaPickerButtonLabel(
-                        title: selectedImages.isEmpty && draft.imageURLStrings.isEmpty ? "Add Photos" : "Update Photos",
+                        title: draft.imageURLStrings.isEmpty ? "Add Photos" : "Add More Photos",
                         icon: "photo.on.rectangle.angled"
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(remainingPhotoSlots == 0)
+                .opacity(remainingPhotoSlots == 0 ? 0.6 : 1)
 
-                if !selectedImages.isEmpty {
+                if !draft.imageURLStrings.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
-                            ForEach(Array(selectedImages.enumerated()), id: \.offset) { _, image in
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 108, height: 108)
-                                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                            .strokeBorder(.white.opacity(0.7), lineWidth: 1)
-                                    )
-                                    .shadow(color: TBTheme.deepSky.opacity(0.08), radius: 8, y: 4)
-                            }
-                        }
-                    }
-                } else if !draft.imageURLStrings.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(draft.imageURLStrings, id: \.self) { reference in
-                                StorefrontImageView(reference: reference) {
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .fill(TBTheme.skyLight.opacity(0.30))
-                                        .overlay {
-                                            Image(systemName: "photo")
-                                                .foregroundStyle(.secondary)
-                                        }
-                                }
-                                .frame(width: 108, height: 108)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .strokeBorder(.white.opacity(0.7), lineWidth: 1)
-                                )
-                                .shadow(color: TBTheme.deepSky.opacity(0.08), radius: 8, y: 4)
+                            ForEach(Array(draft.imageURLStrings.enumerated()), id: \.offset) { index, reference in
+                                productPhotoThumbnail(reference: reference, index: index)
                             }
                         }
                     }
@@ -249,7 +267,7 @@ struct AddProductView: View {
                     photoLibrary: .shared()
                 ) {
                     mediaPickerButtonLabel(
-                        title: selectedVideoURL == nil ? "Add Short Clip" : "Replace Short Clip",
+                        title: selectedVideoURL == nil ? "Add Creator Clip" : "Replace Creator Clip",
                         icon: "video.badge.plus"
                     )
                 }
@@ -263,7 +281,7 @@ struct AddProductView: View {
                                 .foregroundStyle(TBTheme.accent)
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Short product clip ready")
+                                Text("Creator clip ready")
                                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                                     .foregroundStyle(TBTheme.deepSky)
                                 Text(selectedVideoURL.lastPathComponent)
@@ -301,11 +319,11 @@ struct AddProductView: View {
                     .overlay(TBTheme.skyBlue.opacity(0.10))
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Production Preview (Orders only)")
+                    Text("Maker Video (Orders only)")
                         .font(.tbBodyStrong)
                         .foregroundStyle(TBTheme.deepSky)
 
-                    Text("Optional private clip shown in Order Details after production begins. Not visible in the public gallery.")
+                    Text("Optional private clip shown in the buyer's \"see your item being made\" section after production begins. Not visible in the public gallery.")
                         .font(.tbCaption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -317,7 +335,7 @@ struct AddProductView: View {
                     photoLibrary: .shared()
                 ) {
                     mediaPickerButtonLabel(
-                        title: selectedProductionPreviewURL == nil ? "Add Production Preview" : "Replace Production Preview",
+                        title: selectedProductionPreviewURL == nil ? "Add Maker Video" : "Replace Maker Video",
                         icon: "sparkles.tv"
                     )
                 }
@@ -331,7 +349,7 @@ struct AddProductView: View {
                                 .foregroundStyle(TBTheme.accent)
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Production preview ready")
+                                Text("Maker video ready")
                                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                                     .foregroundStyle(TBTheme.deepSky)
                                 Text(selectedProductionPreviewURL.lastPathComponent)
@@ -373,18 +391,18 @@ struct AddProductView: View {
             Button {
                 var updatedDraft = draft
                 updatedDraft.demoVideoURLString = selectedVideoURL?.absoluteString ?? draft.demoVideoURLString
-                updatedDraft.productionPreviewURLString = selectedProductionPreviewURL?.absoluteString ?? ""
+                updatedDraft.productionPreviewURLString = selectedProductionPreviewURL?.absoluteString ?? draft.productionPreviewURLString
                 draft = updatedDraft
                 onSave(
                     updatedDraft,
                     SellerProductMediaSelection(
-                        selectedImages: selectedImages,
-                        selectedVideoURL: selectedVideoURL
+                        selectedVideoURL: selectedVideoURL,
+                        selectedProductionPreviewURL: selectedProductionPreviewURL
                     )
                 )
                 dismiss()
             } label: {
-                Text(title == "Add Product" ? "Save Product Draft" : "Update Product Details")
+                Text(title == "Add Product" ? "Save & Submit for Review" : "Submit Product Updates")
                     .font(.tbHeadline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
@@ -393,9 +411,13 @@ struct AddProductView: View {
             .disabled(!canSave)
             .opacity(canSave ? 1 : 0.6)
 
-            Text("This editor controls title, price, details, shipping, and media for the product page.")
+            Text(
+                premiumListingBlocked
+                    ? "Earn verification to unlock premium-priced marketplace listings."
+                    : "This editor saves your listing locally and submits it to TenBelow for marketplace review."
+            )
                 .font(.tbCaption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(premiumListingBlocked ? .orange : .secondary)
         }
     }
 
@@ -472,18 +494,70 @@ struct AddProductView: View {
         )
     }
 
-    private func loadSelectedImages(from items: [PhotosPickerItem]) async {
-        var loadedImages: [UIImage] = []
+    private func productPhotoThumbnail(reference: String, index: Int) -> some View {
+        ZStack(alignment: .topTrailing) {
+            StorefrontImageView(reference: reference) {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(TBTheme.skyLight.opacity(0.30))
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            }
+            .frame(width: 108, height: 108)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.white.opacity(0.7), lineWidth: 1)
+            )
+            .shadow(color: TBTheme.deepSky.opacity(0.08), radius: 8, y: 4)
 
-        for item in items {
-            if let data = try? await item.loadTransferable(type: Data.self),
-               let image = UIImage(data: data) {
-                loadedImages.append(image)
+            Button {
+                removePhoto(at: index)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(7)
+                    .background(.black.opacity(0.55), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(6)
+        }
+    }
+
+    private func loadSelectedImages(from items: [PhotosPickerItem]) async {
+        guard remainingPhotoSlots > 0 else {
+            await MainActor.run {
+                mediaErrorMessage = "You can add up to 6 photos."
+                selectedImageItems = []
+            }
+            return
+        }
+
+        var loadedReferences: [String] = []
+
+        for item in items.prefix(remainingPhotoSlots) {
+            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+            let fileExtension = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+            let outputURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(fileExtension)
+            do {
+                try data.write(to: outputURL, options: .atomic)
+                loadedReferences.append(outputURL.absoluteString)
+            } catch {
+                continue
             }
         }
 
         await MainActor.run {
-            selectedImages = loadedImages
+            draft.imageURLStrings.append(contentsOf: loadedReferences)
+            draft.imageURLStrings = Array(draft.imageURLStrings.prefix(6))
+            mediaErrorMessage = items.count > remainingPhotoSlots
+                ? "You can add up to 6 photos."
+                : nil
+            selectedImageItems = []
         }
     }
 
@@ -553,33 +627,105 @@ struct AddProductView: View {
 
     private func clearSelectedVideo() {
         if let selectedVideoURL {
-            try? FileManager.default.removeItem(at: selectedVideoURL)
+            if selectedVideoURL.isFileURL {
+                try? FileManager.default.removeItem(at: selectedVideoURL)
+            }
         }
 
+        draft.demoVideoURLString = ""
         selectedVideoURL = nil
         selectedVideoItem = nil
     }
 
     private func clearSelectedProductionPreview() {
         if let selectedProductionPreviewURL {
-            try? FileManager.default.removeItem(at: selectedProductionPreviewURL)
+            if selectedProductionPreviewURL.isFileURL {
+                try? FileManager.default.removeItem(at: selectedProductionPreviewURL)
+            }
         }
 
+        draft.productionPreviewURLString = ""
         selectedProductionPreviewURL = nil
         selectedProductionPreviewItem = nil
+    }
+
+    private func removePhoto(at index: Int) {
+        guard draft.imageURLStrings.indices.contains(index) else { return }
+        let reference = draft.imageURLStrings.remove(at: index)
+        if let fileURL = Product.previewMediaURL(for: reference), fileURL.isFileURL {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        mediaErrorMessage = nil
     }
 }
 
 struct SellerProductMediaSelection {
-    let selectedImages: [UIImage]
     let selectedVideoURL: URL?
+    let selectedProductionPreviewURL: URL?
+}
+
+enum SellerMarketplaceStatus: String, Codable {
+    case draft
+    case pendingReview
+    case live
+    case rejected
+    case archived
+
+    var title: String {
+        switch self {
+        case .draft: return "Draft"
+        case .pendingReview: return "Pending review"
+        case .live: return "Live"
+        case .rejected: return "Not approved"
+        case .archived: return "Archived"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .draft: return "Saved on this device"
+        case .pendingReview: return "Submitted to TenBelow"
+        case .live: return "Visible in marketplace"
+        case .rejected: return "Hidden until you revise and resubmit"
+        case .archived: return "Removed from the marketplace by TenBelow"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .draft: return "square.and.pencil"
+        case .pendingReview: return "clock.badge.checkmark"
+        case .live: return "checkmark.seal.fill"
+        case .rejected: return "xmark.circle.fill"
+        case .archived: return "archivebox.fill"
+        }
+    }
+
+    /// Maps server catalog fields to the seller-facing workflow chip.
+    static func fromServerProduct(_ p: RemoteProduct) -> SellerMarketplaceStatus {
+        let s = (p.approvalStatus ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch s {
+        case "archived":
+            return .archived
+        case "rejected":
+            return .rejected
+        case "submitted":
+            return .pendingReview
+        case "approved":
+            return (p.isActive && p.isApproved) ? .live : .pendingReview
+        default:
+            return (p.isActive && p.isApproved) ? .live : .pendingReview
+        }
+    }
 }
 
 struct SellerProductsView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
+    @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
 
     let seller: SellerProfile
     let products: [Product]
@@ -588,9 +734,9 @@ struct SellerProductsView: View {
     @State private var productDrafts: [SellerProductDraft]
     @State private var selectedDraft: SellerProductDraft?
     @State private var isShowingAddSheet = false
-    @State private var isShowingSubscriptionSheet = false
     @State private var hasPresentedInitialAdd = false
     @State private var syncMessage: String?
+    @State private var pendingDeleteDraft: SellerProductDraft?
 
     init(
         seller: SellerProfile = .sample,
@@ -614,21 +760,24 @@ struct SellerProductsView: View {
                 if let syncMessage {
                     Text(syncMessage)
                         .font(.tbCaption)
-                        .foregroundStyle(syncMessage.contains("device") ? .orange : .green)
+                        .foregroundStyle(syncMessageForeground(for: syncMessage))
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 ForEach(productDrafts) { draft in
                     Button {
-                        if sellerSubscription.hasActiveSubscription {
-                            selectedDraft = draft
-                        } else {
-                            isShowingSubscriptionSheet = true
-                        }
+                        selectedDraft = draft
                     } label: {
                         sellerProductCard(draft)
                     }
                     .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            pendingDeleteDraft = draft
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                 }
 
                 if productDrafts.isEmpty {
@@ -640,6 +789,15 @@ struct SellerProductsView: View {
             }
             .padding(TBTheme.spacingLG)
         }
+        .task {
+            await refreshInventoryFromServer()
+        }
+        .refreshable {
+            await refreshInventoryFromServer()
+        }
+        .onChange(of: catalogRefreshToken) { _, _ in
+            Task { await refreshInventoryFromServer() }
+        }
         .background(TBTheme.cloudWhite.ignoresSafeArea())
         .navigationTitle("My Products")
         #if os(iOS) || os(visionOS)
@@ -648,11 +806,7 @@ struct SellerProductsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    if sellerSubscription.hasActiveSubscription {
-                        isShowingAddSheet = true
-                    } else {
-                        isShowingSubscriptionSheet = true
-                    }
+                    Task { await presentAddProductFlow() }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 16, weight: .semibold))
@@ -674,9 +828,6 @@ struct SellerProductsView: View {
                     }
                 }
             }
-        }
-        .sheet(isPresented: $isShowingSubscriptionSheet) {
-            SellerSubscriptionView()
         }
         .sheet(item: $selectedDraft) { draft in
             NavigationStack {
@@ -700,10 +851,44 @@ struct SellerProductsView: View {
         .onAppear {
             guard startInAddMode, !hasPresentedInitialAdd else { return }
             hasPresentedInitialAdd = true
+            Task { await presentAddProductFlow() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await refreshInventoryFromServer() }
+        }
+        .confirmationDialog(
+            "Delete product?",
+            isPresented: Binding(
+                get: { pendingDeleteDraft != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingDeleteDraft = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeleteDraft
+        ) { draft in
+            Button("Delete", role: .destructive) {
+                deleteDraft(draft)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { draft in
+            Text("Remove \(draft.name.isEmpty ? "this product" : draft.name) from My Products on this device?")
+        }
+    }
+
+    private func presentAddProductFlow() async {
+        if sellerPreviewMode || sellerSubscription.hasActiveSubscription {
+            await MainActor.run { isShowingAddSheet = true }
+            return
+        }
+        await sellerSubscription.refresh()
+        await sellerSubscription.purchaseMembership()
+        await MainActor.run {
             if sellerSubscription.hasActiveSubscription {
                 isShowingAddSheet = true
-            } else {
-                isShowingSubscriptionSheet = true
             }
         }
     }
@@ -744,6 +929,28 @@ struct SellerProductsView: View {
                     )
                 }
 
+                if pendingReviewCount > 0 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock.badge.checkmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(TBTheme.icyBlue)
+                        Text("\(pendingReviewCount) listing\(pendingReviewCount == 1 ? "" : "s") awaiting marketplace review")
+                            .font(.tbCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if rejectedOrArchivedCount > 0 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.orange.opacity(0.85))
+                        Text("\(rejectedOrArchivedCount) listing\(rejectedOrArchivedCount == 1 ? "" : "s") not live (rejected or archived)")
+                            .font(.tbCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 if let latestDraft = productDrafts.first {
                     Text("Latest update: \(latestDraft.name.isEmpty ? "Untitled product" : latestDraft.name)")
                         .font(.tbCaption)
@@ -768,15 +975,32 @@ struct SellerProductsView: View {
 
                 Spacer()
 
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 6) {
+                    Image(systemName: draft.marketplaceStatus.symbolName)
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(draft.marketplaceStatus.title)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(statusTint(for: draft.marketplaceStatus))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(statusBackground(for: draft.marketplaceStatus), in: Capsule(style: .continuous))
             }
 
-            Text(draft.productionNote)
+            Text(draft.marketplaceStatus.subtitle)
                 .font(.tbCaption)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let notes = draft.serverReviewNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty,
+               draft.marketplaceStatus == .rejected {
+                Text("Feedback: \(notes)")
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack(spacing: 10) {
                 sellerMetaPill(draft.category.rawValue)
@@ -785,12 +1009,12 @@ struct SellerProductsView: View {
             }
         }
         .padding(16)
-        .background(.white.opacity(0.76), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(cardBackground(for: draft.marketplaceStatus), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
+                .strokeBorder(cardBorderColor(for: draft.marketplaceStatus), lineWidth: 0.9)
         )
-        .shadow(color: .black.opacity(0.03), radius: 10, y: 5)
+        .shadow(color: cardShadowColor(for: draft.marketplaceStatus), radius: 10, y: 5)
     }
 
     private func sellerMetaPill(_ text: String) -> some View {
@@ -832,8 +1056,80 @@ struct SellerProductsView: View {
         return Money.format(cents: average)
     }
 
+    private var pendingReviewCount: Int {
+        productDrafts.filter { $0.marketplaceStatus == .pendingReview }.count
+    }
+
+    private var rejectedOrArchivedCount: Int {
+        productDrafts.filter { $0.marketplaceStatus == .rejected || $0.marketplaceStatus == .archived }.count
+    }
+
+    private func syncMessageForeground(for message: String) -> Color {
+        if message.contains("failed") || message.contains("Failed") {
+            return .orange
+        }
+        if message.contains("not approved") || message.contains("rejected") || message.contains("archived") || message.contains("Archived") {
+            return .red
+        }
+        if message.contains("device") {
+            return .orange
+        }
+        return .green
+    }
+
+    private func refreshInventoryFromServer() async {
+        do {
+            let remote = try await SellerAPI.fetchSellerProducts(sellerId: seller.id)
+            await MainActor.run {
+                mergeRemoteInventory(remote)
+                if let m = syncMessage,
+                   m.contains("Couldn’t refresh") || m.contains("submission failed") {
+                    syncMessage = nil
+                }
+            }
+        } catch {
+            await MainActor.run {
+                syncMessage = "Couldn’t refresh listing status from the server. Pull to try again."
+            }
+        }
+    }
+
+    private func mergeRemoteInventory(_ remote: [RemoteProduct]) {
+        let remoteById = Dictionary(uniqueKeysWithValues: remote.map { ($0.id, $0) })
+        var result = productDrafts
+        for i in result.indices {
+            if let r = remoteById[result[i].id] {
+                result[i].marketplaceStatus = SellerMarketplaceStatus.fromServerProduct(r)
+                let trimmed = r.reviewNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                result[i].serverReviewNotes = trimmed.isEmpty ? nil : trimmed
+            }
+        }
+        let localIds = Set(result.map(\.id))
+        for r in remote where !localIds.contains(r.id) {
+            result.append(SellerProductDraft.fromRemoteProduct(r))
+        }
+        productDrafts = result.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        persistDrafts()
+        for d in productDrafts {
+            localProducts.saveDraft(d)
+        }
+    }
+
     private func persistDrafts() {
         SellerProductDraft.store(productDrafts, for: seller.id)
+    }
+
+    private func deleteDraft(_ draft: SellerProductDraft) {
+        productDrafts.removeAll { $0.id == draft.id }
+        persistDrafts()
+        localProducts.removeDraft(productId: draft.id)
+        if selectedDraft?.id == draft.id {
+            selectedDraft = nil
+        }
+        syncMessage = "Deleted from this device."
+        pendingDeleteDraft = nil
     }
 
     private func syncDraftToServer(
@@ -843,32 +1139,40 @@ struct SellerProductsView: View {
         let fallbackProduct = products.first(where: { $0.id == draft.id })
             ?? localProducts.product(withId: draft.id)
         let uploadedImageURLStrings = await uploadImagesIfNeeded(
-            mediaSelection.selectedImages,
-            draft: draft,
-            fallbackURLs: draft.imageURLStrings
+            draft.imageURLStrings,
+            draft: draft
         )
         let uploadedDemoVideoURLString = await uploadVideoIfNeeded(
             mediaSelection.selectedVideoURL,
             draft: draft,
-            fallbackURLString: draft.demoVideoURLString
+            fallbackURLString: draft.demoVideoURLString,
+            mediaKind: "demo-video"
+        )
+        let uploadedProductionPreviewURLString = await uploadVideoIfNeeded(
+            mediaSelection.selectedProductionPreviewURL,
+            draft: draft,
+            fallbackURLString: draft.productionPreviewURLString,
+            mediaKind: "production-preview"
         )
         var syncedDraft = draft
         syncedDraft.imageURLStrings = uploadedImageURLStrings
         syncedDraft.demoVideoURLString = uploadedDemoVideoURLString
+        syncedDraft.productionPreviewURLString = uploadedProductionPreviewURLString
         let request = UpsertSellerProductRequest(
             name: syncedDraft.name.isEmpty ? "Untitled Product" : syncedDraft.name,
             priceCents: max(syncedDraft.priceCents, 0),
             category: syncedDraft.category.rawValue,
             imageURLs: uploadedImageURLStrings.isEmpty ? (fallbackProduct?.imageNames ?? []) : uploadedImageURLStrings,
             demoVideoURL: uploadedDemoVideoURLString.isEmpty ? fallbackProduct?.demoVideoURL?.absoluteString : uploadedDemoVideoURLString,
+            productionPreviewURL: uploadedProductionPreviewURLString.isEmpty ? fallbackProduct?.productionPreviewURL?.absoluteString : uploadedProductionPreviewURLString,
             material: syncedDraft.material.isEmpty ? "PLA+" : syncedDraft.material,
             durabilityNote: syncedDraft.durabilityNote.isEmpty ? "Built for everyday use." : syncedDraft.durabilityNote,
             careWarnings: syncedDraft.warningLines.isEmpty ? ["Handle with care."] : syncedDraft.warningLines,
             shipsInMinDays: min(syncedDraft.shipsInMinDays, syncedDraft.shipsInMaxDays),
             shipsInMaxDays: max(syncedDraft.shipsInMinDays, syncedDraft.shipsInMaxDays),
             isDrop: false,
-            isActive: true,
-            isApproved: true
+            isActive: false,
+            isApproved: false
         )
 
         do {
@@ -878,6 +1182,9 @@ struct SellerProductsView: View {
                 product: request
             )
             await MainActor.run {
+                syncedDraft.marketplaceStatus = SellerMarketplaceStatus.fromServerProduct(remoteProduct)
+                let trimmed = remoteProduct.reviewNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                syncedDraft.serverReviewNotes = trimmed.isEmpty ? nil : trimmed
                 if let index = productDrafts.firstIndex(where: { $0.id == draft.id }) {
                     productDrafts[index] = syncedDraft
                 }
@@ -885,47 +1192,161 @@ struct SellerProductsView: View {
                 localProducts.saveDraft(syncedDraft)
                 catalog.upsertRemoteProduct(remoteProduct)
                 catalogRefreshToken += 1
-                syncMessage = "Saved and synced to your live store."
+                syncMessage = syncSummaryMessage(for: syncedDraft.marketplaceStatus)
             }
         } catch {
             await MainActor.run {
-                syncMessage = "Saved on this device. Live store sync failed for now."
+                let details = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                if details.isEmpty || details == "The operation couldn’t be completed." {
+                    syncMessage = "Saved on this device. Marketplace submission failed for now."
+                } else {
+                    syncMessage = "Saved on this device. Marketplace submission failed for now. \(details)"
+                }
             }
         }
     }
 
+    private func syncSummaryMessage(for status: SellerMarketplaceStatus) -> String {
+        switch status {
+        case .live:
+            return "Saved and synced to your live store."
+        case .pendingReview:
+            return "Saved and submitted for TenBelow review."
+        case .rejected:
+            return "Saved. This listing was not approved — review feedback and resubmit when ready."
+        case .archived:
+            return "Saved. This listing is archived and hidden from the marketplace."
+        case .draft:
+            return "Saved on this device."
+        }
+    }
+
+    private func statusTint(for status: SellerMarketplaceStatus) -> Color {
+        switch status {
+        case .draft:
+            return TBTheme.deepSky
+        case .pendingReview:
+            return TBTheme.icyBlue
+        case .live:
+            return .green
+        case .rejected:
+            return .red
+        case .archived:
+            return Color.secondary
+        }
+    }
+
+    private func statusBackground(for status: SellerMarketplaceStatus) -> Color {
+        switch status {
+        case .draft:
+            return TBTheme.skyLight.opacity(0.28)
+        case .pendingReview:
+            return TBTheme.skyBlue.opacity(0.14)
+        case .live:
+            return Color.green.opacity(0.14)
+        case .rejected:
+            return Color.red.opacity(0.12)
+        case .archived:
+            return Color.gray.opacity(0.12)
+        }
+    }
+
+    private func cardBackground(for status: SellerMarketplaceStatus) -> Color {
+        switch status {
+        case .live:
+            return Color.green.opacity(0.08)
+        case .rejected:
+            return Color.red.opacity(0.07)
+        case .archived:
+            return Color.gray.opacity(0.10)
+        case .pendingReview:
+            return Color.white.opacity(0.78)
+        case .draft:
+            return Color.white.opacity(0.76)
+        }
+    }
+
+    private func cardBorderColor(for status: SellerMarketplaceStatus) -> Color {
+        switch status {
+        case .live:
+            return Color.green.opacity(0.24)
+        case .rejected:
+            return Color.red.opacity(0.24)
+        case .archived:
+            return Color.gray.opacity(0.18)
+        case .pendingReview:
+            return TBTheme.skyBlue.opacity(0.16)
+        case .draft:
+            return TBTheme.skyBlue.opacity(0.12)
+        }
+    }
+
+    private func cardShadowColor(for status: SellerMarketplaceStatus) -> Color {
+        switch status {
+        case .live:
+            return Color.green.opacity(0.08)
+        case .rejected:
+            return Color.red.opacity(0.08)
+        case .archived:
+            return Color.black.opacity(0.02)
+        case .pendingReview, .draft:
+            return Color.black.opacity(0.03)
+        }
+    }
+
     private func uploadImagesIfNeeded(
-        _ selectedImages: [UIImage],
-        draft: SellerProductDraft,
-        fallbackURLs: [String]
+        _ imageReferences: [String],
+        draft: SellerProductDraft
     ) async -> [String] {
-        guard !selectedImages.isEmpty else { return fallbackURLs }
+        let trimmedReferences = imageReferences
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !trimmedReferences.isEmpty else { return [] }
 
         var uploadedURLs: [String] = []
-        for (index, image) in selectedImages.enumerated() {
-            guard let imageData = image.jpegData(compressionQuality: 0.84) else { continue }
+        for (index, reference) in trimmedReferences.prefix(6).enumerated() {
+            if let remoteURL = Product.mediaURL(for: reference) {
+                uploadedURLs.append(remoteURL.absoluteString)
+                continue
+            }
+
+            guard let localURL = Product.previewMediaURL(for: reference), localURL.isFileURL else {
+                uploadedURLs.append(reference)
+                continue
+            }
+
+            guard let imageData = try? Data(contentsOf: localURL) else {
+                uploadedURLs.append(reference)
+                continue
+            }
+
+            let fileExtension = localURL.pathExtension.lowercased().isEmpty ? "jpg" : localURL.pathExtension.lowercased()
+
             do {
                 let url = try await SellerAPI.uploadMedia(
                     sellerId: seller.id,
                     productId: draft.id,
                     mediaKind: "image",
                     slot: "\(index)",
-                    fileExtension: "jpg",
-                    contentType: "image/jpeg",
+                    fileExtension: fileExtension,
+                    contentType: imageContentType(for: fileExtension),
                     data: imageData
                 )
                 uploadedURLs.append(url)
             } catch {
-                return fallbackURLs
+                uploadedURLs.append(reference)
             }
         }
-        return uploadedURLs.isEmpty ? fallbackURLs : uploadedURLs
+
+        return uploadedURLs
     }
 
     private func uploadVideoIfNeeded(
         _ selectedVideoURL: URL?,
         draft: SellerProductDraft,
-        fallbackURLString: String
+        fallbackURLString: String,
+        mediaKind: String
     ) async -> String {
         guard let selectedVideoURL else { return fallbackURLString }
         guard selectedVideoURL.isFileURL, let videoData = try? Data(contentsOf: selectedVideoURL) else {
@@ -937,7 +1358,7 @@ struct SellerProductsView: View {
             return try await SellerAPI.uploadMedia(
                 sellerId: seller.id,
                 productId: draft.id,
-                mediaKind: "demo-video",
+                mediaKind: mediaKind,
                 slot: "0",
                 fileExtension: fileExtension,
                 contentType: "video/\(fileExtension == "mp4" ? "mp4" : "quicktime")",
@@ -945,6 +1366,19 @@ struct SellerProductsView: View {
             )
         } catch {
             return fallbackURLString.isEmpty ? selectedVideoURL.absoluteString : fallbackURLString
+        }
+    }
+
+    private func imageContentType(for fileExtension: String) -> String {
+        switch fileExtension.lowercased() {
+        case "png":
+            return "image/png"
+        case "webp":
+            return "image/webp"
+        case "heic", "heif":
+            return "image/heic"
+        default:
+            return "image/jpeg"
         }
     }
 }
@@ -966,6 +1400,9 @@ struct SellerProductDraft: Identifiable, Codable {
     /// Separate post-purchase clip shown in buyer Order Details.
     /// This is intentionally independent from public product photos/demo media.
     var productionPreviewURLString: String = ""
+    var marketplaceStatusRaw: String? = nil
+    /// Admin rejection rationale from the server (shown when `marketplaceStatus` is `.rejected`).
+    var serverReviewNotes: String? = nil
 
     init(product: Product) {
         id = product.id
@@ -982,6 +1419,8 @@ struct SellerProductDraft: Identifiable, Codable {
         shipsInMinDays = product.shipsInDays.lowerBound
         shipsInMaxDays = product.shipsInDays.upperBound
         productionPreviewURLString = product.productionPreviewURL?.absoluteString ?? ""
+        marketplaceStatusRaw = SellerMarketplaceStatus.live.rawValue
+        serverReviewNotes = nil
     }
 
     static func new(sellerId: String = SellerProfile.sample.id) -> SellerProductDraft {
@@ -999,7 +1438,9 @@ struct SellerProductDraft: Identifiable, Codable {
             careWarningsText: "",
             shipsInMinDays: 2,
             shipsInMaxDays: 4,
-            productionPreviewURLString: ""
+            productionPreviewURLString: "",
+            marketplaceStatusRaw: SellerMarketplaceStatus.draft.rawValue,
+            serverReviewNotes: nil
         )
     }
 
@@ -1017,7 +1458,9 @@ struct SellerProductDraft: Identifiable, Codable {
         careWarningsText: String,
         shipsInMinDays: Int,
         shipsInMaxDays: Int,
-        productionPreviewURLString: String
+        productionPreviewURLString: String,
+        marketplaceStatusRaw: String? = nil,
+        serverReviewNotes: String? = nil
     ) {
         self.id = id
         self.sellerId = sellerId
@@ -1033,6 +1476,31 @@ struct SellerProductDraft: Identifiable, Codable {
         self.shipsInMinDays = shipsInMinDays
         self.shipsInMaxDays = shipsInMaxDays
         self.productionPreviewURLString = productionPreviewURLString
+        self.marketplaceStatusRaw = marketplaceStatusRaw
+        self.serverReviewNotes = serverReviewNotes
+    }
+
+    static func fromRemoteProduct(_ p: RemoteProduct) -> SellerProductDraft {
+        let storefront = p.asStorefrontProduct()
+        let notes = p.reviewNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return SellerProductDraft(
+            id: p.id,
+            sellerId: p.sellerId,
+            name: p.name,
+            priceText: String(format: "%.2f", Double(p.priceCents) / 100.0),
+            category: storefront.category,
+            imageURLStrings: p.imageURLs,
+            demoVideoURLString: p.demoVideoURL ?? "",
+            material: p.material,
+            productionNote: "Printed fresh when you order",
+            durabilityNote: p.durabilityNote,
+            careWarningsText: p.careWarnings.joined(separator: "\n"),
+            shipsInMinDays: p.shipsInMinDays,
+            shipsInMaxDays: p.shipsInMaxDays,
+            productionPreviewURLString: p.productionPreviewURL ?? "",
+            marketplaceStatusRaw: SellerMarketplaceStatus.fromServerProduct(p).rawValue,
+            serverReviewNotes: notes.isEmpty ? nil : notes
+        )
     }
 
     var priceCents: Int {
@@ -1049,6 +1517,11 @@ struct SellerProductDraft: Identifiable, Codable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
+
+    var marketplaceStatus: SellerMarketplaceStatus {
+        get { SellerMarketplaceStatus(rawValue: marketplaceStatusRaw ?? "") ?? .draft }
+        set { marketplaceStatusRaw = newValue.rawValue }
+    }
 }
 
 struct SellerStorePreviewView: View {
@@ -1060,8 +1533,7 @@ struct SellerStorePreviewView: View {
             PublicSellerProfileView(
                 seller: seller,
                 products: previewDisplayProducts,
-                previewDraftIDs: previewDraftIDs,
-                showsDraftPreviewBanner: showsDraftPreviewBanner
+                previewDraftIDs: previewDraftIDs
             )
         } else {
             Text("Store Preview").navigationTitle("Store Preview")
@@ -1093,10 +1565,6 @@ struct SellerStorePreviewView: View {
 
     private var previewDraftIDs: Set<String> {
         Set(localDrafts.map(\.id))
-    }
-
-    private var showsDraftPreviewBanner: Bool {
-        !localDrafts.isEmpty
     }
 
     private var localDrafts: [SellerProductDraft] {
@@ -1320,26 +1788,46 @@ struct SupportView: View {
                         openURL(URL(string: "mailto:\(AppConstants.reportListingEmail)?subject=TenBelow%20Seller%20Support")!)
                     }
 
-                    supportActionButton(
-                        title: "View Seller Agreement",
-                        subtitle: "Review marketplace expectations and seller terms.",
-                        icon: "doc.text.fill"
-                    ) {
-                        openURL(AppConstants.sellerAgreementURL)
+                    NavigationLink {
+                        LegalDocumentView(document: .sellerAgreement)
+                    } label: {
+                        supportNavigationRow(
+                            title: "View Seller Agreement",
+                            subtitle: "Review marketplace expectations and seller terms.",
+                            icon: "doc.text.fill"
+                        )
                     }
+                    .buttonStyle(.plain)
                 }
 
                 SellerSettingsCard(title: "Helpful Links") {
-                    supportLinkRow(title: "Exchange Policy", subtitle: "Buyer-facing exchange guidelines", url: AppConstants.exchangePolicyURL)
-                    supportLinkRow(title: "IP Policy", subtitle: "Know what can and can’t be listed", url: AppConstants.ipPolicyURL)
-                    supportLinkRow(title: "DMCA", subtitle: "Report infringement or review copyright policy", url: AppConstants.dmcaURL)
-                    supportLinkRow(title: "Privacy Policy", subtitle: "See how TenBelow handles seller data", url: AppConstants.privacyPolicyURL)
-                }
+                    NavigationLink {
+                        LegalDocumentView(document: .exchangePolicy)
+                    } label: {
+                        supportLinkRow(title: "Exchange Policy", subtitle: "Buyer-facing exchange guidelines")
+                    }
+                    .buttonStyle(.plain)
 
-                SellerSettingsCard(title: "Seller FAQ") {
-                    faqRow(question: "When do I need to handle subscription setup?", answer: "You can wait until you begin uploading products. The app will remind you again before you publish.")
-                    faqRow(question: "What should I include in my shipping settings?", answer: "Set your real processing time, main shipping region, and any rate notes so buyers understand delivery expectations before checkout.")
-                    faqRow(question: "How should I write product policies?", answer: "Keep them short and specific. Tell buyers whether returns, exchanges, and cancellations are accepted and note anything custom-made that may be final sale.")
+                    NavigationLink {
+                        InAppPolicyBrowser(url: AppConstants.ipPolicyURL)
+                    } label: {
+                        supportLinkRow(title: "IP Policy", subtitle: "Know what can and can’t be listed")
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        LegalDocumentView(document: .dmcaPolicy)
+                    } label: {
+                        supportLinkRow(title: "DMCA", subtitle: "Report infringement or review copyright policy")
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        LegalDocumentView(document: .privacyPolicy)
+                    } label: {
+                        supportLinkRow(title: "Privacy Policy", subtitle: "See how TenBelow handles seller data")
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, TBTheme.spacingLG)
@@ -1355,80 +1843,36 @@ struct SupportView: View {
 
     private func supportActionButton(title: String, subtitle: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(TBTheme.icyBlue)
-                    .frame(width: 34, height: 34)
-                    .background(TBTheme.skyLight.opacity(0.35), in: Circle())
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.tbBodyStrong)
-                        .foregroundStyle(TBTheme.deepSky)
-
-                    Text(subtitle)
-                        .font(.tbCaption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer()
-
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(14)
-            .background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
-            )
+            supportNavigationRow(title: title, subtitle: subtitle, icon: icon, trailingSymbol: "arrow.up.right")
         }
         .buttonStyle(.plain)
     }
 
-    private func supportLinkRow(title: String, subtitle: String, url: URL) -> some View {
-        Button {
-            openURL(url)
-        } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.tbBodyStrong)
-                        .foregroundStyle(TBTheme.deepSky)
+    private func supportNavigationRow(title: String, subtitle: String, icon: String, trailingSymbol: String = "chevron.right") -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(TBTheme.icyBlue)
+                .frame(width: 34, height: 34)
+                .background(TBTheme.skyLight.opacity(0.35), in: Circle())
 
-                    Text(subtitle)
-                        .font(.tbCaption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
 
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                Text(subtitle)
+                    .font(.tbCaption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
 
-    private func faqRow(question: String, answer: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(question)
-                .font(.tbBodyStrong)
-                .foregroundStyle(TBTheme.deepSky)
+            Spacer()
 
-            Text(answer)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineSpacing(2)
+            Image(systemName: trailingSymbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tertiary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
@@ -1436,84 +1880,129 @@ struct SupportView: View {
                 .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
         )
     }
+
+    private func supportLinkRow(title: String, subtitle: String) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
+
+                Text(subtitle)
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
 }
 
 struct PayoutSettingsView: View {
+    @Environment(\.openURL) private var openURL
+    @AppStorage("sellerSellerId") private var sellerId = ""
     @AppStorage("sellerEmail") private var sellerEmail = ""
-    @State private var draft = SellerPayoutSettingsDraft.load()
-    @State private var saveMessage: String?
+    @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
+    @State private var status: SellerStatusResponse?
+    @State private var errorMessage: String?
+    @State private var infoMessage: String?
+    @State private var isLoadingStatus = false
+    @State private var isOpeningStripe = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: TBTheme.spacingLG) {
                 SellerSettingsHeader(
                     title: "Payout Settings",
-                    subtitle: "Set a clean preview of how seller payouts, banking details, and notifications will look."
+                    subtitle: "Manage seller payouts securely through Stripe Connect."
                 )
 
-                SellerSettingsCard(title: "Payout Schedule") {
-                    Picker("Schedule", selection: $draft.schedule) {
-                        ForEach(SellerPayoutSchedule.allCases) { option in
-                            Text(option.title).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    SellerSettingsToggleField(
-                        title: "Email payout updates",
-                        subtitle: "Get notified when transfers are scheduled or delayed.",
-                        isOn: $draft.emailNotificationsEnabled
-                    )
-                }
-
-                SellerSettingsCard(title: "Banking") {
-                    SellerSettingsTextField(
-                        title: "Account holder",
-                        text: $draft.accountHolder,
-                        prompt: "PrintCraft Studio LLC"
-                    )
-
-                    SellerSettingsTextField(
-                        title: "Bank name",
-                        text: $draft.bankName,
-                        prompt: "Chase"
-                    )
-
-                    SellerSettingsTextField(
-                        title: "Account ending",
-                        text: $draft.accountLast4,
-                        prompt: "4242"
-                    )
-                    .keyboardType(.numberPad)
-
-                    SellerSettingsTextField(
-                        title: "Payout email",
-                        text: Binding(
-                            get: { draft.payoutEmail.isEmpty ? sellerEmail : draft.payoutEmail },
-                            set: { draft.payoutEmail = $0 }
-                        ),
-                        prompt: "seller@email.com"
-                    )
-                    .keyboardType(.emailAddress)
-                }
-
-                SellerSettingsCard(title: "Preview Note") {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "info.circle.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(TBTheme.icyBlue)
-
-                        Text("This is a local preview of payout details. Real bank onboarding and transfer verification can hook into Stripe later.")
+                if sellerPreviewMode {
+                    SellerSettingsCard(title: "Preview Mode") {
+                        Text("Stripe payout setup is unavailable while seller preview mode is active. Connect the live backend and sign in with a real seller account to finish onboarding.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineSpacing(2)
                     }
                 }
 
-                if let saveMessage {
-                    Text(saveMessage)
+                SellerSettingsCard(title: "Stripe Account") {
+                    stripeStatusRow(
+                        title: "Seller ID",
+                        value: sellerId.isEmpty ? "Not available" : sellerId
+                    )
+                    stripeStatusRow(
+                        title: "Payout email",
+                        value: sellerEmail.isEmpty ? "Not available" : sellerEmail
+                    )
+                    stripeStatusRow(
+                        title: "Stripe account",
+                        value: maskedStripeAccountId
+                    )
+                    stripeStatusRow(
+                        title: "Details submitted",
+                        value: status?.detailsSubmitted == true ? "Complete" : "Pending"
+                    )
+                    stripeStatusRow(
+                        title: "Charges",
+                        value: status?.chargesEnabled == true ? "Enabled" : "Pending"
+                    )
+                    stripeStatusRow(
+                        title: "Payouts",
+                        value: status?.payoutsEnabled == true ? "Enabled" : "Pending"
+                    )
+                }
+
+                SellerSettingsCard(title: "How It Works") {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(TBTheme.icyBlue)
+
+                        Text("Bank account collection, identity verification, and payout dashboard access are handled in Stripe. TenBelow does not manage full banking details directly in this screen.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(2)
+                    }
+                }
+
+                if let status {
+                    SellerSettingsCard(title: "Payout Readiness") {
+                        Text(status.onboardingComplete
+                             ? "Your Stripe payout setup is complete. You can review transfers and payout timing in Stripe Express."
+                             : "Your Stripe payout setup is not finished yet. Continue onboarding in Stripe to enable transfers from orders.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(2)
+                    }
+                } else if !sellerPreviewMode {
+                    SellerSettingsCard(title: "Status") {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(isLoadingStatus ? "Checking Stripe payout status..." : "Stripe payout status will appear here.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if let infoMessage {
+                    Text(infoMessage)
                         .font(.caption)
                         .foregroundStyle(.green)
+                }
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
             }
             .padding(.horizontal, TBTheme.spacingLG)
@@ -1525,20 +2014,186 @@ struct PayoutSettingsView: View {
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .task {
+            await refreshStripeStatus()
+        }
         .safeAreaInset(edge: .bottom) {
-            SellerSettingsSaveBar(title: "Save Payout Settings", action: savePayoutSettings)
+            payoutActionBar
         }
     }
 
-    private func savePayoutSettings() {
-        draft.accountLast4 = String(draft.accountLast4.filter(\.isNumber).prefix(4))
-        draft.payoutEmail = draft.payoutEmail.trimmingCharacters(in: .whitespacesAndNewlines)
-        draft.store()
-        saveMessage = "Payout settings saved locally."
+    private var maskedStripeAccountId: String {
+        guard let accountId = status?.stripeAccountId, !accountId.isEmpty else {
+            return sellerPreviewMode ? "Preview account" : "Not connected yet"
+        }
+        if accountId.count <= 10 { return accountId }
+        return "\(accountId.prefix(8))...\(accountId.suffix(4))"
+    }
+
+    @ViewBuilder
+    private var payoutActionBar: some View {
+        VStack(spacing: 10) {
+            Button {
+                Task {
+                    if status?.onboardingComplete == true {
+                        await openStripeDashboard()
+                    } else {
+                        await openStripeOnboarding()
+                    }
+                }
+            } label: {
+                Text(primaryActionTitle)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        LinearGradient(
+                            colors: [TBTheme.accent, TBTheme.deepSky],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(!isPrimaryActionEnabled)
+            .opacity(isPrimaryActionEnabled ? 1 : 0.6)
+
+            Button {
+                Task { await refreshStripeStatus() }
+            } label: {
+                Text(isLoadingStatus ? "Refreshing..." : "Refresh payout status")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(TBTheme.deepSky)
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoadingStatus)
+        }
+        .padding(.horizontal, TBTheme.spacingLG)
+        .padding(.top, 12)
+        .padding(.bottom, 12)
+        .background(.ultraThinMaterial)
+    }
+
+    private var primaryActionTitle: String {
+        if isOpeningStripe {
+            return "Opening Stripe..."
+        }
+        if status?.onboardingComplete == true {
+            return "Open Stripe Dashboard"
+        }
+        return "Continue Stripe Payout Setup"
+    }
+
+    private var isPrimaryActionEnabled: Bool {
+        !sellerPreviewMode && !sellerId.isEmpty && !isOpeningStripe
+    }
+
+    private func stripeStatusRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(TBTheme.deepSky)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func refreshStripeStatus() async {
+        guard !sellerPreviewMode, !sellerId.isEmpty else { return }
+
+        await MainActor.run {
+            isLoadingStatus = true
+            errorMessage = nil
+        }
+
+        do {
+            let refreshedStatus = try await SellerAPI.onboardingStatus(sellerId: sellerId)
+            await MainActor.run {
+                status = refreshedStatus
+                infoMessage = nil
+                isLoadingStatus = false
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                isLoadingStatus = false
+            }
+        }
+    }
+
+    private func openStripeOnboarding() async {
+        guard !sellerPreviewMode, !sellerId.isEmpty else { return }
+
+        await MainActor.run {
+            isOpeningStripe = true
+            errorMessage = nil
+        }
+
+        defer {
+            Task { @MainActor in
+                isOpeningStripe = false
+            }
+        }
+
+        do {
+            let response = try await SellerAPI.onboardingLink(sellerId: sellerId)
+            guard let url = URL(string: response.onboardingUrl) else {
+                throw URLError(.badURL)
+            }
+            await MainActor.run {
+                infoMessage = "Stripe opened in your browser. Come back here and tap refresh after finishing setup."
+            }
+            await MainActor.run {
+                openURL(url)
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func openStripeDashboard() async {
+        guard !sellerPreviewMode, !sellerId.isEmpty else { return }
+
+        await MainActor.run {
+            isOpeningStripe = true
+            errorMessage = nil
+        }
+
+        defer {
+            Task { @MainActor in
+                isOpeningStripe = false
+            }
+        }
+
+        do {
+            let response = try await SellerAPI.dashboardLink(sellerId: sellerId)
+            guard let url = URL(string: response.dashboardUrl) else {
+                throw URLError(.badURL)
+            }
+            await MainActor.run {
+                openURL(url)
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 }
 
 struct EditSellerProfileView: View {
+    /// Same height as `PublicSellerProfileView.bannerHeader` so picked photos crop like the live storefront.
+    private enum SellerProfileMedia {
+        static let bannerPreviewHeight: CGFloat = 84
+    }
+
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var catalog: CatalogStore
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
@@ -1548,11 +2203,25 @@ struct EditSellerProfileView: View {
     @State private var draft: SellerProfileDraft
     @State private var errorMessage: String?
     @State private var isSaving = false
+    @State private var selectedAvatarItem: PhotosPickerItem?
+    @State private var selectedBannerItem: PhotosPickerItem?
+    @State private var selectedAvatarImage: UIImage?
+    @State private var selectedBannerImage: UIImage?
+    @State private var bannerZoom: CGFloat = 1
+    @State private var bannerPan: CGSize = .zero
+    @State private var bannerPreviewWidth: CGFloat = 0
+    @State private var bannerEditSession = 0
 
     init(seller: Binding<SellerProfile>) {
         _seller = seller
         _draft = State(initialValue: SellerProfileDraft(seller: seller.wrappedValue))
     }
+
+    #if os(iOS)
+    private var activeScreenWidth: CGFloat? {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width
+    }
+    #endif
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -1607,6 +2276,18 @@ struct EditSellerProfileView: View {
             .padding(.bottom, 12)
             .background(.ultraThinMaterial)
         }
+        .onChange(of: selectedAvatarItem) { _, item in
+            Task { selectedAvatarImage = await loadProfileImage(from: item) }
+        }
+        .onChange(of: selectedBannerItem) { _, item in
+            Task { selectedBannerImage = await loadProfileImage(from: item) }
+        }
+        .onChange(of: selectedBannerImage) { _, new in
+            guard new != nil else { return }
+            bannerZoom = 1
+            bannerPan = .zero
+            bannerEditSession += 1
+        }
     }
 
     private var headerSection: some View {
@@ -1627,6 +2308,7 @@ struct EditSellerProfileView: View {
             VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
                 sectionTitle("Public Profile")
 
+                profileMediaSection
                 profileField("Shop name", text: $draft.displayName)
                 profileField("Handle", text: $draft.handle, prefix: "@")
                 profileField("Location", text: $draft.location)
@@ -1647,8 +2329,164 @@ struct EditSellerProfileView: View {
                                 .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 1)
                         )
                 }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Custom orders")
+                        .font(.tbCaption)
+                        .foregroundStyle(.secondary)
+
+                    Toggle(isOn: $draft.acceptsCustomOrders) {
+                        Text("Accept custom order requests")
+                            .font(.tbBody)
+                    }
+                    .tint(TBTheme.deepSky)
+
+                    Text("Buyers will see a small “Custom” action on your public storefront to describe a project and attach reference photos. You’ll get an email when email is configured on the server.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    profileField(
+                        "Custom order info link (optional)",
+                        text: $draft.customOrderInfoURLString,
+                        prompt: "https://example.com/custom-guidelines"
+                    )
+                }
             }
         }
+    }
+
+    private var profileMediaSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Storefront images")
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 10) {
+                sellerBannerPreview
+
+                if selectedBannerImage != nil {
+                    Text("Pinch and drag on the banner to choose what buyers see.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                PhotosPicker(selection: $selectedBannerItem, matching: .images, photoLibrary: .shared()) {
+                    profileMediaButtonLabel(
+                        title: selectedBannerImage == nil && draft.bannerURLString.isEmpty ? "Add banner" : "Update banner",
+                        icon: "photo.fill.on.rectangle.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(alignment: .center, spacing: 14) {
+                sellerAvatarPreview
+
+                PhotosPicker(selection: $selectedAvatarItem, matching: .images, photoLibrary: .shared()) {
+                    profileMediaButtonLabel(
+                        title: selectedAvatarImage == nil && draft.avatarURLString.isEmpty ? "Add photo" : "Update photo",
+                        icon: "person.crop.circle.badge.plus"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var sellerBannerPreview: some View {
+        Group {
+            if let selectedBannerImage {
+                SellerBannerEditSlot(
+                    image: selectedBannerImage,
+                    slotHeight: SellerProfileMedia.bannerPreviewHeight,
+                    zoom: $bannerZoom,
+                    pan: $bannerPan,
+                    reportedPreviewWidth: $bannerPreviewWidth
+                )
+                .id(bannerEditSession)
+            } else {
+                StorefrontImageView(reference: draft.bannerURLString, contentMode: .fill) {
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.30, green: 0.58, blue: 0.96),
+                            Color(red: 0.48, green: 0.72, blue: 0.98),
+                            Color(red: 0.83, green: 0.91, blue: 1.0)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: SellerProfileMedia.bannerPreviewHeight)
+                .clipped()
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: SellerProfileMedia.bannerPreviewHeight)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(.white.opacity(0.72), lineWidth: 1)
+        )
+        .shadow(color: TBTheme.deepSky.opacity(0.08), radius: 10, y: 4)
+    }
+
+    private var sellerAvatarPreview: some View {
+        ZStack {
+            Circle()
+                .fill(.white)
+                .frame(width: 76, height: 76)
+                .shadow(color: .black.opacity(0.06), radius: 10, y: 4)
+
+            Group {
+                if let selectedAvatarImage {
+                    Image(uiImage: selectedAvatarImage)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    StorefrontImageView(reference: draft.avatarURLString, contentMode: .fill) {
+                        Circle()
+                            .fill(TBTheme.skyLight.opacity(0.9))
+                            .overlay {
+                                Text(avatarInitials)
+                                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                                    .foregroundStyle(TBTheme.deepSky)
+                            }
+                    }
+                }
+            }
+            .frame(width: 68, height: 68)
+            .clipShape(Circle())
+        }
+    }
+
+    private var avatarInitials: String {
+        let words = draft.displayName.split(separator: " ")
+        let letters = words.prefix(2).compactMap { $0.first }.map { String($0).uppercased() }
+        return letters.isEmpty ? "TB" : letters.joined()
+    }
+
+    private func profileMediaButtonLabel(title: String, icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+            Text(title)
+                .font(.tbBodyStrong)
+            Spacer(minLength: 8)
+            Image(systemName: "plus")
+                .font(.system(size: 14, weight: .bold))
+        }
+        .foregroundStyle(TBTheme.deepSky)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
+        .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 1)
+        )
     }
 
     private var shopDetailsSection: some View {
@@ -1774,18 +2612,49 @@ struct EditSellerProfileView: View {
         let processingTime = draft.processingTime.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? seller.processingTime
             : draft.processingTime.trimmingCharacters(in: .whitespacesAndNewlines)
+        let uploadedAvatarURLString = await uploadProfileImageIfNeeded(
+            selectedAvatarImage,
+            mediaKind: "avatar",
+            fallbackURLString: draft.avatarURLString
+        )
+        let bannerUploadImage: UIImage? = {
+            guard let selectedBannerImage else { return nil }
+            let previewW: CGFloat = bannerPreviewWidth > 10
+                ? bannerPreviewWidth
+                : max((activeScreenWidth ?? 390) - TBTheme.spacingLG * 2, 320)
+            let previewH = SellerProfileMedia.bannerPreviewHeight
+            return SellerBannerCropExporter.renderForUpload(
+                image: selectedBannerImage,
+                previewContainerPoints: CGSize(width: previewW, height: previewH),
+                zoom: bannerZoom,
+                panPoints: bannerPan
+            )
+        }()
+        let uploadedBannerURLString = await uploadProfileImageIfNeeded(
+            bannerUploadImage,
+            mediaKind: "banner",
+            fallbackURLString: draft.bannerURLString
+        )
 
         let request = UpdateSellerProfileRequest(
             displayName: trimmedDisplayName,
             handle: "@\(normalizedHandle)",
             bio: trimmedBio,
+            avatarURL: uploadedAvatarURLString.isEmpty ? nil : uploadedAvatarURLString,
+            bannerURL: uploadedBannerURLString.isEmpty ? nil : uploadedBannerURLString,
             websiteURL: draft.normalizedWebsiteURL?.absoluteString,
             location: trimmedLocation,
             materials: materials,
             processingTime: processingTime,
             shipsInMinDays: minDays,
-            shipsInMaxDays: maxDays
+            shipsInMaxDays: maxDays,
+            acceptsCustomOrders: draft.acceptsCustomOrders,
+            customOrderInfoURL: draft.normalizedCustomOrderInfoURL?.absoluteString
         )
+
+        #if DEBUG
+        print("[ProfileSave] starting save sellerId=\(seller.id) avatar=\(uploadedAvatarURLString) banner=\(uploadedBannerURLString)")
+        #endif
 
         isSaving = true
         defer { isSaving = false }
@@ -1800,6 +2669,9 @@ struct EditSellerProfileView: View {
             updatedSeller.storeLocally()
             catalog.upsertSellerProfile(updatedSeller)
             catalogRefreshToken += 1
+            #if DEBUG
+            print("[ProfileSave] success sellerId=\(updatedSeller.id) avatar=\(updatedSeller.avatarURL?.absoluteString ?? "nil") banner=\(updatedSeller.bannerURL?.absoluteString ?? "nil") refreshToken=\(catalogRefreshToken)")
+            #endif
             errorMessage = nil
             dismiss()
         } catch {
@@ -1808,8 +2680,12 @@ struct EditSellerProfileView: View {
                 displayName: trimmedDisplayName,
                 handle: "@\(normalizedHandle)",
                 bio: trimmedBio,
-                avatarURL: seller.avatarURL,
-                bannerURL: seller.bannerURL,
+                avatarMediaReference: uploadedAvatarURLString.isEmpty
+                    ? seller.avatarMediaReference
+                    : uploadedAvatarURLString,
+                bannerMediaReference: uploadedBannerURLString.isEmpty
+                    ? seller.bannerMediaReference
+                    : uploadedBannerURLString,
                 websiteURL: draft.normalizedWebsiteURL,
                 location: trimmedLocation,
                 shipsInDays: minDays...maxDays,
@@ -1822,13 +2698,57 @@ struct EditSellerProfileView: View {
                 pageViewCount: seller.pageViewCount,
                 designLicense: seller.designLicense,
                 isVerified: seller.isVerified,
+                acceptsCustomOrders: draft.acceptsCustomOrders,
+                customOrderInfoURL: draft.normalizedCustomOrderInfoURL,
                 joinedAt: seller.joinedAt
             )
             seller = fallbackSeller
             storedBusinessName = fallbackSeller.displayName
             fallbackSeller.storeLocally()
             catalog.upsertSellerProfile(fallbackSeller)
-            errorMessage = "Saved on this device. Server sync failed, so other devices will not see it yet."
+            #if DEBUG
+            print("[ProfileSave] fallback sellerId=\(fallbackSeller.id) avatar=\(fallbackSeller.avatarURL?.absoluteString ?? "nil") banner=\(fallbackSeller.bannerURL?.absoluteString ?? "nil") error=\((error as NSError).localizedDescription)")
+            #endif
+            let detail = (error as NSError).localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            if detail.isEmpty || detail == "The operation couldn’t be completed." {
+                errorMessage = "Saved on this device. Server sync failed, so other devices will not see it yet. Is the backend running, and does your app’s backend URL match this machine (same Wi‑Fi / correct IP for a real device)?"
+            } else {
+                errorMessage = "Saved on this device. Server sync failed: \(detail)"
+            }
+        }
+    }
+
+    private func loadProfileImage(from item: PhotosPickerItem?) async -> UIImage? {
+        guard let item else { return nil }
+        guard let data = try? await item.loadTransferable(type: Data.self) else { return nil }
+        #if os(iOS)
+        return UIImage(data: data)
+        #else
+        return nil
+        #endif
+    }
+
+    private func uploadProfileImageIfNeeded(
+        _ image: UIImage?,
+        mediaKind: String,
+        fallbackURLString: String
+    ) async -> String {
+        guard let image, let imageData = image.jpegData(compressionQuality: 0.84) else {
+            return fallbackURLString
+        }
+
+        do {
+            return try await SellerAPI.uploadMedia(
+                sellerId: seller.id,
+                productId: "profile",
+                mediaKind: mediaKind,
+                slot: "0",
+                fileExtension: "jpg",
+                contentType: "image/jpeg",
+                data: imageData
+            )
+        } catch {
+            return fallbackURLString
         }
     }
 }
@@ -1843,6 +2763,10 @@ private struct SellerProfileDraft {
     var materials: String
     var shipsInMinDays: Int
     var shipsInMaxDays: Int
+    var avatarURLString: String
+    var bannerURLString: String
+    var acceptsCustomOrders: Bool
+    var customOrderInfoURLString: String
 
     init(seller: SellerProfile) {
         displayName = seller.displayName
@@ -1854,6 +2778,10 @@ private struct SellerProfileDraft {
         materials = seller.materials.joined(separator: ", ")
         shipsInMinDays = seller.shipsInDays.lowerBound
         shipsInMaxDays = seller.shipsInDays.upperBound
+        avatarURLString = seller.avatarURL?.absoluteString ?? ""
+        bannerURLString = seller.bannerURL?.absoluteString ?? ""
+        acceptsCustomOrders = seller.acceptsCustomOrders
+        customOrderInfoURLString = seller.customOrderInfoURL?.absoluteString ?? ""
     }
 
     var normalizedHandle: String {
@@ -1873,6 +2801,17 @@ private struct SellerProfileDraft {
         }
 
         return URL(string: "https://\(trimmedWebsite)")
+    }
+
+    var normalizedCustomOrderInfoURL: URL? {
+        let trimmed = customOrderInfoURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let directURL = URL(string: trimmed), directURL.scheme != nil {
+            return directURL
+        }
+
+        return URL(string: "https://\(trimmed)")
     }
 
     var materialList: [String] {
@@ -2112,7 +3051,6 @@ private struct SellerSettingsSaveBar: View {
 private enum SellerSettingsStorageKey {
     static let shipping = "sellerShippingSettingsData"
     static let policies = "sellerPolicySettingsData"
-    static let payout = "sellerPayoutSettingsData"
 }
 
 private struct SellerShippingSettingsDraft: Codable {
@@ -2181,55 +3119,6 @@ private struct SellerPolicySettingsDraft: Codable {
     }
 }
 
-private enum SellerPayoutSchedule: String, CaseIterable, Codable, Identifiable {
-    case weekly
-    case biweekly
-    case monthly
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .weekly:
-            return "Weekly"
-        case .biweekly:
-            return "Biweekly"
-        case .monthly:
-            return "Monthly"
-        }
-    }
-}
-
-private struct SellerPayoutSettingsDraft: Codable {
-    var schedule: SellerPayoutSchedule
-    var emailNotificationsEnabled: Bool
-    var accountHolder: String
-    var bankName: String
-    var accountLast4: String
-    var payoutEmail: String
-
-    static func load() -> SellerPayoutSettingsDraft {
-        if let data = UserDefaults.standard.data(forKey: SellerSettingsStorageKey.payout),
-           let saved = try? JSONDecoder().decode(SellerPayoutSettingsDraft.self, from: data) {
-            return saved
-        }
-
-        return SellerPayoutSettingsDraft(
-            schedule: .weekly,
-            emailNotificationsEnabled: true,
-            accountHolder: "PrintCraft Studio",
-            bankName: "Chase",
-            accountLast4: "4242",
-            payoutEmail: ""
-        )
-    }
-
-    func store() {
-        guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: SellerSettingsStorageKey.payout)
-    }
-}
-
 private enum SellerProductDraftStorage {
     static func key(for sellerId: String) -> String {
         "sellerProductDraftsData.\(sellerId)"
@@ -2260,7 +3149,9 @@ private extension SellerProductDraft {
                     careWarningsText: product.careWarnings.joined(separator: "\n"),
                     shipsInMinDays: product.shipsInDays.lowerBound,
                     shipsInMaxDays: product.shipsInDays.upperBound,
-                    productionPreviewURLString: product.productionPreviewURL?.absoluteString ?? ""
+                    productionPreviewURLString: product.productionPreviewURL?.absoluteString ?? "",
+                    marketplaceStatusRaw: SellerMarketplaceStatus.live.rawValue,
+                    serverReviewNotes: nil
                 )
             }
     }

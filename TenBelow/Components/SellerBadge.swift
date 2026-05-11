@@ -32,12 +32,3 @@ struct SellerBadge: View {
     }
 }
 
-#Preview {
-    VStack(spacing: 12) {
-        SellerBadge(text: "Ships in 2–4 days", icon: "shippingbox")
-        SellerBadge(text: "Ships from Austin, TX", icon: "location.fill")
-        SellerBadge(text: "Verified Seller", icon: "checkmark.seal.fill", tint: .green)
-    }
-    .padding()
-    .background(TBTheme.cloudWhite)
-}

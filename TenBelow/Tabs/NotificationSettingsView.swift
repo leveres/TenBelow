@@ -105,7 +105,7 @@ struct NotificationSettingsView: View {
                 deliveryRow(
                     icon: "list.bullet.rectangle.portrait",
                     title: "Inside the app",
-                    message: "Activity refreshes when you reopen TenBelow."
+                    message: "Notifications refresh when you reopen TenBelow."
                 )
                 deliveryRow(
                     icon: "slider.horizontal.3",

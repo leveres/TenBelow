@@ -97,8 +97,10 @@ struct OnboardingView: View {
                 slides: slides,
                 currentPage: $currentPage,
                 finalCTA: finalCTA,
+                isSellerFlow: userRole == "seller",
                 onSkip: completeOnboarding,
-                onContinue: advanceOnboarding
+                onContinue: advanceOnboarding,
+                onSellerExploreFirst: completeOnboarding
             )
         }
     }
@@ -122,19 +124,24 @@ struct OnboardingView: View {
     }
 }
 
-#Preview {
-    OnboardingView()
-}
 
 struct IntroSlidesContent: View {
     let slides: [IntroSlide]
     @Binding var currentPage: Int
     let finalCTA: String
+    let isSellerFlow: Bool
     let onSkip: () -> Void
     let onContinue: () -> Void
+    let onSellerExploreFirst: () -> Void
+
+    @AppStorage("sellerSkippedMembershipAtOnboarding") private var sellerSkippedMembershipAtOnboarding = false
 
     private var lastPageIndex: Int {
         max(slides.count - 1, 0)
+    }
+
+    private var onFinalSellerPage: Bool {
+        isSellerFlow && currentPage >= lastPageIndex
     }
 
     var body: some View {
@@ -194,19 +201,48 @@ struct IntroSlidesContent: View {
             }
             .padding(.bottom, 24)
 
-            Button {
-                #if os(iOS)
-                let generator = UIImpactFeedbackGenerator(style: currentPage < lastPageIndex ? .light : .medium)
-                generator.impactOccurred()
-                #endif
-                onContinue()
-            } label: {
-                Text(currentPage < lastPageIndex ? "Continue" : finalCTA)
+            Group {
+                if onFinalSellerPage {
+                    sellerFinalStepActions
+                } else {
+                    Button {
+                        #if os(iOS)
+                        let generator = UIImpactFeedbackGenerator(style: currentPage < lastPageIndex ? .light : .medium)
+                        generator.impactOccurred()
+                        #endif
+                        onContinue()
+                    } label: {
+                        Text(currentPage < lastPageIndex ? "Continue" : finalCTA)
+                    }
+                    .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: currentPage == lastPageIndex))
+                    .frame(width: 200)
+                }
             }
-            .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: currentPage == lastPageIndex))
-            .frame(width: 200)
             .padding(.bottom, 44)
             .transition(.scale.combined(with: .opacity))
         }
+    }
+
+    private var sellerFinalStepActions: some View {
+        VStack(spacing: 14) {
+            Text("Explore the app first. When you add a product or drop listing, you can subscribe to seller tools—subscription is also under Settings when you need it.")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(Color.primary.opacity(0.78))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
+            Button {
+                #if os(iOS)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                #endif
+                sellerSkippedMembershipAtOnboarding = true
+                onSellerExploreFirst()
+            } label: {
+                Text("Explore the app first")
+            }
+            .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+            .frame(minWidth: 200, maxWidth: 320)
+        }
+        .frame(maxWidth: .infinity)
     }
 }

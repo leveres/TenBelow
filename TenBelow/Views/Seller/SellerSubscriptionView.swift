@@ -3,6 +3,7 @@ import SwiftUI
 struct SellerSubscriptionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
 
     @AppStorage("sellerBusinessName") private var businessName = ""
@@ -41,6 +42,11 @@ struct SellerSubscriptionView: View {
         }
         .task {
             await sellerSubscription.refresh()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await sellerSubscription.refresh() }
+            }
         }
     }
 
@@ -87,7 +93,7 @@ struct SellerSubscriptionView: View {
 
                 benefitRow(icon: "plus.circle.fill", title: "Product uploads", detail: "Create and update listings in TenBelow.")
                 benefitRow(icon: "shippingbox.fill", title: "Weekly Drop", detail: "Submit weekend listings when your membership is active.")
-                benefitRow(icon: "creditcard.fill", title: "Apple billing", detail: "Billing and renewals are managed through your App Store account.")
+                benefitRow(icon: "checkmark.seal.fill", title: "Billed through Apple", detail: "Subscriptions use your Apple ID. Manage or cancel in Settings → Apple Account → Subscriptions.")
             }
         }
     }
@@ -101,7 +107,7 @@ struct SellerSubscriptionView: View {
 
                 Text(sellerSubscription.hasActiveSubscription
                      ? "You’re ready to upload products and manage inventory."
-                     : "Start membership to unlock product uploads. Apple handles billing and renewals.")
+                     : "Tap below to use your Apple ID and the App Store subscription sheet. You can restore past purchases or manage the subscription from this screen.")
                     .font(.tbBody)
                     .foregroundStyle(.secondary)
 
@@ -169,59 +175,4 @@ struct SellerSubscriptionView: View {
     }
 }
 
-/// Compact membership summary for Settings (and anywhere else); opens full flow via `onOpenMembership`.
-struct SellerMembershipSummaryCard: View {
-    @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
-    var onOpenMembership: () -> Void
 
-    var body: some View {
-        GlassCard(cornerRadius: 22) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label(
-                        sellerSubscription.hasActiveSubscription ? "Membership Active" : "Membership Needed",
-                        systemImage: sellerSubscription.hasActiveSubscription ? "checkmark.seal.fill" : "creditcard"
-                    )
-                    .font(.tbBodyStrong)
-                    .foregroundStyle(sellerSubscription.hasActiveSubscription ? .green : TBTheme.deepSky)
-
-                    Spacer()
-
-                    Text(sellerSubscription.hasActiveSubscription ? "Ready to sell" : "\(sellerSubscription.displayPrice)/mo")
-                        .font(.tbCaption.weight(.bold))
-                        .foregroundStyle(TBTheme.accent)
-                }
-
-                Text(sellerSubscription.hasActiveSubscription
-                     ? sellerSubscription.syncDescription
-                     : "Unlock product uploads and seller-only publishing tools with the App Store subscription.")
-                    .font(.tbCaption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Button {
-                    onOpenMembership()
-                } label: {
-                    Text(sellerSubscription.hasActiveSubscription ? "Manage membership" : "Start membership")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(TBTheme.deepSky)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.82))
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-}
-
-#Preview("Inactive") {
-    SellerSubscriptionView()
-        .environmentObject(SellerSubscriptionStore.previewInactive)
-}
-
-#Preview("Active") {
-    SellerSubscriptionView()
-        .environmentObject(SellerSubscriptionStore.previewActive)
-}

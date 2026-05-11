@@ -5,6 +5,7 @@ enum NotificationType: String, Codable, Hashable, CaseIterable {
     case newProduct
     case orderReceived
     case orderStatusUpdate
+    case exchangeUpdate
     case itemFavorited
     case system
 }
@@ -18,6 +19,9 @@ struct AppNotification: Identifiable, Codable, Hashable {
     let relatedProductId: String?
     let relatedOrderId: String?
     let relatedSellerId: String?
+    let relatedExchangeRequestId: String?
+    /// Stable key for inbox dedupe (`CommerceEvent.id` + semantic bucket, or a synthetic key for non-event sources). Older persisted rows decode as `nil` and fall back to content-based dedupe.
+    let dedupeKey: String?
     var isRead: Bool
     let createdAt: Date
 
@@ -30,6 +34,8 @@ struct AppNotification: Identifiable, Codable, Hashable {
         relatedProductId: String? = nil,
         relatedOrderId: String? = nil,
         relatedSellerId: String? = nil,
+        relatedExchangeRequestId: String? = nil,
+        dedupeKey: String? = nil,
         isRead: Bool = false,
         createdAt: Date = .now
     ) {
@@ -41,6 +47,8 @@ struct AppNotification: Identifiable, Codable, Hashable {
         self.relatedProductId = relatedProductId
         self.relatedOrderId = relatedOrderId
         self.relatedSellerId = relatedSellerId
+        self.relatedExchangeRequestId = relatedExchangeRequestId
+        self.dedupeKey = dedupeKey
         self.isRead = isRead
         self.createdAt = createdAt
     }
@@ -53,6 +61,9 @@ enum NotificationPreferences {
         "tenBelow.notifications.pref.\(type.rawValue)"
     }
 
+    /// In-app inbox toggles per `NotificationType` (UserDefaults). Remote push is not wired yet; when it is, consider
+    /// separate keys per channel (e.g. `…pref.\(type).push` vs `…inApp`) if product policy calls for split control.
+    ///
     /// `true` when the user has not changed the default (notifications allowed).
     static func isTypeEnabled(_ type: NotificationType) -> Bool {
         let key = storageKey(for: type)

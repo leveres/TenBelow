@@ -1,12 +1,19 @@
 import SwiftUI
 
 struct OrderRowCard: View {
+    private enum Metrics {
+        static let contentSpacing: CGFloat = 10
+        static let thumbnailSize: CGFloat = 34
+        static let thumbnailCornerRadius: CGFloat = 9
+        static let stackedPreviewSize: CGFloat = 34
+    }
+
     let order: Order
     var products: [Product] = MockData.products
 
     var body: some View {
         GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Metrics.contentSpacing) {
 
                 HStack {
                     Text(order.id)
@@ -25,10 +32,10 @@ struct OrderRowCard: View {
                             Text("+\(remainingPreviewCount)")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
-                                .frame(width: 38, height: 38)
-                                .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 10))
+                                .frame(width: Metrics.stackedPreviewSize, height: Metrics.stackedPreviewSize)
+                                .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: Metrics.thumbnailCornerRadius))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
+                                    RoundedRectangle(cornerRadius: Metrics.thumbnailCornerRadius)
                                         .stroke(Color.black.opacity(0.06), lineWidth: 1)
                                 )
                         }
@@ -36,25 +43,24 @@ struct OrderRowCard: View {
                 }
 
                 Text(primaryTitle)
-                    .font(.headline)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
 
                 Text(subtitle)
-                    .font(.subheadline)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
 
                 Divider().opacity(0.6)
 
                 HStack {
                     Text("Total: \(formatMoney(order.totalCents, order.currency))")
-                        .font(.subheadline)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                     Spacer()
                     HStack(spacing: 6) {
                         Text("View")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
                         Image(systemName: "arrow.right")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                             .accessibilityHidden(true)
                     }
                     .foregroundStyle(Color.blue.opacity(0.9))
@@ -98,33 +104,33 @@ struct OrderRowCard: View {
     private func orderThumbnail(for item: OrderLineItem) -> some View {
         if let product = productsById[item.productId] {
             StorefrontImageView(reference: product.primaryImageReference) {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: Metrics.thumbnailCornerRadius)
                     .fill(Color.white.opacity(0.78))
                     .overlay {
                         Image(systemName: "shippingbox")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
             }
-            .frame(width: 38, height: 38)
+            .frame(width: Metrics.thumbnailSize, height: Metrics.thumbnailSize)
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: Metrics.thumbnailCornerRadius))
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: Metrics.thumbnailCornerRadius)
                     .stroke(Color.white.opacity(0.85), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.05), radius: 3, y: 1)
         } else {
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: Metrics.thumbnailCornerRadius)
                 .fill(Color.white.opacity(0.78))
-                .frame(width: 38, height: 38)
+                .frame(width: Metrics.thumbnailSize, height: Metrics.thumbnailSize)
                 .overlay {
                     Image(systemName: "shippingbox")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: Metrics.thumbnailCornerRadius)
                         .stroke(Color.black.opacity(0.06), lineWidth: 1)
                 )
         }

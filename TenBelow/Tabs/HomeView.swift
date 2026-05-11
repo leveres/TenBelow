@@ -25,6 +25,9 @@ struct HomeView: View {
     @State private var selectedFeaturedCreator: SellerProfile?
     @State private var featuredRotationIndex = 0
     @State private var creatorRotationIndex = 0
+    @State private var cachedFeaturedProducts: [Product] = []
+    @State private var lastLiveDropRefresh = Date.distantPast
+    @State private var isLiveDropRefreshInFlight = false
     private let drop = MockData.currentDrop
     private let rotationInterval: TimeInterval = 120
     private let rotationTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
@@ -32,12 +35,113 @@ struct HomeView: View {
     /// Shared horizontal inset and vertical rhythm for the home screen.
     private enum HomeMetrics {
         static let pageInset = TBTheme.spacingXL
-        static let sectionSpacing = TBTheme.spacingMD
-        static let titleToContent = TBTheme.spacingXS + 2
-        static let logoImageHeight: CGFloat = 118
-        static let dealBannerHeight: CGFloat = 148
-        static let freshFavoritesRowHeight: CGFloat = 194
-        static let spotlightBottomInset: CGFloat = 2
+        // Give section titles a little more breathing room above cards/banners.
+        static let titleToContent = TBTheme.spacingSM + 4
+        /// Slightly larger mark; paired with tighter snowfall padding so layout below doesn’t shift.
+        static let logoImageHeight: CGFloat = 158
+        static let logoTopOffset: CGFloat = -18
+        static let logoSnowfallVerticalPadding: CGFloat = 2
+        /// Pad below the last section on top of `safeAreaInsets.bottom` (tab / home indicator only).
+        static let bottomContentPadding: CGFloat = 0
+        static let floatingTabBarExtraClearance: CGFloat = 0
+        static let logoToDealSpacing: CGFloat = 4
+        /// Clear separation so the favorites strip (and its pill title) never visually collides with the deal hero.
+        static let dealToFavoritesSpacing: CGFloat = 14
+        static let favoritesToSpotlightSpacing: CGFloat = 0
+        static let spotlightBottomSpacing: CGFloat = 0
+        /// Space between the spotlight title pill and the card (pill uses `.spotlight` sizing).
+        static let spotlightTitleToCard: CGFloat = 4
+        static let dealTitleTopOffset: CGFloat = -4
+        static let favoritesTitleTopInset: CGFloat = 14
+        static let favoritesTitleToCardsSpacing: CGFloat = TBTheme.spacingSM
+        /// Former optical nudge for plain `Text`; folded into layout padding so the pill doesn’t draw over the hero (`offset` doesn’t expand layout).
+        static let favoritesTitleVisualDrop: CGFloat = 7
+        /// Horizontal strip shows up to this many cards; ranking pool may be larger for rotation.
+        static let freshFavoritesMaxStripCards = 6
+
+        static func dealBannerHeight(for contentWidth: CGFloat) -> CGFloat {
+            return min(max(contentWidth * 0.295, 104), 124)
+        }
+
+        static func freshFavoriteCardWidth(for contentWidth: CGFloat) -> CGFloat {
+            min(max(contentWidth * 0.417, 150), 166)
+        }
+    }
+
+    /// Compact frost capsule for home section headings (keeps copy readable without a full-width title bar).
+    private struct HomeSectionTitlePill: View {
+        enum Style {
+            /// Default strip titles (e.g. Fresh favorites).
+            case standard
+            /// Slightly larger copy and padding so the label carries more visual weight without shifting layout.
+            case spotlight
+        }
+
+        let title: String
+        var style: Style = .standard
+
+        private var titleFont: Font {
+            switch style {
+            case .standard:
+                return .system(size: 15, weight: .semibold, design: .rounded)
+            case .spotlight:
+                return .system(size: 18, weight: .semibold, design: .rounded)
+            }
+        }
+
+        private var horizontalPadding: CGFloat {
+            switch style {
+            case .standard: return 10
+            case .spotlight: return 16
+            }
+        }
+
+        private var verticalPadding: CGFloat {
+            switch style {
+            case .standard: return 4
+            case .spotlight: return 10
+            }
+        }
+
+        private var strokeWidth: CGFloat {
+            switch style {
+            case .standard: return 0.75
+            case .spotlight: return 0.85
+            }
+        }
+
+        var body: some View {
+            Text(title)
+                .font(titleFont)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [TBTheme.deepSky, TBTheme.icyBlue],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, verticalPadding)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.94),
+                                    TBTheme.skyLight.opacity(0.62)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(TBTheme.skyBlue.opacity(0.3), lineWidth: strokeWidth)
+                )
+                .shadow(color: TBTheme.deepSky.opacity(0.06), radius: style == .spotlight ? 3 : 2, y: style == .spotlight ? 2 : 1)
+                .accessibilityAddTraits(.isHeader)
+        }
     }
 
     private var products: [Product] {
@@ -45,6 +149,33 @@ struct HomeView: View {
             remoteProducts: catalog.products,
             fallbackProducts: localProducts.products
         )
+    }
+
+    /// Fresh favorites only: `resolvedStorefrontProducts` drops local/mock seed data whenever the API returns *any* listing,
+    /// so a thin approved catalog (e.g. one product) would otherwise show a single card. When below the strip cap, merge in
+    /// unique extras from local storage then bundled mocks so the carousel matches the designed multi-card layout while the
+    /// backend still drives real storefront data everywhere else (Deal of the Day, spotlight, shop).
+    private var freshFavoritesCatalog: [Product] {
+        let base = products
+        if base.count >= HomeMetrics.freshFavoritesMaxStripCards { return base }
+
+        var seen = Set(base.map(\.id))
+        var merged = base
+
+        func appendUnique(_ candidates: [Product]) {
+            for p in candidates {
+                guard merged.count < 32 else { return }
+                if seen.insert(p.id).inserted {
+                    merged.append(p)
+                }
+            }
+        }
+
+        appendUnique(localProducts.products)
+        if merged.count < HomeMetrics.freshFavoritesMaxStripCards {
+            appendUnique(MockData.products)
+        }
+        return merged
     }
 
     private var sellerProfilesByID: [String: SellerProfile] {
@@ -58,34 +189,40 @@ struct HomeView: View {
         orderStore.orders
     }
 
-    private var currentSellerProfile: SellerProfile {
-        resolvedSellerProfile(
-            sellerId: sellerId,
-            storefrontProducts: products,
-            remoteProfiles: catalog.sellerProfiles
-        ) ?? .previewProfile(sellerId: sellerId, businessName: sellerBusinessName)
-    }
-
     @ViewBuilder
     private var profileDestination: some View {
         if userRole == "seller" {
-            PublicSellerProfileView(
-                seller: currentSellerProfile,
-                products: products
-            )
+            if let sellerStoreProfile {
+                SellerStorePreviewView(
+                    seller: sellerStoreProfile,
+                    products: products
+                )
+            } else {
+                SellerProfileView()
+            }
         } else {
             BuyerProfileView()
         }
     }
 
-    private var hasLiveDrop: Bool {
-        if let d = liveDrop, d.active, !d.products.isEmpty { return true }
-        return false
+    private var sellerStoreProfile: SellerProfile? {
+        let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSellerId.isEmpty else { return nil }
+
+        return resolvedSellerProfile(
+            sellerId: trimmedSellerId,
+            storefrontProducts: products.filter { $0.sellerId == trimmedSellerId },
+            remoteProfiles: catalog.sellerProfiles
+        ) ?? .previewProfile(
+            sellerId: trimmedSellerId,
+            businessName: sellerBusinessName
+        )
     }
 
     private var profileToolbarIcon: some View {
         Group {
-            if userRole == "buyer", buyerAccountCreated, !buyerInitials.isEmpty {
+            // Single-letter initials read as stray glyphs next to the bell; prefer the icon until we have ≥2 letters.
+            if userRole == "buyer", buyerAccountCreated, buyerInitials.count >= 2 {
                 Text(buyerInitials)
                     .font(.system(size: 16, weight: .heavy, design: .rounded))
                     .foregroundStyle(TBTheme.deepSky)
@@ -119,6 +256,14 @@ struct HomeView: View {
     }
 
     private var featuredProducts: [Product] {
+        if !cachedFeaturedProducts.isEmpty {
+            return cachedFeaturedProducts
+        }
+
+        return computeFeaturedProducts()
+    }
+
+    private func computeFeaturedProducts() -> [Product] {
         let nonDropProducts = products.filter { !excludedFeaturedProductIDs.contains($0.id) }
         let source = nonDropProducts.isEmpty ? products : nonDropProducts
 
@@ -148,7 +293,9 @@ struct HomeView: View {
             return lhsTraffic < rhsTraffic
         }
 
-        var workingBuckets = sellerBuckets
+        var nextIndexBySellerID = Dictionary(
+            uniqueKeysWithValues: sellerOrder.map { ($0, 0) }
+        )
         var rotation: [Product] = []
         var appendedProductIDs = Set<String>()
 
@@ -156,9 +303,16 @@ struct HomeView: View {
             var appendedInPass = false
 
             for sellerID in sellerOrder {
-                guard var sellerProducts = workingBuckets[sellerID], !sellerProducts.isEmpty else { continue }
-                let nextProduct = sellerProducts.removeFirst()
-                workingBuckets[sellerID] = sellerProducts
+                guard
+                    let sellerProducts = sellerBuckets[sellerID],
+                    let nextIndex = nextIndexBySellerID[sellerID],
+                    nextIndex < sellerProducts.count
+                else {
+                    continue
+                }
+
+                let nextProduct = sellerProducts[nextIndex]
+                nextIndexBySellerID[sellerID] = nextIndex + 1
 
                 if appendedProductIDs.insert(nextProduct.id).inserted {
                     rotation.append(nextProduct)
@@ -178,8 +332,9 @@ struct HomeView: View {
     /// but when that would leave fewer than two items while more storefront products exist, include all
     /// eligible products so the horizontal carousel still shows multiple cards (same catalog the cart uses).
     private var freshFavoriteRankingPool: [Product] {
-        let nonDropProducts = products.filter { !excludedFeaturedProductIDs.contains($0.id) }
-        let source = nonDropProducts.isEmpty ? products : nonDropProducts
+        let catalog = freshFavoritesCatalog
+        let nonDropProducts = catalog.filter { !excludedFeaturedProductIDs.contains($0.id) }
+        let source = nonDropProducts.isEmpty ? catalog : nonDropProducts
         guard let featuredProductID = featuredProduct?.id else { return source }
 
         let withoutDealOfDay = source.filter { $0.id != featuredProductID }
@@ -211,6 +366,21 @@ struct HomeView: View {
         guard !ranked.isEmpty else { return [] }
         let startIndex = freshFavoritesRotationOffset % ranked.count
         return Array(ranked[startIndex...] + ranked[..<startIndex])
+    }
+
+    private var featuredProductsTaskKey: String {
+        "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(liveDrop?.active ?? false)"
+    }
+
+    private func refreshFeaturedProductsCache() {
+        let latest = computeFeaturedProducts()
+        cachedFeaturedProducts = latest
+
+        if latest.isEmpty {
+            featuredRotationIndex = 0
+        } else {
+            featuredRotationIndex %= latest.count
+        }
     }
 
     private var spotlightCreators: [SellerProfile] {
@@ -247,6 +417,41 @@ struct HomeView: View {
 
     private var freshFavoriteProductsCountForRotation: Int {
         max(freshFavoriteRankingPool.count, 0)
+    }
+
+    /// Products for the horizontal Fresh favorites strip (up to six). When the remote catalog is sparse, fill from locally seeded products.
+    private var freshFavoritesDisplayProducts: [Product] {
+        let maxCards = HomeMetrics.freshFavoritesMaxStripCards
+        let primary = freshFavoriteProducts
+        var seen = Set<String>()
+        var merged: [Product] = []
+        for p in primary {
+            guard merged.count < maxCards else { break }
+            if seen.insert(p.id).inserted {
+                merged.append(p)
+            }
+        }
+
+        if merged.count < maxCards {
+            let filler = freshFavoritesCatalog
+                .filter { !seen.contains($0.id) }
+                .sorted { lhs, rhs in
+                    let l = freshFavoritePriorityScore(lhs)
+                    let r = freshFavoritePriorityScore(rhs)
+                    if l == r {
+                        return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                    }
+                    return l > r
+                }
+            for p in filler {
+                guard merged.count < maxCards else { break }
+                if seen.insert(p.id).inserted {
+                    merged.append(p)
+                }
+            }
+        }
+
+        return merged
     }
 
     private func products(for seller: SellerProfile) -> [Product] {
@@ -315,88 +520,143 @@ struct HomeView: View {
         }
     }
 
-    var body: some View {
-        NavigationStack {
-            GeometryReader { _ in
-                VStack(alignment: .leading, spacing: HomeMetrics.sectionSpacing) {
-                    SnowfallTitleContainer(
-                        cornerRadius: 30,
-                        horizontalPadding: TBTheme.spacingLG + 2,
-                        verticalPadding: TBTheme.spacingSM,
-                        flakeCount: 84
-                    ) {
-                        Image("Logo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: HomeMetrics.logoImageHeight)
-                    }
-                    .frame(maxWidth: .infinity)
+    private func freshFavoritesSection(cardWidth: CGFloat, pageInset: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: HomeMetrics.favoritesTitleToCardsSpacing) {
+            HomeSectionTitlePill(title: "Fresh favorites")
+                .padding(.top, HomeMetrics.favoritesTitleTopInset + HomeMetrics.favoritesTitleVisualDrop)
 
-                    if let dealOfDayProduct = featuredProduct {
-                        VStack(alignment: .leading, spacing: HomeMetrics.titleToContent) {
-                            Text("Deal of the Day")
-                                .font(.tbSectionTitle)
-                                .tracking(-0.2)
-                                .foregroundStyle(TBTheme.icyBlue)
-
-                            DealOfDayBanner(product: dealOfDayProduct) {
-                                selectedFeaturedProduct = dealOfDayProduct
-                            }
-                            .frame(height: HomeMetrics.dealBannerHeight)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: HomeMetrics.titleToContent) {
-                        Text("Fresh favorites")
-                            .font(.tbSectionTitle)
-                            .tracking(-0.2)
-                            .foregroundStyle(TBTheme.icyBlue)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: TBTheme.spacingLG + 2) {
-                                ForEach(freshFavoriteProducts.prefix(6)) { product in
-                                    ProductCard(
-                                        product: product,
-                                        seller: sellerProfilesByID[product.sellerId],
-                                        allProducts: products,
-                                        style: .blended
-                                    )
-                                    .frame(width: 166)
-                                }
-                            }
-                            .padding(.trailing, HomeMetrics.pageInset)
-                        }
-                        .frame(height: HomeMetrics.freshFavoritesRowHeight)
-                    }
-
-                    if let featuredCreator {
-                        VStack(alignment: .leading, spacing: HomeMetrics.titleToContent) {
-                            Text("Maker spotlight")
-                                .font(.tbSectionTitle)
-                                .tracking(-0.2)
-                                .foregroundStyle(TBTheme.icyBlue)
-
-                            CreatorSpotlightCard(
-                                creator: featuredCreator,
-                                onOpenStore: {
-                                    selectedFeaturedCreator = featuredCreator
-                                }
-                            )
-                            .frame(maxWidth: .infinity, alignment: .top)
-                        }
-                        .padding(.top, -10)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .padding(.bottom, HomeMetrics.spotlightBottomInset)
-                    } else {
-                        Spacer(minLength: 0)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: TBTheme.spacingLG + 2) {
+                    ForEach(freshFavoritesDisplayProducts) { product in
+                        ProductCard(
+                            product: product,
+                            seller: resolvedSellerProfile(
+                                sellerId: product.sellerId,
+                                storefrontProducts: freshFavoritesCatalog,
+                                remoteProfiles: catalog.sellerProfiles
+                            ),
+                            allProducts: freshFavoritesCatalog,
+                            style: .blended
+                        )
+                        .frame(width: cardWidth)
                     }
                 }
-                .padding(.horizontal, HomeMetrics.pageInset)
-                .padding(.top, 2)
-                .frame(maxWidth: .infinity, alignment: .top)
+                .padding(.trailing, pageInset)
+                .padding(.bottom, 0)
+            }
+            // Horizontal `ScrollView` can add implicit scroll-content margins (extra air below the row).
+            .contentMargins(.vertical, 0, for: .scrollContent)
+            // Horizontal scroll content must not widen the home column; otherwise sections below
+            // (e.g. Maker spotlight) lay out at the inflated width and appear shifted on screen.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func makerSpotlightSection(_ creator: SellerProfile) -> some View {
+        VStack(alignment: .leading, spacing: HomeMetrics.spotlightTitleToCard) {
+            HomeSectionTitlePill(title: "Maker spotlight")
+
+            CreatorSpotlightCard(
+                creator: creator,
+                onOpenStore: {
+                    selectedFeaturedCreator = creator
+                }
+            )
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .padding(.bottom, HomeMetrics.spotlightBottomSpacing)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func homeContent(
+        bottomInset: CGFloat,
+        pageInset: CGFloat,
+        safeTopInset: CGFloat,
+        contentWidth: CGFloat,
+        layoutWidth: CGFloat
+    ) -> some View {
+        let dealBannerHeight = HomeMetrics.dealBannerHeight(for: contentWidth)
+        let favoriteCardWidth = HomeMetrics.freshFavoriteCardWidth(for: contentWidth)
+        /// Some device + display settings (Dynamic Island, Display Zoom, larger nav bars) can make
+        /// the top chrome noticeably taller than the simulator default. Slightly tuck the mark
+        /// so the rest of the home layout maintains the intended visual rhythm.
+        let topChromeOverage = min(max(safeTopInset - 47, 0), 22)
+        let logoHeight = max(116, HomeMetrics.logoImageHeight - (topChromeOverage * 0.45))
+        let logoOffset = HomeMetrics.logoTopOffset - (topChromeOverage * 0.20)
+        let homeTopPadding = TopLevelHeaderMetrics.homeTopInset - min(6, topChromeOverage * 0.18)
+
+        VStack(alignment: .leading, spacing: 0) {
+            SnowfallTitleContainer(
+                cornerRadius: 30,
+                horizontalPadding: TBTheme.spacingLG + 2,
+                verticalPadding: HomeMetrics.logoSnowfallVerticalPadding,
+                flakeCount: 84
+            ) {
+                Image("Logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: logoHeight)
+                    .offset(y: logoOffset)
+            }
+            .frame(maxWidth: .infinity)
+
+            if let dealOfDayProduct = featuredProduct {
+                Color.clear
+                    .frame(height: HomeMetrics.logoToDealSpacing)
+
+                DealOfDayBanner(product: dealOfDayProduct) {
+                    selectedFeaturedProduct = dealOfDayProduct
+                }
+                .environment(\.dealBannerContentWidth, contentWidth)
+                .frame(height: dealBannerHeight)
+
+                Color.clear
+                    .frame(height: HomeMetrics.dealToFavoritesSpacing)
+            }
+
+            freshFavoritesSection(cardWidth: favoriteCardWidth, pageInset: pageInset)
+
+            if let featuredCreator {
+                Color.clear
+                    .frame(height: HomeMetrics.favoritesToSpotlightSpacing)
+                makerSpotlightSection(featuredCreator)
+            }
+        }
+        .padding(.horizontal, pageInset)
+        .padding(.top, homeTopPadding)
+        .padding(.bottom, bottomInset + HomeMetrics.bottomContentPadding)
+        .frame(maxWidth: layoutWidth, alignment: .top)
+    }
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { geometry in
+                let pageInset = HomeMetrics.pageInset
+                let contentWidth = max(geometry.size.width - (pageInset * 2), 0)
+                let safeTop = geometry.safeAreaInsets.top
+                // Tab content is already laid out above the system tab bar; only the home indicator
+                // (or similar) contributes bottom inset—do not add a second fixed “floor” or it reads as a large empty band.
+                let safeBottom = geometry.safeAreaInsets.bottom
+                let tabBarOverlapPad = HomeMetrics.floatingTabBarExtraClearance
+                let bottomInset = safeBottom + tabBarOverlapPad
+
+                homeContent(
+                    bottomInset: bottomInset,
+                    pageInset: pageInset,
+                    safeTopInset: safeTop,
+                    contentWidth: contentWidth,
+                    layoutWidth: geometry.size.width
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(TBTheme.cloudWhite)
             }
             .task {
-                do { liveDrop = try await DropAPI.currentDrop() } catch { }
+                await refreshLiveDropIfNeeded()
+            }
+            .task(id: featuredProductsTaskKey) {
+                refreshFeaturedProductsCache()
             }
             .onAppear {
                 seedRotations()
@@ -404,11 +664,16 @@ struct HomeView: View {
             .onReceive(rotationTimer) { _ in
                 advanceRotations()
             }
-            .background(TBTheme.cloudWhite)
-            .navigationTitle("")
-            #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
+            #if os(iOS) || os(visionOS)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    // Occupies the nav bar title slot without drawable text. Zero‑width / empty titles can render as
+                    // stray punctuation on hardware (the marks users saw under the Dynamic Island).
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityHidden(true)
+                }
                 ToolbarItem(placement: .topBarLeading) {
                     HStack(spacing: 2) {
                         NavigationLink {
@@ -437,6 +702,11 @@ struct HomeView: View {
             }
             #else
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .accessibilityHidden(true)
+                }
                 ToolbarItem(placement: .automatic) {
                     HStack(spacing: 2) {
                         NavigationLink {
@@ -481,19 +751,84 @@ struct HomeView: View {
             }
         }
     }
+
+    private func refreshLiveDropIfNeeded(force: Bool = false) async {
+        let now = Date()
+        guard !isLiveDropRefreshInFlight else { return }
+        guard force || now.timeIntervalSince(lastLiveDropRefresh) > 45 else { return }
+        isLiveDropRefreshInFlight = true
+        defer { isLiveDropRefreshInFlight = false }
+        lastLiveDropRefresh = now
+
+        do {
+            liveDrop = try await DropAPI.currentDrop()
+        } catch {
+            // Keep the existing/fallback drop content during transient network failures.
+        }
+    }
+}
+
+private struct DealBannerContentWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 361
+}
+
+private extension EnvironmentValues {
+    var dealBannerContentWidth: CGFloat {
+        get { self[DealBannerContentWidthKey.self] }
+        set { self[DealBannerContentWidthKey.self] = newValue }
+    }
 }
 
 private struct DealOfDayBanner: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.dealBannerContentWidth) private var bannerContentWidth
     let product: Product
     let onSeeDetails: () -> Void
 
+    /// Matches the “Deal of the Day” label capsule so the CTA does not read larger.
+    private enum DealCapsuleMetrics {
+        static let font = Font.system(size: 12, weight: .semibold, design: .rounded)
+        static let horizontalPadding: CGFloat = 10
+        static let verticalPadding: CGFloat = 6
+    }
+
+    private var artworkContainerSize: CGFloat {
+        min(max(bannerContentWidth * 0.262, 92), 104)
+    }
+
+    private var artworkImageSize: CGFloat {
+        artworkContainerSize
+    }
+
+    private var artworkCornerRadius: CGFloat {
+        20
+    }
+
+    private var horizontalPadding: CGFloat {
+        min(max(bannerContentWidth * 0.045, 14), 18)
+    }
+
+    private var bannerSpacing: CGFloat {
+        bannerContentWidth < 370 ? TBTheme.spacingMD : TBTheme.spacingLG
+    }
+
     var body: some View {
-        HStack(alignment: .center, spacing: TBTheme.spacingLG) {
-            VStack(alignment: .leading, spacing: TBTheme.spacingSM + 2) {
+        HStack(alignment: .center, spacing: bannerSpacing) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Deal of the Day")
+                    .font(DealCapsuleMetrics.font)
+                    .foregroundStyle(.white.opacity(0.96))
+                    .padding(.horizontal, DealCapsuleMetrics.horizontalPadding)
+                    .padding(.vertical, DealCapsuleMetrics.verticalPadding)
+                    .background(Color.white.opacity(0.22))
+                    .overlay(
+                        Capsule()
+                            .stroke(.white.opacity(0.18), lineWidth: 0.8)
+                    )
+                    .clipShape(Capsule())
+
                 Text(product.name)
                     .font(.tbProductTitleXL)
-                    .tracking(-0.25)
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .minimumScaleFactor(0.78)
@@ -501,10 +836,9 @@ private struct DealOfDayBanner: View {
 
                 Text(Money.format(cents: product.priceCents))
                     .font(.tbProductPriceLG)
-                    .tracking(-0.5)
                     .foregroundStyle(.white)
 
-                Spacer(minLength: TBTheme.spacingSM)
+                Spacer(minLength: 4)
 
                 actionStack
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -527,22 +861,24 @@ private struct DealOfDayBanner: View {
                         RoundedRectangle(cornerRadius: 24, style: .continuous)
                             .strokeBorder(.white.opacity(0.18), lineWidth: 1)
                     )
-                    .frame(width: 96, height: 96)
+                    .frame(width: artworkContainerSize, height: artworkContainerSize)
 
-                StorefrontImageView(reference: product.primaryImageReference, contentMode: .fit) {
+                StorefrontImageView(reference: product.primaryImageReference, contentMode: .fill) {
                     Image(systemName: product.category.icon)
                         .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.88))
-                        .frame(width: 108, height: 108)
+                        .frame(width: artworkImageSize, height: artworkImageSize)
                 }
-                .frame(width: 108, height: 108)
-                .shadow(color: .white.opacity(0.18), radius: 6, y: -1)
-                .shadow(color: .black.opacity(0.10), radius: 10, y: 5)
-                .offset(y: -2)
+                .frame(width: artworkImageSize, height: artworkImageSize)
+                .clipShape(RoundedRectangle(cornerRadius: artworkCornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: artworkCornerRadius, style: .continuous)
+                        .strokeBorder(.white.opacity(0.16), lineWidth: 0.8)
+                )
             }
-            .frame(width: 104, height: 104)
+            .frame(width: artworkContainerSize, height: artworkContainerSize)
         }
-        .padding(.horizontal, TBTheme.spacingLG + 2)
+        .padding(.horizontal, horizontalPadding)
         .padding(.vertical, TBTheme.spacingMD + 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background {
@@ -591,25 +927,38 @@ private struct DealOfDayBanner: View {
 
     private var detailsButton: some View {
         Button(action: onSeeDetails) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Text("View details")
                 Image(systemName: "arrow.right")
-                    .font(.caption.weight(.bold))
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
             }
-            .font(.callout.weight(.semibold))
-            .tracking(-0.08)
+            .font(DealCapsuleMetrics.font)
+            .tracking(-0.04)
             .foregroundStyle(TBTheme.bannerCTAForeground)
             .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 15)
-            .padding(.vertical, 9)
-            .background(Capsule().fill(Color.white.opacity(0.92)))
+            .padding(.horizontal, DealCapsuleMetrics.horizontalPadding)
+            .padding(.vertical, DealCapsuleMetrics.verticalPadding)
+            .background(.ultraThinMaterial, in: Capsule())
+            .background(
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.20),
+                                .white.opacity(0.08)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
             .overlay(
                 Capsule()
-                    .strokeBorder(.white.opacity(0.98), lineWidth: 1)
+                    .strokeBorder(.white.opacity(0.32), lineWidth: 0.9)
             )
-            .shadow(color: .black.opacity(0.14), radius: 6, y: 3)
+            .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
         }
         .buttonStyle(.plain)
     }
@@ -620,52 +969,62 @@ private struct CreatorSpotlightCard: View {
     let creator: SellerProfile
     let onOpenStore: () -> Void
 
+    private var isAccessibilityLayout: Bool {
+        dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var cardCornerRadius: CGFloat {
+        isAccessibilityLayout ? TBTheme.radiusLG : TBTheme.radiusMD
+    }
+
+    private var avatarDiameter: CGFloat {
+        isAccessibilityLayout ? 52 : 44
+    }
+
     var body: some View {
         content
-        .padding(.horizontal, TBTheme.spacingMD)
-        .padding(.vertical, TBTheme.spacingMD + 2)
-        .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? 108 : 88)
+        .padding(.horizontal, isAccessibilityLayout ? TBTheme.spacingMD + 2 : TBTheme.spacingSM + 2)
+        .padding(.vertical, isAccessibilityLayout ? TBTheme.spacingMD + 6 : TBTheme.spacingSM + 6)
         .frame(maxWidth: .infinity, alignment: .center)
         .background {
             ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.35, green: 0.58, blue: 0.91),
-                        Color(red: 0.27, green: 0.52, blue: 0.90)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                TBTheme.skyBlue.opacity(0.22),
+                                TBTheme.deepSky.opacity(0.12),
+                                TBTheme.icyBlue.opacity(0.08)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.35), .clear],
+                            startPoint: .top,
+                            endPoint: .center
+                        )
+                    )
             }
         }
         .overlay(
-            RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous)
-                .fill(
+            RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
+                .strokeBorder(
                     LinearGradient(
-                        colors: [
-                            .white.opacity(0.18),
-                            .white.opacity(0.05),
-                            .clear
-                        ],
+                        colors: [.white.opacity(0.55), TBTheme.skyBlue.opacity(0.35)],
                         startPoint: .topLeading,
-                        endPoint: .bottom
-                    )
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: isAccessibilityLayout ? 1 : 0.75
                 )
-                .allowsHitTesting(false)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous)
-                .strokeBorder(.white.opacity(0.15), lineWidth: 0.9)
-                .allowsHitTesting(false)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous))
-        .shadow(color: TBTheme.deepSky.opacity(0.07), radius: 6, y: 2)
-    }
-
-    private var avatarInitials: String {
-        let words = creator.displayName.split(separator: " ")
-        let initials = words.prefix(2).compactMap { $0.first }
-        return initials.isEmpty ? "TB" : String(initials)
+        .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+        .shadow(color: TBTheme.deepSky.opacity(0.06), radius: isAccessibilityLayout ? 8 : 5, y: isAccessibilityLayout ? 3 : 2)
     }
 
     private var metadataText: String {
@@ -689,166 +1048,122 @@ private struct CreatorSpotlightCard: View {
     private var content: some View {
         if dynamicTypeSize.isAccessibilitySize {
             VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
-                headerRow
+                HStack(alignment: .top, spacing: TBTheme.spacingSM + 2) {
+                    spotlightAvatar
+                    spotlightTextColumn
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 storeButton
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
-            HStack(alignment: .center, spacing: TBTheme.spacingMD) {
-                headerRow
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                storeButton
+            // Keep the CTA beside the *text* column only. Pairing it with the full avatar+titles
+            // `HStack` made the pill vertically center against 50pt+3 lines, so it looked oversized / misaligned.
+            HStack(alignment: .center, spacing: TBTheme.spacingSM) {
+                spotlightAvatar
+                HStack(alignment: .center, spacing: TBTheme.spacingSM - 2) {
+                    spotlightTextColumn
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    storeButton
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private var headerRow: some View {
-        HStack(alignment: .center, spacing: TBTheme.spacingMD) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.white.opacity(0.98), TBTheme.skyLight.opacity(0.55)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+    private var spotlightAvatar: some View {
+        StorefrontImageView(reference: creator.avatarURL?.absoluteString, contentMode: .fill) {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [.white.opacity(0.98), TBTheme.skyLight.opacity(0.55)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
+                )
+                .overlay {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: isAccessibilityLayout ? 22 : 18, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.65))
+                }
+        }
+        .frame(width: avatarDiameter, height: avatarDiameter)
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .strokeBorder(.white.opacity(0.88), lineWidth: 1)
+        )
+    }
 
-                Circle()
-                    .strokeBorder(.white.opacity(0.88), lineWidth: 1)
+    private var spotlightTextColumn: some View {
+        VStack(alignment: .leading, spacing: isAccessibilityLayout ? 4 : 2) {
+            Text(creator.displayName)
+                .font(.system(size: isAccessibilityLayout ? 17 : 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(TBTheme.deepSky)
+                .lineLimit(isAccessibilityLayout ? 2 : 1)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .minimumScaleFactor(0.88)
 
-                Text(avatarInitials)
-                    .font(.system(size: 21, weight: .semibold, design: .rounded))
-                    .foregroundStyle(TBTheme.deepSky)
-            }
-            .frame(width: 48, height: 48)
+            Text("Spotlight seller")
+                .font(.system(size: isAccessibilityLayout ? 11 : 10, weight: .medium, design: .rounded))
+                .foregroundStyle(TBTheme.icyBlue.opacity(0.88))
 
-            VStack(alignment: .leading, spacing: TBTheme.spacingXS) {
-                Text(creator.displayName)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .tracking(-0.15)
-                    .foregroundStyle(.white)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-
-                Text("Spotlight seller")
-                    .font(.tbMicro)
-                    .foregroundStyle(.white.opacity(0.82))
-
-                Text(metadataText)
-                    .font(.tbCaption)
-                    .foregroundStyle(.white.opacity(0.74))
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-            }
+            Text(metadataText)
+                .font(.system(size: isAccessibilityLayout ? 12 : 10, weight: .medium, design: .rounded))
+                .foregroundStyle(TBTheme.icyBlue.opacity(0.94))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var storeButton: some View {
         Button(action: onOpenStore) {
-            HStack(spacing: TBTheme.spacingXS + 1) {
+            HStack(spacing: isAccessibilityLayout ? 4 : 2) {
                 Text("View store")
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: isAccessibilityLayout ? 11 : 7, weight: .bold, design: .rounded))
             }
-            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .font(.system(size: isAccessibilityLayout ? 15 : 10, weight: .semibold, design: .rounded))
+            .tracking(-0.02)
             .foregroundStyle(TBTheme.bannerCTAForeground)
-            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, TBTheme.spacingMD)
-            .padding(.vertical, TBTheme.spacingSM)
-            .background(Capsule().fill(Color.white.opacity(0.92)))
+            .padding(.horizontal, isAccessibilityLayout ? 14 : 6)
+            .padding(.vertical, isAccessibilityLayout ? 9 : 3)
+            .background {
+                Capsule(style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Capsule(style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.22),
+                                        TBTheme.skyBlue.opacity(0.06),
+                                        .clear
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+            }
             .overlay(
-                Capsule()
-                    .strokeBorder(.white.opacity(0.98), lineWidth: 1)
+                Capsule(style: .continuous)
+                    .strokeBorder(TBTheme.skyBlue.opacity(0.35), lineWidth: 0.6)
             )
-            .shadow(color: .black.opacity(0.14), radius: 6, y: 3)
+            .shadow(color: TBTheme.deepSky.opacity(0.05), radius: 1, y: 1)
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
-    }
-}
-
-// MARK: - Live Drop Banner (replaces old DropHeroBanner on Home)
-
-private struct LiveDropBanner: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    let endsAt: String
-    let productCount: Int
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
-            HStack {
-                Image(systemName: "flame.fill")
-                    .foregroundStyle(.orange)
-                Text("Weekend drop highlights")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-            }
-
-            Spacer()
-
-            HStack {
-                Text(DropCountdown.timeLeft(until: endsAt))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.white.opacity(0.2))
-                    .clipShape(Capsule())
-
-                Spacer()
-
-                viewDropPill
-            }
-        }
-        .padding(TBTheme.spacingLG)
-        .frame(height: 120)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TBTheme.dropBannerGradient)
-        .cornerRadius(TBTheme.radiusLG)
-        .shadow(color: TBTheme.skyBlue.opacity(0.25), radius: 10, y: 4)
+        .frame(maxWidth: isAccessibilityLayout ? .infinity : nil, alignment: .leading)
+        .accessibilityLabel("View \(creator.displayName) store")
     }
 
-    private var viewDropPill: some View {
-        HStack(spacing: 6) {
-            Text("\(productCount) item\(productCount == 1 ? "" : "s")")
-            Text("View drop")
-            Image(systemName: "arrow.right")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-        }
-        .font(.system(size: 13, weight: .semibold, design: .rounded))
-        .foregroundStyle(TBTheme.bannerCTAForeground)
-        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-        .multilineTextAlignment(.center)
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Capsule().fill(Color.white.opacity(0.92)))
-        .overlay(
-            Capsule()
-                .strokeBorder(.white.opacity(0.98), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.14), radius: 6, y: 3)
-    }
 }
 
-#Preview {
-    let events = CommerceEventStore()
-    let products = LocalProductStore(eventStore: events)
-    let orders = OrderStore(eventStore: events)
-    let engagement = BuyerEngagementStore(eventStore: events)
-    let notifications = NotificationStore(
-        eventStore: events,
-        buyerEngagement: engagement,
-        localProducts: products,
-        orderStore: orders
-    )
 
-    return HomeView()
-        .environmentObject(CartStore())
-        .environmentObject(CatalogStore())
-        .environmentObject(engagement)
-        .environmentObject(products)
-        .environmentObject(orders)
-        .environmentObject(notifications)
-}

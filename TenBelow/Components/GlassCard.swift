@@ -5,27 +5,30 @@ struct GlassCard<Content: View>: View {
     var showsBorder: Bool
     /// When set, draws the same snowfall as title banners behind the frosted material.
     var snowfallFlakeCount: Int?
+    var contentPadding: CGFloat
     let content: Content
 
     init(
         cornerRadius: CGFloat = 22,
         showsBorder: Bool = true,
         snowfallFlakeCount: Int? = nil,
+        contentPadding: CGFloat = 16,
         @ViewBuilder content: () -> Content
     ) {
         self.cornerRadius = cornerRadius
         self.showsBorder = showsBorder
         self.snowfallFlakeCount = snowfallFlakeCount
+        self.contentPadding = contentPadding
         self.content = content()
     }
 
     var body: some View {
         content
-            .padding(16)
+            .padding(contentPadding)
             .background {
                 ZStack {
                     if let flakeCount = snowfallFlakeCount {
-                        SnowfallParticleCanvas(flakeCount: flakeCount)
+                        SnowfallParticleCanvas(flakeCount: flakeCount, animates: false)
                             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                             .allowsHitTesting(false)
                     }

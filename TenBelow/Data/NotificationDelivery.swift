@@ -1,6 +1,8 @@
 import Foundation
 
 protocol NotificationDelivering {
+    /// Local inbox already persists before this runs; keep implementations **idempotent** so replays are safe.
+    /// When adding APNs (or other transports), handle retries/backoff here rather than in `NotificationStore`.
     func deliver(_ notification: AppNotification)
 }
 

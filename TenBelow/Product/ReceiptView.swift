@@ -16,6 +16,7 @@ struct ReceiptView: View {
 
     @Environment(\.openURL) private var openURL
     @AppStorage("buyerEmail") private var buyerEmail = ""
+    @State private var showExchangePolicyBrowser = false
 
     private var itemsBySeller: [(sellerId: String, items: [CartItem])] {
         Dictionary(grouping: items, by: { $0.product.sellerId })
@@ -101,6 +102,9 @@ struct ReceiptView: View {
             .padding(.top, TBTheme.spacingLG)
         }
         .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .sheet(isPresented: $showExchangePolicyBrowser) {
+            LegalDocumentSheet(document: .exchangePolicy)
+        }
     }
 
     private var confirmationHeader: some View {
@@ -176,7 +180,7 @@ struct ReceiptView: View {
 
     private var policyLinks: some View {
         HStack(spacing: 16) {
-            Button("Exchange policy") { openURL(AppConstants.exchangePolicyURL) }
+            Button("Exchange policy") { showExchangePolicyBrowser = true }
             Text("·").foregroundStyle(.tertiary)
             Button("Contact support") {
                 if let url = AppConstants.supportMailtoURL {
@@ -189,6 +193,3 @@ struct ReceiptView: View {
     }
 }
 
-#Preview {
-    ReceiptView(orderId: "ORD-1001") { }
-}

@@ -27,11 +27,8 @@ struct NotificationBellButton: View {
         }
         .frame(width: 44, height: 44)
         .contentShape(Rectangle())
-        .accessibilityLabel("Open notifications")
+        .accessibilityLabel("Open favorites and notifications")
         .accessibilityValue("\(unreadCount) unread")
     }
 }
 
-#Preview {
-    NotificationBellButton(unreadCount: 4)
-}

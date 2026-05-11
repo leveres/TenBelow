@@ -16,24 +16,31 @@ struct TenBelowApp: App {
     #endif
 
     @StateObject private var cart = CartStore()
-    @StateObject private var catalog = CatalogStore()
+    @StateObject private var catalog: CatalogStore
     @StateObject private var commerceEvents: CommerceEventStore
     @StateObject private var buyerEngagement: BuyerEngagementStore
     @StateObject private var localProducts: LocalProductStore
     @StateObject private var orderStore: OrderStore
+    @StateObject private var exchangeStore: ExchangeStore
     @StateObject private var notifications: NotificationStore
     @StateObject private var sellerSubscription = SellerSubscriptionStore()
     @StateObject private var buyerSellerThreads = BuyerSellerThreadStore()
 
     init() {
+        #if DEBUG
+        AppConstants.applyLaunchArgumentsForTesting()
+        #endif
+
         let eventStore = CommerceEventStore()
         let engagementStore = BuyerEngagementStore(eventStore: eventStore)
         let productStore = LocalProductStore(eventStore: eventStore)
         let ordersStore = OrderStore(eventStore: eventStore)
+        _catalog = StateObject(wrappedValue: CatalogStore(eventStore: eventStore))
         _commerceEvents = StateObject(wrappedValue: eventStore)
         _buyerEngagement = StateObject(wrappedValue: engagementStore)
         _localProducts = StateObject(wrappedValue: productStore)
         _orderStore = StateObject(wrappedValue: ordersStore)
+        _exchangeStore = StateObject(wrappedValue: ExchangeStore(eventStore: eventStore, orderStore: ordersStore))
         _notifications = StateObject(
             wrappedValue: NotificationStore(
                 eventStore: eventStore,
@@ -73,6 +80,7 @@ struct TenBelowApp: App {
                 .environmentObject(buyerEngagement)
                 .environmentObject(localProducts)
                 .environmentObject(orderStore)
+                .environmentObject(exchangeStore)
                 .environmentObject(notifications)
                 .environmentObject(sellerSubscription)
                 .environmentObject(buyerSellerThreads)

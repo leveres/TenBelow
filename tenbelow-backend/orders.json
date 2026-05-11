@@ -1,0 +1,95 @@
+[
+  {
+    "id": "TB-SEED-2001",
+    "createdAt": "2026-04-10T15:30:00.000Z",
+    "status": "placed",
+    "buyerEmail": "buyer@tenbelow.app",
+    "shipToCity": "Austin",
+    "shipToState": "TX",
+    "currency": "USD",
+    "totalCents": 2400,
+    "shipments": [
+      {
+        "id": "SHIP-SEED-2001-1",
+        "sellerId": "seller_001",
+        "sellerName": "PrintShop One",
+        "sellerHandle": "printshopone",
+        "status": "preparing",
+        "shipByDate": "2026-04-12T23:59:59.000Z",
+        "carrier": null,
+        "trackingNumber": null,
+        "shippedAt": null,
+        "deliveredAt": null,
+        "items": [
+          {
+            "id": "ITEM-SEED-2001-1",
+            "productId": "prod-desk-cable-clip",
+            "productName": "Desk Cable Clip",
+            "unitPriceCents": 1200,
+            "quantity": 2,
+            "thumbnailURL": null,
+            "productionPreviewURL": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "TB-SEED-2002",
+    "createdAt": "2026-04-09T18:10:00.000Z",
+    "status": "placed",
+    "buyerEmail": "buyer@tenbelow.app",
+    "shipToCity": "Austin",
+    "shipToState": "TX",
+    "currency": "USD",
+    "totalCents": 3600,
+    "shipments": [
+      {
+        "id": "SHIP-SEED-2002-1",
+        "sellerId": "seller_001",
+        "sellerName": "PrintShop One",
+        "sellerHandle": "printshopone",
+        "status": "preparing",
+        "shipByDate": "2026-04-13T23:59:59.000Z",
+        "carrier": null,
+        "trackingNumber": null,
+        "shippedAt": null,
+        "deliveredAt": null,
+        "items": [
+          {
+            "id": "ITEM-SEED-2002-1",
+            "productId": "prod-cup-holder-insert",
+            "productName": "Cup Holder Insert",
+            "unitPriceCents": 1200,
+            "quantity": 1,
+            "thumbnailURL": null,
+            "productionPreviewURL": null
+          }
+        ]
+      },
+      {
+        "id": "SHIP-SEED-2002-2",
+        "sellerId": "seller_002",
+        "sellerName": "MakerLab Two",
+        "sellerHandle": "makerlabtwo",
+        "status": "preparing",
+        "shipByDate": "2026-04-13T23:59:59.000Z",
+        "carrier": null,
+        "trackingNumber": null,
+        "shippedAt": null,
+        "deliveredAt": null,
+        "items": [
+          {
+            "id": "ITEM-SEED-2002-2",
+            "productId": "prod-desk-organizer-tray",
+            "productName": "Desk Organizer Tray",
+            "unitPriceCents": 1200,
+            "quantity": 2,
+            "thumbnailURL": null,
+            "productionPreviewURL": null
+          }
+        ]
+      }
+    ]
+  }
+]

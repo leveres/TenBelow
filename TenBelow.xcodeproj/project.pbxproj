@@ -445,7 +445,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TenBelow/Info.plist;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.shopping";
 				"INFOPLIST_KEY_NSPhotoLibraryUsageDescription[sdk=iphoneos*]" = "TenBelow uses your photo library so sellers can choose product photos and videos for listings and drops.";
 				"INFOPLIST_KEY_NSPhotoLibraryUsageDescription[sdk=iphonesimulator*]" = "TenBelow uses your photo library so sellers can choose product photos and videos for listings and drops.";
 				"INFOPLIST_KEY_NSUserNotificationsUsageDescription[sdk=iphoneos*]" = "TenBelow sends alerts about orders, drops, and account activity.";
@@ -479,7 +479,8 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TENBELOW_BACKEND_BASE_URL = "https://tenbelow.onrender.com";
+				TENBELOW_APP_API_KEY = tb_app_client_4b8c9d1e6f0a2b3c7d8e9f1023456789;
+				TENBELOW_BACKEND_BASE_URL = "http://192.168.1.211:3000";
 				TENBELOW_STRIPE_PUBLISHABLE_KEY = pk_test_51TEEVH1f4tTEmZhQKRiwK9JKU98Lhg5Qn6Pln1UZWvTNYRSE6SaoCmEhyZi6zBab2qPp8X90P6LEY2XUmZaIkL7D00rYO7i0na;
 				XROS_DEPLOYMENT_TARGET = 26.2;
 			};
@@ -502,7 +503,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TenBelow/Info.plist;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.shopping";
 				"INFOPLIST_KEY_NSPhotoLibraryUsageDescription[sdk=iphoneos*]" = "TenBelow uses your photo library so sellers can choose product photos and videos for listings and drops.";
 				"INFOPLIST_KEY_NSPhotoLibraryUsageDescription[sdk=iphonesimulator*]" = "TenBelow uses your photo library so sellers can choose product photos and videos for listings and drops.";
 				"INFOPLIST_KEY_NSUserNotificationsUsageDescription[sdk=iphoneos*]" = "TenBelow sends alerts about orders, drops, and account activity.";
@@ -536,6 +537,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TENBELOW_APP_API_KEY = tb_app_client_4b8c9d1e6f0a2b3c7d8e9f1023456789;
 				TENBELOW_BACKEND_BASE_URL = "https://tenbelow.onrender.com";
 				TENBELOW_STRIPE_PUBLISHABLE_KEY = pk_test_51TEEVH1f4tTEmZhQKRiwK9JKU98Lhg5Qn6Pln1UZWvTNYRSE6SaoCmEhyZi6zBab2qPp8X90P6LEY2XUmZaIkL7D00rYO7i0na;
 				XROS_DEPLOYMENT_TARGET = 26.2;
@@ -695,7 +697,7 @@
 			repositoryURL = "https://github.com/stripe/stripe-ios";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 24.0.0;
+				minimumVersion = 25.0.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

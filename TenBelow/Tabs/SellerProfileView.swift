@@ -17,13 +17,13 @@ struct SellerProfileView: View {
     @AppStorage("sellerBusinessName") private var businessName = ""
     @AppStorage("sellerAccountCreated") private var accountCreated = false
     @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
+    @AppStorage("sellerPayoutSetupDeferred") private var payoutSetupDeferred = false
 
     @State private var status: SellerStatusResponse?
     @State private var dropSubmissions: SellerSubmissionsResponse?
     @State private var isLoading = false
     @State private var isCreating = false
     @State private var errorMessage: String?
-    @State private var showSubscriptionCenter = false
     @State private var showDropSubmit = false
 
     private var isRegistered: Bool { accountCreated && !sellerId.isEmpty }
@@ -83,7 +83,8 @@ struct SellerProfileView: View {
                         Image("Logo")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 96, height: 96)
+                            .frame(height: 96)
+                            .frame(maxWidth: .infinity)
 
                         Text(isRegistered ? businessName.isEmpty ? "Seller Account" : businessName : "Become a Seller")
                             .font(.system(size: 21, weight: .bold, design: .rounded))
@@ -95,7 +96,7 @@ struct SellerProfileView: View {
                                 Circle()
                                     .fill(s.onboardingComplete ? .green : .orange)
                                     .frame(width: 8, height: 8)
-                                Text(s.onboardingComplete ? "Active" : "Onboarding incomplete")
+                                Text(s.onboardingComplete ? "Payouts ready" : "Payout setup needed")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(s.onboardingComplete ? .green : .orange)
                             }
@@ -125,7 +126,7 @@ struct SellerProfileView: View {
                 AppLoadingOverlay(
                     title: isCreating ? "Creating Seller Account" : "Loading Seller Account",
                     subtitle: isCreating
-                        ? "Setting up your storefront and onboarding links."
+                        ? "Setting up your seller account."
                         : "Refreshing your seller status and drop details."
                 )
                 .transition(.opacity)
@@ -137,11 +138,13 @@ struct SellerProfileView: View {
             if isRegistered { await refreshStatus() }
             await sellerSubscription.refresh()
         }
+        .onChange(of: status?.onboardingComplete) { _, complete in
+            if complete == true {
+                payoutSetupDeferred = false
+            }
+        }
         .navigationDestination(isPresented: $showDropSubmit) {
             DropSubmitView()
-        }
-        .sheet(isPresented: $showSubscriptionCenter) {
-            SellerSubscriptionView()
         }
     }
 
@@ -191,6 +194,13 @@ struct SellerProfileView: View {
     @ViewBuilder
     private var registeredView: some View {
         VStack(spacing: TBTheme.spacingMD) {
+            if sellerPreviewMode {
+                Text("Offline preview — the seller server didn’t respond; you’re seeing local demo data. Use a Debug build from Xcode, or connect the backend for a real account.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 4)
+            }
 
             // Account details card
             VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
@@ -212,8 +222,6 @@ struct SellerProfileView: View {
                     .strokeBorder(TBTheme.skyBlue.opacity(0.10), lineWidth: 1)
             )
             .shadow(color: TBTheme.deepSky.opacity(0.035), radius: 8, y: 4)
-
-            sellerMembershipCard
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -271,27 +279,70 @@ struct SellerProfileView: View {
             )
             .shadow(color: TBTheme.deepSky.opacity(0.03), radius: 6, y: 3)
 
-            // Onboarding incomplete — show button to finish
+            // Stripe Connect payout setup — optional until sellers need payouts (separate from App Store membership).
             if let s = status, !s.onboardingComplete {
-                Button {
-                    Task { await openOnboarding() }
-                } label: {
-                    Label("Complete onboarding", systemImage: "arrow.right.circle")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
+                if payoutSetupDeferred {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Payout setup is still needed before you can receive transfers from orders. Finish any time here or in Settings → Manage payouts.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Button {
+                            Task { await openPayoutSetup() }
+                        } label: {
+                            Text("Set up payouts")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+
+                        Button {
+                            payoutSetupDeferred = false
+                        } label: {
+                            Text("More options")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(TBTheme.deepSky)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(TBTheme.spacingMD)
+                    .background(Color.white.opacity(0.84))
+                    .cornerRadius(18)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18)
+                            .strokeBorder(TBTheme.skyBlue.opacity(0.10), lineWidth: 1)
+                    )
+                } else {
+                    VStack(spacing: 10) {
+                        Button {
+                            Task { await openPayoutSetup() }
+                        } label: {
+                            Label("Set up payouts", systemImage: "banknote")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .accessibilityHint("Opens secure payout setup in Safari. Membership is managed separately in the App Store.")
+
+                        Button {
+                            payoutSetupDeferred = true
+                        } label: {
+                            Text("I’ll set this up later")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(TBTheme.deepSky)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(PrimaryButtonStyle())
             }
 
             // Weekly Drop (only for fully onboarded sellers)
             if isOnboarded {
                 Button {
-                    if sellerSubscription.hasActiveSubscription {
-                        showDropSubmit = true
-                    } else {
-                        showSubscriptionCenter = true
-                    }
+                    showDropSubmit = true
                 } label: {
                     HStack {
                         Image(systemName: "flame")
@@ -370,6 +421,9 @@ struct SellerProfileView: View {
     }
 
     private var dropSlotText: String {
+        if !shouldShowVerificationBadge {
+            return "Verification required to unlock"
+        }
         guard let subs = dropSubmissions else { return "Submit premium products" }
         if subs.isActive {
             return subs.slotsUsed == 0 ? "Drop is open — submit products!" : "\(subs.slotsUsed) product\(subs.slotsUsed == 1 ? "" : "s") submitted this week"
@@ -380,60 +434,17 @@ struct SellerProfileView: View {
         return "Submit premium products"
     }
 
-    private var sellerMembershipCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label(
-                    sellerSubscription.hasActiveSubscription ? "Seller membership active" : "Seller membership required",
-                    systemImage: sellerSubscription.hasActiveSubscription ? "checkmark.seal.fill" : "creditcard"
-                )
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(sellerSubscription.hasActiveSubscription ? .green : TBTheme.deepSky)
-
-                Spacer()
-
-                Text(sellerSubscription.hasActiveSubscription ? "Ready" : "\(sellerSubscription.displayPrice)/mo")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(TBTheme.accent)
-            }
-
-            Text(sellerSubscription.hasActiveSubscription
-                 ? sellerSubscription.syncDescription
-                 : "Activate the monthly seller membership in the App Store to upload products and submit to Weekly Drop.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Button {
-                showSubscriptionCenter = true
-            } label: {
-                Label(
-                    sellerSubscription.hasActiveSubscription ? "Manage membership" : "Start membership",
-                    systemImage: sellerSubscription.hasActiveSubscription ? "gearshape" : "arrow.right.circle"
-                )
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding()
-            }
-            .buttonStyle(PrimaryButtonStyle())
-        }
-        .padding(TBTheme.spacingMD)
-        .background(Color.white.opacity(0.84))
-        .cornerRadius(18)
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(TBTheme.skyBlue.opacity(0.10), lineWidth: 1)
-        )
-        .shadow(color: TBTheme.deepSky.opacity(0.03), radius: 6, y: 3)
-    }
-
     // MARK: - Actions
 
     private func createAccount() async {
         errorMessage = nil
         isCreating = true
+        let starterProfile = SellerProfile.starterProfile(
+            sellerId: sellerId,
+            businessName: businessName
+        )
         do {
-            let response = try await SellerAPI.createAccount(
+            try await SellerAPI.createAccount(
                 sellerId: sellerId,
                 email: sellerEmail,
                 businessName: businessName.isEmpty ? nil : businessName
@@ -442,19 +453,16 @@ struct SellerProfileView: View {
             accountCreated = true
             userRole = "seller"
             pendingLaunchTab = storeTabIndex
-            if let url = URL(string: response.onboardingUrl) {
-                openURL(url)
-            }
+            starterProfile.storeLocally()
+            catalog.upsertSellerProfile(starterProfile)
             await refreshStatus()
             await sellerSubscription.refresh()
         } catch {
-            accountCreated = true
-            sellerPreviewMode = true
-            userRole = "seller"
-            pendingLaunchTab = storeTabIndex
-            status = .preview(sellerId: sellerId)
-            dropSubmissions = .preview(sellerId: sellerId)
-            errorMessage = nil
+            accountCreated = false
+            sellerPreviewMode = false
+            status = nil
+            dropSubmissions = nil
+            errorMessage = "We couldn't create your seller account right now. Connect the backend and try again. \(error.localizedDescription)"
             await sellerSubscription.refresh()
         }
         isCreating = false
@@ -475,6 +483,13 @@ struct SellerProfileView: View {
         isLoading = true
         do {
             status = try await SellerAPI.onboardingStatus(sellerId: sellerId)
+            if let profile = try? await SellerAPI.fetchProfile(sellerId: sellerId) {
+                profile.storeLocally()
+                catalog.upsertSellerProfile(profile)
+                if businessName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    businessName = profile.displayName
+                }
+            }
             if let status {
                 // Trusted TestFlight collaborators can be force-verified via backend flag.
                 SellerVerificationStore.setTrustedTesterVerified(status.trustedTesterVerified, sellerId: sellerId)
@@ -489,9 +504,9 @@ struct SellerProfileView: View {
         isLoading = false
     }
 
-    private func openOnboarding() async {
+    private func openPayoutSetup() async {
         if sellerPreviewMode {
-            errorMessage = "Preview mode is active, so Stripe onboarding is skipped."
+            errorMessage = "Preview mode is active, so payout setup in the browser is skipped."
             return
         }
 
@@ -558,11 +573,3 @@ private struct DetailRow: View {
     }
 }
 
-#Preview {
-    NavigationStack {
-        SellerProfileView()
-    }
-    .environmentObject(CartStore())
-    .environmentObject(CatalogStore())
-    .environmentObject(SellerSubscriptionStore.previewActive)
-}

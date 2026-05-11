@@ -86,7 +86,7 @@ struct StoredProduct: Identifiable, Codable, Hashable {
         shipsInMaxDays = product.shipsInDays.upperBound
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-        self.previousPriceCents = previousPriceCents
+        self.previousPriceCents = product.previousPriceCents ?? previousPriceCents
     }
 
     init(
@@ -138,7 +138,9 @@ struct StoredProduct: Identifiable, Codable, Hashable {
             productionNote: productionNote,
             durabilityNote: durabilityNote,
             careWarnings: careWarnings,
-            shipsInDays: shipsInMinDays...shipsInMaxDays
+            shipsInDays: shipsInMinDays...shipsInMaxDays,
+            createdAt: createdAt,
+            previousPriceCents: previousPriceCents
         )
     }
 }
@@ -155,6 +157,9 @@ enum CommerceEventKind: String, Codable, Hashable {
     case orderPlaced
     case orderStatusUpdated
     case shipmentStatusUpdated
+    case exchangeSubmitted
+    case exchangeProofUploaded
+    case exchangeStatusUpdated
 }
 
 struct CommerceEvent: Identifiable, Codable, Hashable {

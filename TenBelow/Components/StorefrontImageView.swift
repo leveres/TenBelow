@@ -3,26 +3,92 @@ import SwiftUI
 import Combine
 import UIKit
 
-@MainActor
 private final class RemoteImageLoader: ObservableObject {
     static let cache = NSCache<NSURL, UIImage>()
 
     @Published private(set) var image: UIImage?
+    private var currentURL: URL?
 
     func load(from url: URL) async {
+        currentURL = url
+
+        #if DEBUG
+        let shouldLogProfileMedia = url.absoluteString.contains("/profile/")
+        if shouldLogProfileMedia {
+            print("[ProfileImage] load start url=\(url.absoluteString)")
+        }
+        #endif
+
         if let cachedImage = Self.cache.object(forKey: url as NSURL) {
-            image = cachedImage
+            await MainActor.run {
+                guard self.currentURL == url else { return }
+                image = cachedImage
+            }
+            #if DEBUG
+            if shouldLogProfileMedia {
+                print("[ProfileImage] cache hit url=\(url.absoluteString)")
+            }
+            #endif
             return
         }
 
         do {
-            let (data, _) = try await URLSession.tenBelow.data(from: url)
+            let data = try await loadData(from: url)
             guard !Task.isCancelled, let uiImage = UIImage(data: data) else { return }
-            Self.cache.setObject(uiImage, forKey: url as NSURL)
-            image = uiImage
+
+            await MainActor.run {
+                guard self.currentURL == url else { return }
+                Self.cache.setObject(uiImage, forKey: url as NSURL)
+                image = uiImage
+            }
+            #if DEBUG
+            if shouldLogProfileMedia {
+                print("[ProfileImage] load success url=\(url.absoluteString) bytes=\(data.count)")
+            }
+            #endif
         } catch {
-            image = nil
+            #if DEBUG
+            if shouldLogProfileMedia {
+                print("[ProfileImage] load failed url=\(url.absoluteString) error=\(error.localizedDescription)")
+            }
+            #endif
         }
+    }
+
+    private func loadData(from url: URL) async throws -> Data {
+        if url.isFileURL {
+            return try await Task.detached(priority: .userInitiated) {
+                try Data(contentsOf: url)
+            }.value
+        }
+
+        var lastError: Error?
+
+        for attempt in 0..<3 {
+            do {
+                var request = URLRequest(url: url)
+                request.cachePolicy = .returnCacheDataElseLoad
+                AppConstants.applyAppClientAuth(to: &request)
+                let (remoteData, response) = try await URLSession.tenBelow.data(for: request)
+
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    throw URLError(.badServerResponse)
+                }
+
+                return remoteData
+            } catch {
+                #if DEBUG
+                if url.absoluteString.contains("/profile/") {
+                    print("[ProfileImage] retry attempt=\(attempt + 1) url=\(url.absoluteString) error=\(error.localizedDescription)")
+                }
+                #endif
+                lastError = error
+                guard attempt < 2 else { break }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+
+        throw lastError ?? URLError(.cannotLoadFromNetwork)
     }
 }
 #endif
@@ -43,7 +109,7 @@ struct StorefrontImageView<Placeholder: View>: View {
     }
 
     var body: some View {
-        if let url = Product.mediaURL(for: reference) {
+        if let url = Product.previewMediaURL(for: reference) {
             remoteImage(url)
         } else {
             fallbackAssetOrPlaceholder

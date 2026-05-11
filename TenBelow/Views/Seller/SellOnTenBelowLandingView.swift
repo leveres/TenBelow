@@ -28,7 +28,8 @@ struct SellOnTenBelowLandingView: View {
             Image("Logo")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 110, height: 110)
+                .frame(height: 100)
+                .frame(maxWidth: .infinity)
 
             Text("Reach buyers looking for unique 3D-printed products")
                 .font(.system(size: 20, weight: .semibold, design: .rounded))
@@ -75,7 +76,7 @@ struct SellOnTenBelowLandingView: View {
 
     private var ctaSection: some View {
         NavigationLink {
-            SellerProfileView()
+            RolePickerView(startInSellerAccount: true)
         } label: {
             Text("Apply to Sell")
                 .font(.headline)

@@ -23,20 +23,21 @@ struct OrdersStatusBar: View {
 
     private var activeCount: Int {
         guard let sid = sellerId else {
-            return orders.filter { $0.status != .delivered }.count
+            return orders.filter { !isCompletedBuyerOrder($0) }.count
         }
         return orders.filter { order in
-            order.shipments.filter { $0.sellerId == sid }.contains { $0.status != .delivered }
+            let myShipments = order.shipments.filter { $0.sellerId == sid }
+            return !myShipments.isEmpty && !myShipments.allSatisfy(isCompletedShipment)
         }.count
     }
 
     private var completedCount: Int {
         guard let sid = sellerId else {
-            return orders.filter { $0.status == .delivered }.count
+            return orders.filter(isCompletedBuyerOrder).count
         }
         return orders.filter { order in
             let my = order.shipments.filter { $0.sellerId == sid }
-            return !my.isEmpty && my.allSatisfy { $0.status == .delivered }
+            return !my.isEmpty && my.allSatisfy(isCompletedShipment)
         }.count
     }
 
@@ -61,6 +62,14 @@ struct OrdersStatusBar: View {
         f.numberStyle = .currency
         f.currencyCode = "USD"
         return f.string(from: value as NSDecimalNumber) ?? "$\(value)"
+    }
+
+    private func isCompletedBuyerOrder(_ order: Order) -> Bool {
+        order.status == .shipped || order.status == .delivered
+    }
+
+    private func isCompletedShipment(_ shipment: Shipment) -> Bool {
+        shipment.status == .shipped || shipment.status == .delivered
     }
 
     var body: some View {

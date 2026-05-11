@@ -1,7 +1,10 @@
 import Foundation
 
 extension URLSession {
-    static let tenBelow: URLSession = {
+    /// Shared session for storefront/API JSON. Marked `nonisolated` so callers (and default parameters like
+    /// `CatalogService.loadProducts(urlSession:)`) are valid under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
+    /// `URLSession` is thread-safe for concurrent `data`/`decode` tasks on this configuration.
+    nonisolated static let tenBelow: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
@@ -15,8 +18,12 @@ extension URLSession {
         return URLSession(configuration: config)
     }()
 
-    func decode<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
-        let (data, response) = try await data(from: url)
+    nonisolated func decode<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+        let (data, response) = try await data(for: request)
 
         guard let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode) else {

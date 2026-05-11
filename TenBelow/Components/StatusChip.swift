@@ -66,13 +66,3 @@ struct StatusChip: View {
     }
 }
 
-#Preview {
-    HStack {
-        StatusChip(status: .placed)
-        StatusChip(status: .processing)
-        StatusChip(status: .partiallyShipped)
-        StatusChip(status: .shipped)
-        StatusChip(status: .delivered)
-    }
-    .padding()
-}
