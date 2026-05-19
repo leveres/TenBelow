@@ -20,7 +20,7 @@ body {
 .app-shell {
   width: min(1200px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 32px 0 40px;
+  padding: 32px 0 max(40px, env(safe-area-inset-bottom, 0px) + 88px);
 }
 
 .hero {
@@ -317,6 +317,115 @@ textarea {
   color: #315692;
 }
 
+.admin-section-nav {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 0 0 14px;
+  padding: 8px 0 12px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.admin-section-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.admin-section-link {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border: 1px solid rgba(127, 178, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #355b99;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-section-link.is-active {
+  border-color: #355b99;
+  background: #355b99;
+  color: #fff;
+}
+
+.admin-panel {
+  margin: 0 0 12px;
+  border: 1px solid rgba(127, 178, 255, 0.2);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 10px 28px rgba(71, 121, 206, 0.08);
+  scroll-margin-top: 72px;
+}
+
+.admin-panel-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.admin-panel-toggle-text {
+  font-size: 18px;
+  font-weight: 700;
+  color: #365a98;
+}
+
+.admin-panel-chevron {
+  flex: 0 0 auto;
+  color: #6a7f9f;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.admin-panel:not(.is-open) .admin-panel-chevron {
+  transform: rotate(-90deg);
+}
+
+.admin-panel-body {
+  padding: 0 18px 18px;
+}
+
+.admin-panel:not(.is-open) .admin-panel-body {
+  display: none;
+}
+
+.admin-panel .queue-section,
+.admin-panel .exchange-section,
+.admin-panel .audit-section,
+.admin-panel .ops-section {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.admin-panel .audit-subcopy:first-child {
+  margin-top: 0;
+}
+
+.audit-subcopy-inline {
+  margin: 0;
+  flex: 1;
+}
+
+.exchange-heading-row,
+.ops-heading-row {
+  justify-content: flex-end;
+}
+
 .audit-section {
   margin: 0 0 20px;
   padding: 18px 20px;
@@ -374,23 +483,70 @@ textarea {
   color: #355b99;
 }
 
+.audit-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.audit-list-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
 .audit-log-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  margin: 0 0 12px;
 }
 
 .audit-row {
+  display: block;
+  width: 100%;
   padding: 10px 12px;
   border-radius: 14px;
   background: rgba(245, 250, 255, 0.95);
   border: 1px solid rgba(127, 178, 255, 0.18);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.audit-row:focus-visible {
+  outline: 2px solid #5f8fde;
+  outline-offset: 2px;
+}
+
+.audit-row.is-expanded {
+  border-color: rgba(95, 143, 222, 0.45);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .audit-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.audit-row-details {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(127, 178, 255, 0.16);
+}
+
+.audit-row-chevron {
+  color: #6a7f9f;
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.audit-row.is-expanded .audit-row-chevron {
+  transform: rotate(90deg);
 }
 
 .audit-ts {
@@ -900,6 +1056,46 @@ textarea {
 }
 
 @media (max-width: 980px) {
+  .app-shell {
+    width: min(1200px, calc(100vw - 20px));
+    padding-top: 16px;
+  }
+
+  .admin-section-nav {
+    top: 0;
+    margin-left: -2px;
+    margin-right: -2px;
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+
+  .security-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-meta {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "ts chevron"
+      "action action";
+  }
+
+  .audit-meta .audit-ts {
+    grid-area: ts;
+  }
+
+  .audit-meta .audit-action {
+    grid-area: action;
+  }
+
+  .audit-meta .audit-row-chevron {
+    grid-area: chevron;
+  }
+
   .hero {
     flex-direction: column;
   }

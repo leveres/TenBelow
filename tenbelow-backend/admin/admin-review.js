@@ -15,6 +15,11 @@ const exchangeQueueEmpty = document.querySelector("#exchangeQueueEmpty");
 const exchangeQueueCount = document.querySelector("#exchangeQueueCount");
 const exchangeDetailPanel = document.querySelector("#exchangeDetailPanel");
 const auditLogList = document.querySelector("#auditLogList");
+const auditSearchInput = document.querySelector("#auditSearchInput");
+const auditPageSizeSelect = document.querySelector("#auditPageSizeSelect");
+const auditPrevPage = document.querySelector("#auditPrevPage");
+const auditNextPage = document.querySelector("#auditNextPage");
+const auditPageInfo = document.querySelector("#auditPageInfo");
 const metricAuthFailures = document.querySelector("#metricAuthFailures");
 const metricOwnershipMismatches = document.querySelector("#metricOwnershipMismatches");
 const metricTopScope = document.querySelector("#metricTopScope");
@@ -61,6 +66,8 @@ let isRefreshingAdminSession = false;
 let selectedExchangeRequestId = null;
 let incidentsPage = 1;
 let restoresPage = 1;
+let auditPage = 1;
+let auditEntriesCache = [];
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -460,38 +467,146 @@ async function loadExchangeDetail(exchangeRequestId) {
   }
 }
 
-function renderAuditEntries(entries) {
-  auditLogList.replaceChildren();
-  if (!Array.isArray(entries) || !entries.length) {
-    const empty = document.createElement("p");
-    empty.className = "audit-empty";
-    empty.textContent = "No audit events yet.";
-    auditLogList.appendChild(empty);
+function auditEntryFields(entry) {
+  return {
+    ts: entry?.ts ? dateTimeFormatter.format(new Date(entry.ts)) : "Unknown time",
+    action: entry?.action || "unknown_action",
+    requestId: entry?.requestId || "n/a",
+    method: entry?.method || "-",
+    route: entry?.path || "-",
+    ip: entry?.ip || "-",
+  };
+}
+
+function auditEntryMatchesQuery(entry, query) {
+  if (!query) {
+    return true;
+  }
+  const haystack = [
+    entry?.action,
+    entry?.requestId,
+    entry?.method,
+    entry?.path,
+    entry?.ip,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query.toLowerCase());
+}
+
+function filteredAuditEntries() {
+  const query = auditSearchInput?.value?.trim() || "";
+  return auditEntriesCache.filter((entry) => auditEntryMatchesQuery(entry, query));
+}
+
+function auditPageSize() {
+  return Math.max(5, Math.min(50, Number(auditPageSizeSelect?.value) || 20));
+}
+
+function updateAuditPaginationUI(total, page, pageSize) {
+  if (!auditPageInfo || !auditPrevPage || !auditNextPage) {
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(total / pageSize) || 1);
+  auditPageInfo.textContent = total
+    ? `Page ${page} of ${pages} (${total} events)`
+    : auditSearchInput?.value?.trim()
+      ? "No matching events"
+      : "No audit events";
+  auditPrevPage.disabled = page <= 1 || total === 0;
+  auditNextPage.disabled = page >= pages || total === 0;
+}
+
+function appendAuditDetailLine(container, label, value) {
+  const line = document.createElement("div");
+  line.className = "audit-detail";
+  line.textContent = `${label}: ${value}`;
+  container.appendChild(line);
+}
+
+function createAuditRow(entry) {
+  const { ts, action, requestId, method, route, ip } = auditEntryFields(entry);
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "audit-row";
+  row.setAttribute("aria-expanded", "false");
+
+  const meta = document.createElement("div");
+  meta.className = "audit-meta";
+
+  const tsEl = document.createElement("span");
+  tsEl.className = "audit-ts";
+  tsEl.textContent = ts;
+
+  const actionEl = document.createElement("span");
+  actionEl.className = "audit-action";
+  actionEl.textContent = action;
+
+  const chevron = document.createElement("span");
+  chevron.className = "audit-row-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "▸";
+
+  meta.append(tsEl, actionEl, chevron);
+
+  const details = document.createElement("div");
+  details.className = "audit-row-details";
+  details.hidden = true;
+  appendAuditDetailLine(details, "req", requestId);
+  appendAuditDetailLine(details, "route", `${method} ${route}`);
+  appendAuditDetailLine(details, "ip", ip);
+
+  row.append(meta, details);
+  row.addEventListener("click", () => {
+    const expanded = row.getAttribute("aria-expanded") === "true";
+    row.setAttribute("aria-expanded", expanded ? "false" : "true");
+    row.classList.toggle("is-expanded", !expanded);
+    details.hidden = expanded;
+  });
+
+  return row;
+}
+
+function renderAuditPage() {
+  if (!auditLogList) {
     return;
   }
 
-  for (const entry of entries) {
-    const row = document.createElement("div");
-    row.className = "audit-row";
-
-    const ts = entry?.ts ? dateTimeFormatter.format(new Date(entry.ts)) : "Unknown time";
-    const action = entry?.action || "unknown_action";
-    const requestId = entry?.requestId || "n/a";
-    const method = entry?.method || "-";
-    const route = entry?.path || "-";
-    const ip = entry?.ip || "-";
-
-    row.innerHTML = `
-      <div class="audit-meta">
-        <span class="audit-ts">${ts}</span>
-        <span class="audit-action">${action}</span>
-      </div>
-      <div class="audit-detail">req: ${requestId}</div>
-      <div class="audit-detail">${method} ${route}</div>
-      <div class="audit-detail">ip: ${ip}</div>
-    `;
-    auditLogList.appendChild(row);
+  auditLogList.replaceChildren();
+  const filtered = filteredAuditEntries();
+  const pageSize = auditPageSize();
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize) || 1);
+  if (auditPage > pages) {
+    auditPage = pages;
   }
+  if (auditPage < 1) {
+    auditPage = 1;
+  }
+
+  if (!total) {
+    const empty = document.createElement("p");
+    empty.className = "audit-empty";
+    empty.textContent = auditSearchInput?.value?.trim()
+      ? "No audit events match your search."
+      : "No audit events yet.";
+    auditLogList.appendChild(empty);
+    updateAuditPaginationUI(0, 1, pageSize);
+    return;
+  }
+
+  const start = (auditPage - 1) * pageSize;
+  for (const entry of filtered.slice(start, start + pageSize)) {
+    auditLogList.appendChild(createAuditRow(entry));
+  }
+  updateAuditPaginationUI(total, auditPage, pageSize);
+}
+
+function renderAuditEntries(entries) {
+  auditEntriesCache = Array.isArray(entries) ? entries : [];
+  auditPage = 1;
+  renderAuditPage();
 }
 
 function pickTopCountKey(record) {
@@ -601,6 +716,11 @@ const debouncedReloadRestoreHistory = debounce(() => {
   restoresPage = 1;
   void loadIncidentHistory();
 }, 350);
+
+const debouncedRenderAuditPage = debounce(() => {
+  auditPage = 1;
+  renderAuditPage();
+}, 250);
 
 function renderIncidentHistory(incidents) {
   incidentHistoryList.replaceChildren();
@@ -1265,6 +1385,29 @@ if (restoreNextPage) {
     void loadIncidentHistory();
   });
 }
+if (auditSearchInput) {
+  auditSearchInput.addEventListener("input", debouncedRenderAuditPage);
+}
+if (auditPageSizeSelect) {
+  auditPageSizeSelect.addEventListener("change", () => {
+    auditPage = 1;
+    renderAuditPage();
+  });
+}
+if (auditPrevPage) {
+  auditPrevPage.addEventListener("click", () => {
+    if (auditPage > 1) {
+      auditPage -= 1;
+      renderAuditPage();
+    }
+  });
+}
+if (auditNextPage) {
+  auditNextPage.addEventListener("click", () => {
+    auditPage += 1;
+    renderAuditPage();
+  });
+}
 loginButton.addEventListener("click", loginAdminSession);
 logoutButton.addEventListener("click", logoutAdminSession);
 lightboxClose.addEventListener("click", closeLightbox);
@@ -1287,4 +1430,113 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+const ADMIN_PANEL_IDS = ["products", "exchanges", "audit", "incidents", "snapshots"];
+const OPEN_PANEL_STORAGE_KEY = "tenbelow.admin.openPanel";
+
+function getAdminPanelElements() {
+  return {
+    nav: document.querySelector(".admin-section-nav"),
+    panels: Array.from(document.querySelectorAll(".admin-panel[data-panel-id]")),
+    links: Array.from(document.querySelectorAll(".admin-section-link[data-panel-id]")),
+  };
+}
+
+function setAdminPanelOpen(panelId, { scroll = false, persist = true } = {}) {
+  const { panels, links } = getAdminPanelElements();
+  if (!panels.length) {
+    return;
+  }
+
+  panels.forEach((panel) => {
+    const open = panel.dataset.panelId === panelId;
+    panel.classList.toggle("is-open", open);
+    const toggle = panel.querySelector(".admin-panel-toggle");
+    const body = panel.querySelector(".admin-panel-body");
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    if (body) {
+      body.hidden = !open;
+    }
+  });
+
+  links.forEach((link) => {
+    link.classList.toggle("is-active", link.dataset.panelId === panelId);
+  });
+
+  if (persist) {
+    try {
+      sessionStorage.setItem(OPEN_PANEL_STORAGE_KEY, panelId);
+    } catch {
+      // ignore private browsing quota errors
+    }
+  }
+
+  if (scroll) {
+    document.getElementById(`admin-panel-${panelId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function toggleAdminPanel(panelId) {
+  const panel = document.querySelector(`.admin-panel[data-panel-id="${panelId}"]`);
+  if (!panel) {
+    return;
+  }
+
+  if (panel.classList.contains("is-open")) {
+    panel.classList.remove("is-open");
+    panel.querySelector(".admin-panel-toggle")?.setAttribute("aria-expanded", "false");
+    const body = panel.querySelector(".admin-panel-body");
+    if (body) {
+      body.hidden = true;
+    }
+    getAdminPanelElements().links.forEach((link) => link.classList.remove("is-active"));
+    try {
+      sessionStorage.removeItem(OPEN_PANEL_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+    return;
+  }
+
+  setAdminPanelOpen(panelId, { scroll: true });
+}
+
+function initAdminPanels() {
+  const { nav, panels } = getAdminPanelElements();
+  if (!nav || !panels.length) {
+    return;
+  }
+
+  let initialPanelId = "products";
+  try {
+    const stored = sessionStorage.getItem(OPEN_PANEL_STORAGE_KEY);
+    if (stored && ADMIN_PANEL_IDS.includes(stored)) {
+      initialPanelId = stored;
+    }
+  } catch {
+    // ignore
+  }
+
+  setAdminPanelOpen(initialPanelId, { scroll: false, persist: false });
+
+  nav.addEventListener("click", (event) => {
+    const link = event.target.closest(".admin-section-link[data-panel-id]");
+    if (!link) {
+      return;
+    }
+    setAdminPanelOpen(link.dataset.panelId, { scroll: true });
+  });
+
+  panels.forEach((panel) => {
+    const toggle = panel.querySelector(".admin-panel-toggle");
+    const panelId = panel.dataset.panelId;
+    if (!toggle || !panelId) {
+      return;
+    }
+    toggle.addEventListener("click", () => toggleAdminPanel(panelId));
+  });
+}
+
+initAdminPanels();
 refreshAdminSessionState();

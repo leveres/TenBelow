@@ -6,6 +6,8 @@ import { Resend } from "resend";
 import nodemailer from "nodemailer";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "fs";
 import crypto from "crypto";
+import path from "path";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "url";
 import {
   isAppStoreVerificationConfigured,
@@ -37,6 +39,8 @@ import {
   dataFileURL,
   ensureDirectory,
 } from "./storagePaths.js";
+import { ensureSchema, isPgEnabled, loadAllDocumentsInto, upsertDocumentRow } from "./db/pgDocuments.mjs";
+import { storeMediaBytes } from "./mediaObjectStorage.js";
 
 const app = express();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -129,6 +133,22 @@ const sellerWriteLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const publicReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number.parseInt(process.env.PUBLIC_READ_RATE_LIMIT_MAX || "900", 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => clientIp(req) || "unknown",
+});
+
+const mediaReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number.parseInt(process.env.MEDIA_READ_RATE_LIMIT_MAX || "2000", 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => clientIp(req) || "unknown",
+});
+
 const customOrderLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 48,
@@ -157,6 +177,7 @@ const DROPS_PATH = dataFileURL("drops.json");
 const PRODUCT_REVIEWS_PATH = dataFileURL("product-reviews.json");
 const EXCHANGE_REQUESTS_PATH = dataFileURL("exchange-requests.json");
 const CUSTOM_ORDER_REQUESTS_PATH = dataFileURL("custom-order-requests.json");
+const WEBHOOK_EVENTS_PATH = dataFileURL("webhook-events.json");
 const ADMIN_REVIEW_HTML_PATH = fileURLToPath(new URL("./admin/review.html", import.meta.url));
 const ADMIN_ASSETS_PATH = fileURLToPath(new URL("./admin/", import.meta.url));
 const SNAPSHOT_DIRECTORY_URL = new URL("./snapshots/", DATA_DIRECTORY_URL);
@@ -184,7 +205,11 @@ const MANAGED_DATA_TARGETS = Object.freeze({
   drops: DROPS_PATH,
   productReviews: PRODUCT_REVIEWS_PATH,
   exchangeRequests: EXCHANGE_REQUESTS_PATH,
+  customOrderRequests: CUSTOM_ORDER_REQUESTS_PATH,
+  webhookEvents: WEBHOOK_EVENTS_PATH,
 });
+const DOCUMENT_MEMORY_CACHE = new Map();
+let processedWebhookEventIds = new Set();
 const securityAlertEscalationState = new Map();
 
 function ensureJSONFile(targetURL, { seedCandidates = [], fallbackValue }) {
@@ -242,13 +267,91 @@ function initializeBackendStorage() {
   ensureJSONFile(CUSTOM_ORDER_REQUESTS_PATH, {
     fallbackValue: [],
   });
+  ensureJSONFile(WEBHOOK_EVENTS_PATH, {
+    fallbackValue: () => ({ ids: [] }),
+  });
 }
 
 initializeBackendStorage();
 
+function hydrateWebhookProcessedIds() {
+  try {
+    const raw = JSON.parse(readFileSync(fileURLToPath(WEBHOOK_EVENTS_PATH), "utf-8"));
+    const ids = Array.isArray(raw.ids) ? raw.ids : [];
+    processedWebhookEventIds = new Set(ids);
+  } catch {
+    processedWebhookEventIds = new Set();
+  }
+}
+
+hydrateWebhookProcessedIds();
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function getCachedDocument(key) {
+  if (!DOCUMENT_MEMORY_CACHE.has(key)) return undefined;
+  return DOCUMENT_MEMORY_CACHE.get(key);
+}
+
+function setCachedDocument(key, value) {
+  DOCUMENT_MEMORY_CACHE.set(key, value);
+}
+
+function persistWebhookDedupeIds() {
+  const arr = [...processedWebhookEventIds].slice(-2500);
+  processedWebhookEventIds = new Set(arr);
+  writeManagedJSON("webhookEvents", { ids: arr });
+}
+
+function readConfigDocumentMerged() {
+  const cached = getCachedDocument("config");
+  if (cached !== undefined) {
+    return mergeExchangeConfig(cached);
+  }
+  try {
+    const parsed = mergeExchangeConfig(JSON.parse(readFileSync(CONFIG_PATH, "utf-8")));
+    setCachedDocument("config", parsed);
+    return parsed;
+  } catch {
+    const fallback = mergeExchangeConfig({ version: 2, minimumOrderCents: 1500 });
+    setCachedDocument("config", fallback);
+    return fallback;
+  }
+}
+
+function etagFromFileURL(targetURL) {
+  try {
+    const st = statSync(fileURLToPath(targetURL));
+    return `"${Math.round(st.mtimeMs)}-${st.size}"`;
+  } catch {
+    return '"0"';
+  }
+}
+
+function weakEtagFromString(value) {
+  const h = crypto.createHash("sha1").update(String(value)).digest("hex").slice(0, 24);
+  return `W/"${h}"`;
+}
+
+function sendPublicJsonWithCache(req, res, payload, { maxAgeSeconds, etag, extraHeaders = {} }) {
+  const inm = req.headers["if-none-match"];
+  if (inm && inm === etag) {
+    res.set("Cache-Control", `public, max-age=${maxAgeSeconds}`);
+    res.set("ETag", etag);
+    for (const [hk, hv] of Object.entries(extraHeaders)) {
+      res.set(hk, hv);
+    }
+    return res.status(304).end();
+  }
+  res.set("Cache-Control", `public, max-age=${maxAgeSeconds}`);
+  res.set("ETag", etag);
+  for (const [hk, hv] of Object.entries(extraHeaders)) {
+    res.set(hk, hv);
+  }
+  return res.json(payload);
+}
 
 async function fetchJSON(url) {
   const res = await fetch(url);
@@ -269,24 +372,39 @@ async function fetchCatalog() {
   };
 
   if (process.env.CATALOG_URL) {
-    try { return await fetchJSON(process.env.CATALOG_URL); } catch (e) {
+    try {
+      const remote = await fetchJSON(process.env.CATALOG_URL);
+      setCachedDocument("products", remote);
+      return hydrateCatalog(remote);
+    } catch (e) {
       console.warn("CATALOG_URL fetch failed:", e.message);
     }
   }
-  try {
-    return hydrateCatalog(JSON.parse(readFileSync(PRODUCTS_PATH, "utf-8")));
-  } catch { return hydrateCatalog({ version: 1, updatedAt: new Date().toISOString(), products: [] }); }
+  let catalogRaw = getCachedDocument("products");
+  if (catalogRaw === undefined) {
+    try {
+      catalogRaw = JSON.parse(readFileSync(PRODUCTS_PATH, "utf-8"));
+      setCachedDocument("products", catalogRaw);
+    } catch {
+      catalogRaw = { version: 1, updatedAt: new Date().toISOString(), products: [] };
+      setCachedDocument("products", catalogRaw);
+    }
+  }
+  return hydrateCatalog(catalogRaw);
 }
 
 async function fetchConfig() {
   if (process.env.CONFIG_URL) {
-    try { return await fetchJSON(process.env.CONFIG_URL); } catch (e) {
+    try {
+      const remote = await fetchJSON(process.env.CONFIG_URL);
+      const merged = mergeExchangeConfig(remote);
+      setCachedDocument("config", merged);
+      return merged;
+    } catch (e) {
       console.warn("CONFIG_URL fetch failed:", e.message);
     }
   }
-  try {
-    return mergeExchangeConfig(JSON.parse(readFileSync(CONFIG_PATH, "utf-8")));
-  } catch { return mergeExchangeConfig({ version: 2, minimumOrderCents: 1500 }); }
+  return readConfigDocumentMerged();
 }
 
 async function fetchSellers() {
@@ -751,6 +869,12 @@ function writeManagedJSON(key, payload) {
   const { fileURL } = resolveManagedDataTarget(key);
   createDataSnapshot(key, "autosave");
   writeFileSync(fileURL, JSON.stringify(payload, null, 2));
+  DOCUMENT_MEMORY_CACHE.set(key, payload);
+  if (isPgEnabled()) {
+    void upsertDocumentRow(key, payload).catch((err) =>
+      console.error("Postgres upsert failed:", key, err.message)
+    );
+  }
 }
 
 function listDataSnapshots(key, limit = 50) {
@@ -1321,10 +1445,17 @@ function saveCatalog(catalog = {}) {
 }
 
 function loadProductReviewsFile() {
+  const cached = getCachedDocument("productReviews");
+  if (cached !== undefined) {
+    return Array.isArray(cached) ? cached : [];
+  }
   try {
     const parsed = JSON.parse(readFileSync(PRODUCT_REVIEWS_PATH, "utf-8"));
-    return Array.isArray(parsed) ? parsed : [];
+    const arr = Array.isArray(parsed) ? parsed : [];
+    setCachedDocument("productReviews", arr);
+    return arr;
   } catch {
+    setCachedDocument("productReviews", []);
     return [];
   }
 }
@@ -1551,17 +1682,24 @@ function normalizeCustomOrderRequest(entry = {}) {
 }
 
 function loadCustomOrderRequestsFile() {
+  const cached = getCachedDocument("customOrderRequests");
+  if (cached !== undefined) {
+    const arr = Array.isArray(cached) ? cached : [];
+    return arr.map((row) => normalizeCustomOrderRequest(row));
+  }
   try {
     const raw = JSON.parse(readFileSync(fileURLToPath(CUSTOM_ORDER_REQUESTS_PATH), "utf-8"));
     const arr = Array.isArray(raw) ? raw : [];
+    setCachedDocument("customOrderRequests", arr);
     return arr.map((row) => normalizeCustomOrderRequest(row));
   } catch {
+    setCachedDocument("customOrderRequests", []);
     return [];
   }
 }
 
 function saveCustomOrderRequestsFile(rows) {
-  writeFileSync(fileURLToPath(CUSTOM_ORDER_REQUESTS_PATH), JSON.stringify(rows, null, 2));
+  writeManagedJSON("customOrderRequests", Array.isArray(rows) ? rows : []);
 }
 
 function isAllowedCustomOrderReference(ref, sellerId) {
@@ -1574,8 +1712,6 @@ function isAllowedCustomOrderReference(ref, sellerId) {
   }
   try {
     const u = new URL(t);
-    const backend = new URL(BACKEND_URL);
-    if (u.origin !== backend.origin) return false;
     return u.pathname.startsWith(expectedPrefix);
   } catch {
     return false;
@@ -1624,17 +1760,32 @@ async function applyStripeSubscriptionToSeller(sellerId, subscription) {
 }
 
 function loadOrdersFile() {
+  const cached = getCachedDocument("orders");
+  if (cached !== undefined) {
+    return Array.isArray(cached) ? cached : [];
+  }
   try {
-    return JSON.parse(readFileSync(ORDERS_PATH, "utf-8"));
+    const parsed = JSON.parse(readFileSync(ORDERS_PATH, "utf-8"));
+    const arr = Array.isArray(parsed) ? parsed : [];
+    setCachedDocument("orders", arr);
+    return arr;
   } catch {
+    setCachedDocument("orders", []);
     return [];
   }
 }
 
 function loadExchangeRequestsFile() {
+  const cached = getCachedDocument("exchangeRequests");
+  if (cached !== undefined) {
+    return normalizeExchangeRequests(cached);
+  }
   try {
-    return normalizeExchangeRequests(JSON.parse(readFileSync(EXCHANGE_REQUESTS_PATH, "utf-8")));
+    const parsed = normalizeExchangeRequests(JSON.parse(readFileSync(EXCHANGE_REQUESTS_PATH, "utf-8")));
+    setCachedDocument("exchangeRequests", parsed);
+    return parsed;
   } catch {
+    setCachedDocument("exchangeRequests", []);
     return [];
   }
 }
@@ -1767,14 +1918,20 @@ async function sendBuyerAccountUpdateConfirmation({
 }
 
 function loadBuyersFile() {
-  try {
-    const parsed = JSON.parse(readFileSync(BUYERS_PATH, "utf-8"));
-    return Object.fromEntries(
-      Object.entries(parsed).map(([email, record]) => [email, normalizeBuyerRecord(record, email)])
-    );
-  } catch {
-    return {};
+  let raw = getCachedDocument("buyers");
+  if (raw === undefined) {
+    try {
+      raw = JSON.parse(readFileSync(BUYERS_PATH, "utf-8"));
+      setCachedDocument("buyers", raw);
+    } catch {
+      raw = {};
+      setCachedDocument("buyers", raw);
+    }
   }
+  const src = raw && typeof raw === "object" ? raw : {};
+  return Object.fromEntries(
+    Object.entries(src).map(([email, record]) => [email, normalizeBuyerRecord(record, email)])
+  );
 }
 
 function saveBuyersFile(buyers) {
@@ -1793,11 +1950,7 @@ function saveExchangeRequestsFile(exchangeRequests) {
 }
 
 function exchangeConfigSnapshot() {
-  try {
-    return mergeExchangeConfig(JSON.parse(readFileSync(CONFIG_PATH, "utf-8")));
-  } catch {
-    return DEFAULT_EXCHANGE_CONFIG;
-  }
+  return readConfigDocumentMerged();
 }
 
 function resolveOrderItem(order, orderItemId) {
@@ -1953,6 +2106,9 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
   }
 
   if (event.type === "payment_intent.succeeded") {
+    if (processedWebhookEventIds.has(event.id)) {
+      return res.json({ received: true, duplicate: true });
+    }
     const pi = event.data.object;
     const meta = pi.metadata;
     const orderId = meta.orderId || crypto.randomUUID();
@@ -2010,6 +2166,9 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
       } catch (pushErr) {
         console.warn("Order push notification error:", pushErr?.message || pushErr);
       }
+
+      processedWebhookEventIds.add(event.id);
+      persistWebhookDedupeIds();
     } catch (err) {
       console.error("Webhook processing error:", err);
     }
@@ -2058,6 +2217,27 @@ app.use((req, res, next) => {
   res.setHeader("X-Request-Id", requestId);
   next();
 });
+app.use((req, res, next) => {
+  if (req.path === "/health" || req.path === "/ready") {
+    return next();
+  }
+  const started = performance.now();
+  res.on("finish", () => {
+    const durationMs = Math.max(0, Math.round(performance.now() - started));
+    console.log(
+      JSON.stringify({
+        msg: "http_request",
+        requestId: req.requestId,
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        durationMs,
+        ip: clientIp(req),
+      })
+    );
+  });
+  next();
+});
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -2090,11 +2270,15 @@ app.use((err, req, res, next) => {
   }
   return next(err);
 });
-app.use("/media", express.static(MEDIA_DIRECTORY_PATH));
-app.use("/admin/assets", express.static(ADMIN_ASSETS_PATH));
+app.use("/media", mediaReadLimiter, express.static(MEDIA_DIRECTORY_PATH));
+app.use("/admin/assets", (req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  next();
+}, express.static(ADMIN_ASSETS_PATH));
 
 app.get("/admin/review", (req, res) => {
   ensureLocalAdminSession(req, res);
+  res.setHeader("Cache-Control", "no-store, max-age=0");
   res.sendFile(ADMIN_REVIEW_HTML_PATH);
 });
 
@@ -2630,22 +2814,38 @@ app.get("/admin/security-metrics", adminMutationLimiter, requireAdmin, (req, res
   });
 });
 
-app.get("/catalog", async (_, res) => {
+app.get("/catalog", publicReadLimiter, async (req, res) => {
   try {
     const catalog = await fetchCatalog();
-    res.json(catalog);
+    const etag = process.env.CATALOG_URL
+      ? weakEtagFromString(`${process.env.CATALOG_URL}:${catalog?.version ?? ""}:${catalog?.updatedAt ?? ""}`)
+      : `"cat-${etagFromFileURL(PRODUCTS_PATH).slice(1, -1)}-${etagFromFileURL(PRODUCT_REVIEWS_PATH).slice(1, -1)}"`;
+    const rev = `${catalog?.version ?? 0}:${catalog?.updatedAt ?? ""}`;
+    return sendPublicJsonWithCache(req, res, catalog, {
+      maxAgeSeconds: 30,
+      etag,
+      extraHeaders: { "X-Catalog-Revision": rev },
+    });
   } catch (err) {
     console.error("catalog error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/config", async (_, res) => {
+app.get("/config", publicReadLimiter, async (req, res) => {
   try {
     const config = await fetchConfig();
-    res.json({
+    const body = {
       ...config,
       minimumOrderCents: PLATFORM_MINIMUM_ORDER_CENTS,
+    };
+    const etag = process.env.CONFIG_URL
+      ? weakEtagFromString(`${process.env.CONFIG_URL}:${JSON.stringify(body)}`)
+      : etagFromFileURL(CONFIG_PATH);
+    return sendPublicJsonWithCache(req, res, body, {
+      maxAgeSeconds: 60,
+      etag,
+      extraHeaders: { "X-Config-Revision": String(body?.version ?? config?.version ?? "") },
     });
   } catch (err) {
     console.error("config error:", err);
@@ -2779,12 +2979,50 @@ app.post("/create-payment-intent", paymentLimiter, requireAppClient, async (req,
 // ---------------------------------------------------------------------------
 
 function loadSellersFile() {
-  try { return normalizeSellerMap(JSON.parse(readFileSync(SELLERS_PATH, "utf-8"))); } catch { return {}; }
+  const cached = getCachedDocument("sellers");
+  if (cached !== undefined) {
+    try {
+      return normalizeSellerMap(cached);
+    } catch {
+      return {};
+    }
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(SELLERS_PATH, "utf-8"));
+    setCachedDocument("sellers", parsed);
+    return normalizeSellerMap(parsed);
+  } catch {
+    setCachedDocument("sellers", {});
+    return {};
+  }
 }
 
 function saveSellersFile(sellers) {
   writeManagedJSON("sellers", normalizeSellerMap(sellers));
 }
+
+app.post("/orders/buyer", requireAppClient, requireAuthenticatedBuyer, (req, res) => {
+  try {
+    const bodyEmail = String(req.body?.buyerEmail || "").trim().toLowerCase();
+    const authEmail = String(req.auth.buyerEmail || "").trim().toLowerCase();
+    if (!bodyEmail || bodyEmail !== authEmail) {
+      return res.status(403).json({ error: "Buyer email must match the signed-in buyer session" });
+    }
+    const orderId = String(req.body?.orderId || "").trim();
+    const config = exchangeConfigSnapshot();
+    const exchangeRequests = loadExchangeRequestsFile();
+    let orders = attachExchangeSummariesToOrders(loadOrdersFile(), exchangeRequests, config);
+    if (orderId) {
+      orders = orders.filter((order) => order.id === orderId);
+    }
+    orders = orders.filter((order) => (order.buyerEmail || "").trim().toLowerCase() === authEmail);
+    orders.sort((lhs, rhs) => new Date(rhs.createdAt).getTime() - new Date(lhs.createdAt).getTime());
+    res.json({ orders });
+  } catch (err) {
+    console.error("orders buyer lookup error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get("/orders", requireAppClient, requireAuthenticatedUser, (req, res) => {
   try {
@@ -2793,16 +3031,10 @@ app.get("/orders", requireAppClient, requireAuthenticatedUser, (req, res) => {
     const orderId = (req.query.orderId || "").toString().trim();
 
     if (buyerEmail) {
-      if (req.auth.role !== "buyer" || req.auth.buyerEmail !== buyerEmail) {
-        auditOwnershipMismatch(req, {
-          scope: "orders_buyer_query",
-          expectedRole: "buyer",
-          expectedBuyerEmail: buyerEmail,
-          actualRole: req.auth.role || null,
-          actualBuyerEmail: req.auth.buyerEmail || null,
-        });
-        return res.status(403).json({ error: "Buyer order access denied" });
-      }
+      return res.status(400).json({
+        code: "use_post_orders_buyer",
+        error: "Buyer orders must be fetched with POST /orders/buyer (signed-in session).",
+      });
     } else if (sellerId) {
       if (req.auth.role !== "seller" || req.auth.sellerId !== sellerId) {
         auditOwnershipMismatch(req, {
@@ -2815,7 +3047,7 @@ app.get("/orders", requireAppClient, requireAuthenticatedUser, (req, res) => {
         return res.status(403).json({ error: "Seller order access denied" });
       }
     } else {
-      return res.status(400).json({ error: "buyerEmail or sellerId is required" });
+      return res.status(400).json({ error: "sellerId is required (buyers should POST /orders/buyer)" });
     }
 
     const config = exchangeConfigSnapshot();
@@ -2823,9 +3055,6 @@ app.get("/orders", requireAppClient, requireAuthenticatedUser, (req, res) => {
     let orders = attachExchangeSummariesToOrders(loadOrdersFile(), exchangeRequests, config);
     if (orderId) {
       orders = orders.filter((order) => order.id === orderId);
-    }
-    if (buyerEmail) {
-      orders = orders.filter((order) => (order.buyerEmail || "").trim().toLowerCase() === buyerEmail);
     }
     if (sellerId) {
       orders = orders.filter((order) => order.shipments.some((shipment) => shipment.sellerId === sellerId));
@@ -2988,7 +3217,7 @@ app.post(
   requireAppClient,
   requireAuthenticatedBuyer,
   express.raw({ type: "*/*", limit: "80mb" }),
-  (req, res) => {
+  async (req, res) => {
     try {
       const exchangeRequestId = String(req.params.id || "").trim();
       const exchangeRequests = loadExchangeRequestsFile();
@@ -3057,12 +3286,13 @@ app.post(
       }
 
       const assetId = crypto.randomUUID();
-      const directoryURL = new URL(`./exchanges/${exchangeRequestId}/proof/`, MEDIA_DIRECTORY_URL);
-      mkdirSync(directoryURL, { recursive: true });
-      const fileURL = new URL(`${assetId}.${fileExtension}`, directoryURL);
-      writeFileSync(fileURL, body);
-
-      const publicURL = `${BACKEND_URL}/media/exchanges/${exchangeRequestId}/proof/${assetId}.${fileExtension}`;
+      const relativeKey = `exchanges/${exchangeRequestId}/proof/${assetId}.${fileExtension}`;
+      const ctHeader = String(req.headers["content-type"] || "").trim() || "application/octet-stream";
+      const { url: publicURL } = await storeMediaBytes({
+        relativeKey,
+        buffer: body,
+        contentType: ctHeader,
+      });
       const asset = normalizeExchangeProofAsset({
         id: assetId,
         type: proofType,
@@ -3482,7 +3712,7 @@ app.post("/product-reviews", requireAppClient, requireAuthenticatedBuyer, (req, 
   }
 });
 
-app.get("/product-reviews", (req, res) => {
+app.get("/product-reviews", publicReadLimiter, (req, res) => {
   try {
     const productId = String(req.query.productId || "").trim();
     if (!productId) {
@@ -3495,12 +3725,14 @@ app.get("/product-reviews", (req, res) => {
 
     const summary = buildProductReviewSummaryMap(reviews).get(productId) || { total: 0, count: 0 };
 
-    res.json({
+    const payload = {
       productId,
       averageRating: summary.count > 0 ? Number((summary.total / summary.count).toFixed(1)) : 0,
       reviewCount: summary.count,
       reviews,
-    });
+    };
+    const etag = `"pr-${productId}-${etagFromFileURL(PRODUCT_REVIEWS_PATH).slice(1, -1)}"`;
+    return sendPublicJsonWithCache(req, res, payload, { maxAgeSeconds: 45, etag });
   } catch (err) {
     console.error("product reviews fetch error:", err);
     res.status(500).json({ error: err.message });
@@ -3639,21 +3871,23 @@ app.get("/seller-onboarding-refresh", (req, res) => {
 
 app.get("/sellers", requireAdmin, (_, res) => res.json(loadSellersFile()));
 
-app.get("/seller-profiles", async (_, res) => {
+app.get("/seller-profiles", publicReadLimiter, async (req, res) => {
   try {
     const sellers = loadSellersFile();
     const catalog = await fetchCatalog();
     const orders = loadOrdersFile();
-    res.json({
+    const payload = {
       sellers: buildSellerProfiles(sellers, catalog.products || [], orders),
-    });
+    };
+    const etag = `"sp-all-${etagFromFileURL(SELLERS_PATH).slice(1, -1)}-${etagFromFileURL(PRODUCTS_PATH).slice(1, -1)}-${etagFromFileURL(ORDERS_PATH).slice(1, -1)}"`;
+    return sendPublicJsonWithCache(req, res, payload, { maxAgeSeconds: 45, etag });
   } catch (err) {
     console.error("seller-profiles error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/seller-profiles/:sellerId", async (req, res) => {
+app.get("/seller-profiles/:sellerId", publicReadLimiter, async (req, res) => {
   try {
     const sellerId = String(req.params.sellerId || "").trim();
     if (!sellerId) return res.status(400).json({ error: "Seller id is required" });
@@ -3666,9 +3900,11 @@ app.get("/seller-profiles/:sellerId", async (req, res) => {
       return res.status(404).json({ error: "Seller not found" });
     }
 
-    res.json({
+    const payload = {
       seller: buildSellerProfile(sellerId, sellers[sellerId], catalog.products || [], orders),
-    });
+    };
+    const etag = `"sp-${sellerId}-${etagFromFileURL(SELLERS_PATH).slice(1, -1)}-${etagFromFileURL(PRODUCTS_PATH).slice(1, -1)}-${etagFromFileURL(ORDERS_PATH).slice(1, -1)}"`;
+    return sendPublicJsonWithCache(req, res, payload, { maxAgeSeconds: 45, etag });
   } catch (err) {
     console.error("seller-profile error:", err);
     res.status(500).json({ error: err.message });
@@ -3763,7 +3999,7 @@ app.post(
   requireAppClient,
   customOrderLimiter,
   express.raw({ type: "*/*", limit: "12mb" }),
-  (req, res) => {
+  async (req, res) => {
     try {
       const sellerId = sanitizePathSegment(req.params.sellerId, "seller");
       const sellers = loadSellersFile();
@@ -3799,13 +4035,14 @@ app.post(
       }
 
       const assetId = crypto.randomUUID();
-      const directoryURL = new URL(`./custom-order-ref/${sellerId}/`, MEDIA_DIRECTORY_URL);
-      mkdirSync(directoryURL, { recursive: true });
-      const fileURL = new URL(`${assetId}.${extension}`, directoryURL);
-      writeFileSync(fileURL, body);
-      const publicPath = `/media/custom-order-ref/${sellerId}/${assetId}.${extension}`;
+      const relativeKey = `custom-order-ref/${sellerId}/${assetId}.${extension}`;
+      const { url } = await storeMediaBytes({
+        relativeKey,
+        buffer: body,
+        contentType: contentType || "image/jpeg",
+      });
 
-      res.json({ url: publicPath });
+      res.json({ url });
     } catch (err) {
       console.error("custom-order-reference upload error:", err);
       res.status(500).json({ error: err.message });
@@ -4412,7 +4649,7 @@ app.put(
   requireAppClient,
   requireAuthenticatedSeller,
   express.raw({ type: "*/*", limit: "80mb" }),
-  (req, res) => {
+  async (req, res) => {
     try {
       const sellerId = sanitizePathSegment(req.params.sellerId, "seller");
       if (req.auth.sellerId !== sellerId) {
@@ -4432,17 +4669,15 @@ app.put(
       }
 
       const extension = sanitizeFileExtension(req.headers["x-file-extension"], "bin");
-      const directoryURL = new URL(`./${sellerId}/${productId}/`, MEDIA_DIRECTORY_URL);
-      mkdirSync(directoryURL, { recursive: true });
-
       const filename = `${mediaKind}-${slot}.${extension}`;
-      const fileURL = new URL(filename, directoryURL);
-      writeFileSync(fileURL, body);
+      const relativeKey = `${sellerId}/${productId}/${filename}`;
+      const contentType = String(req.headers["content-type"] || "").trim() || "application/octet-stream";
+      const { url } = await storeMediaBytes({ relativeKey, buffer: body, contentType });
       const version = Date.now();
-      const mediaPath = `/media/${sellerId}/${productId}/${filename}?v=${version}`;
+      const withQuery = url.includes("?") ? `${url}&v=${version}` : `${url}?v=${version}`;
 
       res.json({
-        url: mediaPath,
+        url: withQuery,
       });
     } catch (err) {
       console.error("seller-media upload error:", err);
@@ -4640,7 +4875,19 @@ const DROP_MIN_PRICE_CENTS = 1001;
 const DROP_MAX_SLOTS_PER_SELLER = 4;
 
 function loadDropsFile() {
-  try { return JSON.parse(readFileSync(DROPS_PATH, "utf-8")); } catch { return {}; }
+  const cached = getCachedDocument("drops");
+  if (cached !== undefined) {
+    return cached && typeof cached === "object" ? cached : {};
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(DROPS_PATH, "utf-8"));
+    const obj = parsed && typeof parsed === "object" ? parsed : {};
+    setCachedDocument("drops", obj);
+    return obj;
+  } catch {
+    setCachedDocument("drops", {});
+    return {};
+  }
 }
 
 function saveDropsFile(drops) {
@@ -5016,7 +5263,8 @@ app.post("/drop/submit", requireAppClient, requireAuthenticatedSeller, async (re
 
     const catalogProducts = Array.isArray(catalog.products) ? catalog.products.map((product) => normalizeCatalogProduct(product)) : [];
     const resolvedProductId = sanitizePathSegment(productId || `drop-${crypto.randomUUID()}`, `drop-${crypto.randomUUID()}`);
-    const existingProduct = catalogProducts.find((product) => product.id === resolvedProductId);
+    const existingProductIndex = catalogProducts.findIndex((product) => product.id === resolvedProductId);
+    const existingProduct = existingProductIndex >= 0 ? catalogProducts[existingProductIndex] : null;
     if (existingProduct && existingProduct.sellerId !== sellerId) {
       auditOwnershipMismatch(req, {
         scope: "drop_submit_existing_product",
@@ -5073,7 +5321,7 @@ app.post("/drop/submit", requireAppClient, requireAuthenticatedSeller, async (re
     const entry = normalizeDropEntry({
       productId: product.id,
       sellerId,
-      submittedAt: catalogProducts[existingProductIndex]?.submittedAt || new Date().toISOString(),
+      submittedAt: product.submittedAt || new Date().toISOString(),
     });
     const nextEntries = [...weekEntries, entry];
     weekData.entries = nextEntries;
@@ -5172,9 +5420,10 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
     if (existingProductIndex === -1) {
       return res.status(404).json({ error: "Drop product not found in catalog." });
     }
+    const existingProduct = catalogProducts[existingProductIndex];
 
     const updatedProduct = normalizeCatalogProduct({
-      ...catalogProducts[existingProductIndex],
+      ...existingProduct,
       id: productId,
       sellerId,
       name,
@@ -5187,10 +5436,9 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
       dropStory: story || "",
       dropBestUseCase: bestUseCase || "",
       previousPriceCents:
-        catalogProducts[existingProductIndex]?.priceCents != null &&
-        catalogProducts[existingProductIndex].priceCents !== priceCents
-          ? catalogProducts[existingProductIndex].priceCents
-          : catalogProducts[existingProductIndex]?.previousPriceCents || null,
+        existingProduct.priceCents != null && existingProduct.priceCents !== priceCents
+          ? existingProduct.priceCents
+          : existingProduct.previousPriceCents || null,
       material: material || "PLA+",
       durabilityNote: durabilityNote || "",
       careWarnings: careWarnings || [],
@@ -5218,32 +5466,40 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
   }
 });
 
-app.get("/drop/current", async (req, res) => {
-  const window = getCurrentDropWindow();
-  const drops = loadDropsFile();
-  const weekData = drops[window.weekId];
-  const catalog = await fetchCatalog();
-  const products = resolveDropProducts(weekData, catalog);
+app.get("/drop/current", publicReadLimiter, async (req, res) => {
+  try {
+    const window = getCurrentDropWindow();
+    const drops = loadDropsFile();
+    const weekData = drops[window.weekId];
+    const catalog = await fetchCatalog();
+    const products = resolveDropProducts(weekData, catalog);
+    const etag = `"drop-${etagFromFileURL(DROPS_PATH).slice(1, -1)}-${etagFromFileURL(PRODUCTS_PATH).slice(1, -1)}"`;
 
-  if (!window.isActive || !weekData || !products.length) {
-    return res.json({
-      active: false,
+    if (!window.isActive || !weekData || !products.length) {
+      const payload = {
+        active: false,
+        weekId: window.weekId,
+        nextDropAt: window.nextDropAt,
+        startsAt: window.startsAt,
+        endsAt: window.endsAt,
+        products: [],
+      };
+      return sendPublicJsonWithCache(req, res, payload, { maxAgeSeconds: 20, etag });
+    }
+
+    const payload = {
+      active: true,
       weekId: window.weekId,
-      nextDropAt: window.nextDropAt,
-      startsAt: window.startsAt,
-      endsAt: window.endsAt,
-      products: [],
-    });
+      startsAt: weekData.startsAt || window.startsAt,
+      endsAt: weekData.endsAt || window.endsAt,
+      products,
+      nextDropAt: null,
+    };
+    return sendPublicJsonWithCache(req, res, payload, { maxAgeSeconds: 20, etag });
+  } catch (err) {
+    console.error("drop/current error:", err);
+    res.status(500).json({ error: err.message });
   }
-
-  res.json({
-    active: true,
-    weekId: window.weekId,
-    startsAt: weekData.startsAt || window.startsAt,
-    endsAt: weekData.endsAt || window.endsAt,
-    products,
-    nextDropAt: null,
-  });
 });
 
 app.get("/drop/my-submissions/:sellerId", requireAppClient, requireAuthenticatedSeller, async (req, res) => {
@@ -5357,24 +5613,90 @@ app.delete("/drop/submission/:productId", requireAppClient, requireAuthenticated
 // Health
 // ---------------------------------------------------------------------------
 
+function checkReadiness() {
+  const checks = {
+    dataDirectoryExists: existsSync(DATA_DIRECTORY_PATH),
+    dataDirectoryWritable: false,
+    stripeSecretKey: Boolean(String(process.env.STRIPE_SECRET_KEY || "").trim()),
+    stripeWebhookSecret: Boolean(String(process.env.STRIPE_WEBHOOK_SECRET || "").trim()),
+    appApiKey: Boolean(String(process.env.APP_API_KEY || "").trim()),
+    authSecret: Boolean(String(process.env.AUTH_JWT_SECRET || "").trim() || String(process.env.APP_API_KEY || "").trim()),
+    email: transactionalEmailConfigured(),
+  };
+  try {
+    const probe = path.join(DATA_DIRECTORY_PATH, `.write_probe_${Date.now()}`);
+    writeFileSync(probe, "ok");
+    unlinkSync(probe);
+    checks.dataDirectoryWritable = true;
+  } catch {
+    checks.dataDirectoryWritable = false;
+  }
+
+  let ok =
+    checks.dataDirectoryExists &&
+    checks.dataDirectoryWritable &&
+    checks.stripeSecretKey &&
+    checks.authSecret;
+
+  if (IS_PRODUCTION) {
+    ok = ok && checks.stripeWebhookSecret && checks.appApiKey && checks.email;
+  }
+
+  return { ok, checks };
+}
+
 app.get("/", (_, res) =>
-  res.json({ ok: true, service: "TenBelow", hint: "API routes include /config, /health, /catalog" })
+  res.json({ ok: true, service: "TenBelow", hint: "API routes include /config, /health, /ready, /catalog" })
 );
 
 app.get("/health", (_, res) => res.json({ ok: true }));
+
+app.get("/ready", (_, res) => {
+  const { ok, checks } = checkReadiness();
+  res.status(ok ? 200 : 503).json({
+    ok,
+    checks,
+    dataDirectory: DATA_DIRECTORY_PATH,
+    environment: IS_PRODUCTION ? "production" : "development",
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`TenBelow backend → http://localhost:${PORT}`);
-  console.log(`TenBelow public URL → ${BACKEND_URL}`);
-  console.log(`TenBelow data directory → ${DATA_DIRECTORY_PATH}`);
-  if (!transactionalEmailConfigured()) {
-    console.warn("No transactional email provider configured. Set RESEND_API_KEY or SMTP settings.");
-  } else if (!resend && smtpConfigured) {
-    console.log(`Transactional email provider → SMTP (${SMTP_HOST}:${SMTP_PORT})`);
+
+async function startServer() {
+  if (isPgEnabled()) {
+    try {
+      await ensureSchema();
+      if (process.env.PG_READS === "1") {
+        DOCUMENT_MEMORY_CACHE.clear();
+        await loadAllDocumentsInto(DOCUMENT_MEMORY_CACHE);
+        console.log(`Postgres read cache primed (${DOCUMENT_MEMORY_CACHE.size} documents)`);
+      }
+    } catch (err) {
+      console.error("Postgres initialization failed:", err.message || err);
+      if (process.env.PG_READS === "1") {
+        process.exit(1);
+      }
+    }
   }
+
+  app.listen(PORT, () => {
+    console.log(`TenBelow backend → http://localhost:${PORT}`);
+    console.log(`TenBelow public URL → ${BACKEND_URL}`);
+    console.log(`TenBelow data directory → ${DATA_DIRECTORY_PATH}`);
+    if (!transactionalEmailConfigured()) {
+      console.warn("No transactional email provider configured. Set RESEND_API_KEY or SMTP settings.");
+    } else if (!resend && smtpConfigured) {
+      console.log(`Transactional email provider → SMTP (${SMTP_HOST}:${SMTP_PORT})`);
+    }
+  });
+}
+
+startServer().catch((err) => {
+  console.error("Server failed to start:", err);
+  process.exit(1);
 });
