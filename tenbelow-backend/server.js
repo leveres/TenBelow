@@ -4270,6 +4270,7 @@ app.get(
         .filter((product) => product.sellerId === sellerId)
         .map((product) => normalizeCatalogProduct(product));
 
+      res.setHeader("Cache-Control", "no-store, max-age=0");
       res.json({ products });
     } catch (err) {
       console.error("seller-products list error:", err);

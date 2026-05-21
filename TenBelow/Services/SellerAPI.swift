@@ -77,6 +77,9 @@ enum SellerAPI {
 
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
             var authorized = request
+            authorized.cachePolicy = .reloadIgnoringLocalCacheData
+            authorized.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            authorized.setValue("no-cache", forHTTPHeaderField: "Pragma")
             AppConstants.applyAppClientAuth(to: &authorized)
             MarketplaceAuthSession.applySellerAuth(to: &authorized)
             let (data, response) = try await URLSession.tenBelow.data(for: authorized)

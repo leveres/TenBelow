@@ -862,11 +862,13 @@ struct SellerProductsView: View {
                     title: "Add Product",
                     initialDraft: .new(sellerId: seller.id)
                 ) { savedDraft, mediaSelection in
-                    productDrafts.insert(savedDraft, at: 0)
+                    let submittedDraft = draftForMarketplaceSubmission(savedDraft)
+                    productDrafts.insert(submittedDraft, at: 0)
                     persistDrafts()
-                    localProducts.saveDraft(savedDraft)
+                    localProducts.saveDraft(submittedDraft)
+                    syncMessage = "Submitting listing for TenBelow review..."
                     Task {
-                        await syncDraftToServer(savedDraft, mediaSelection: mediaSelection)
+                        await syncDraftToServer(submittedDraft, mediaSelection: mediaSelection)
                     }
                 }
             }
@@ -877,15 +879,17 @@ struct SellerProductsView: View {
                     title: "Edit Product",
                     initialDraft: draft
                 ) { updatedDraft, mediaSelection in
-                    if let index = productDrafts.firstIndex(where: { $0.id == updatedDraft.id }) {
-                        productDrafts[index] = updatedDraft
+                    let submittedDraft = draftForMarketplaceSubmission(updatedDraft)
+                    if let index = productDrafts.firstIndex(where: { $0.id == submittedDraft.id }) {
+                        productDrafts[index] = submittedDraft
                     } else {
-                        productDrafts.insert(updatedDraft, at: 0)
+                        productDrafts.insert(submittedDraft, at: 0)
                     }
                     persistDrafts()
-                    localProducts.saveDraft(updatedDraft)
+                    localProducts.saveDraft(submittedDraft)
+                    syncMessage = "Submitting listing for TenBelow review..."
                     Task {
-                        await syncDraftToServer(updatedDraft, mediaSelection: mediaSelection)
+                        await syncDraftToServer(submittedDraft, mediaSelection: mediaSelection)
                     }
                 }
             }
@@ -1236,6 +1240,13 @@ struct SellerProductsView: View {
         SellerProductDraft.store(productDrafts, for: seller.id)
     }
 
+    private func draftForMarketplaceSubmission(_ draft: SellerProductDraft) -> SellerProductDraft {
+        var submittedDraft = draft
+        submittedDraft.marketplaceStatus = .pendingReview
+        submittedDraft.serverReviewNotes = nil
+        return submittedDraft
+    }
+
     private func deleteDraft(_ draft: SellerProductDraft, reason: SellerProductRemovalReason) {
         productDrafts.removeAll { $0.id == draft.id }
         persistDrafts()
@@ -1279,6 +1290,17 @@ struct SellerProductsView: View {
         _ draft: SellerProductDraft,
         mediaSelection: SellerProductMediaSelection
     ) async {
+        await MainActor.run {
+            let submittedDraft = draftForMarketplaceSubmission(draft)
+            if let index = productDrafts.firstIndex(where: { $0.id == submittedDraft.id }) {
+                productDrafts[index] = submittedDraft
+            } else {
+                productDrafts.insert(submittedDraft, at: 0)
+            }
+            persistDrafts()
+            localProducts.saveDraft(submittedDraft)
+        }
+
         let fallbackProduct = products.first(where: { $0.id == draft.id })
             ?? localProducts.product(withId: draft.id)
         let uploadedImageURLStrings = await uploadImagesIfNeeded(
