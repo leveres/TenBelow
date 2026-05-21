@@ -834,7 +834,7 @@ struct SellerProductsView: View {
             await refreshInventoryFromServer()
         }
         .refreshable {
-            await refreshInventoryFromServer()
+            await refreshInventoryFromServer(showFailureMessage: true)
         }
         .onChange(of: catalogRefreshToken) { _, _ in
             Task { await refreshInventoryFromServer() }
@@ -1166,7 +1166,7 @@ struct SellerProductsView: View {
         return .green
     }
 
-    private func refreshInventoryFromServer() async {
+    private func refreshInventoryFromServer(showFailureMessage: Bool = false) async {
         var shouldStartRefresh = false
         await MainActor.run {
             if !isRefreshingInventory {
@@ -1205,6 +1205,8 @@ struct SellerProductsView: View {
                     syncMessage = nil
                 } else if !submittingProductIDs.isEmpty {
                     syncMessage = "Submitting listing for TenBelow review..."
+                } else if !showFailureMessage {
+                    syncMessage = nil
                 } else {
                     syncMessage = "Couldn’t refresh listing status from the server. Pull to try again."
                 }
