@@ -18,9 +18,13 @@ extension URLSession {
         return URLSession(configuration: config)
     }()
 
-    nonisolated func decode<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
+    nonisolated func decode<T: Decodable>(
+        _ type: T.Type,
+        from url: URL,
+        cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData
+    ) async throws -> T {
         var request = URLRequest(url: url)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.cachePolicy = cachePolicy
         AppConstants.applyAppClientAuth(to: &request)
         MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
         let (data, response) = try await data(for: request)

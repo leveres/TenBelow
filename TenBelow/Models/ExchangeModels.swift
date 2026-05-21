@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(SwiftUI)
+import SwiftUI
+#endif
 
 enum ExchangeReasonCode: String, Codable, CaseIterable, Identifiable {
     case damaged
@@ -154,6 +157,27 @@ enum ExchangeRequestStatus: String, Codable, CaseIterable, Identifiable {
         }
     }
 }
+
+#if canImport(SwiftUI)
+extension ExchangeRequestStatus {
+    var statusColor: Color {
+        switch self {
+        case .draft:
+            return .secondary
+        case .submitted, .underReview:
+            return .blue
+        case .awaitingBuyerProof, .awaitingSellerResponse:
+            return .orange
+        case .approved, .replacementPreparing, .replacementShipped:
+            return .green
+        case .replacementDelivered, .closed:
+            return .teal
+        case .denied, .cancelled:
+            return .red
+        }
+    }
+}
+#endif
 
 enum ExchangeProofAssetType: String, Codable, CaseIterable, Identifiable {
     case image

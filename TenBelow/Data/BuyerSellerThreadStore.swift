@@ -15,6 +15,7 @@ final class BuyerSellerThreadStore: ObservableObject {
 
     init() {
         load()
+        migrateLegacyGuestThreadKeysIfNeeded()
     }
 
     func messages(for sellerId: String) -> [BuyerSellerThreadMessage] {
@@ -147,6 +148,26 @@ final class BuyerSellerThreadStore: ObservableObject {
         }
     }
 
+    private func migrateLegacyGuestThreadKeysIfNeeded() {
+        let newGuestKey = GuestInstallIdentity.userKey
+        var next = messagesByThreadKey
+        var changed = false
+        for (key, value) in messagesByThreadKey {
+            guard key.hasPrefix("guest|") else { continue }
+            let suffix = String(key.dropFirst("guest".count))
+            let newKey = "\(newGuestKey)\(suffix)"
+            if next[newKey] == nil {
+                next[newKey] = value
+            }
+            next.removeValue(forKey: key)
+            changed = true
+        }
+        if changed {
+            messagesByThreadKey = next
+            save()
+        }
+    }
+
     private func save() {
         do {
             let data = try JSONEncoder().encode(messagesByThreadKey)
@@ -165,7 +186,7 @@ final class BuyerSellerThreadStore: ObservableObject {
             return "buyer:\(email)"
         }
 
-        return "guest"
+        return GuestInstallIdentity.userKey
     }
 
     private func threadKey(for sellerId: String) -> String {
@@ -184,7 +205,7 @@ final class BuyerSellerThreadStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
 
-        if buyerIdentity == "guest" {
+        if buyerIdentity == "guest" || buyerIdentity.hasPrefix("guest:") {
             return "Guest buyer"
         }
 

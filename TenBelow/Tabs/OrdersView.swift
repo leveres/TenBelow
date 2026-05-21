@@ -85,11 +85,11 @@ struct OrdersView: View {
 
     private var emptyState: some View {
         VStack(spacing: 0) {
-            ordersHeaderBlock(statusBarOrders: [], filterBinding: .constant(.all))
+            ordersHeaderBlock(statusBarOrders: baseOrders, filterBinding: $selectedFilter)
 
             ScrollView {
                 VStack(spacing: 10) {
-                    Text(mode == .buyer ? "No orders yet" : "No orders to fulfill")
+                    Text(emptyStateTitle)
                         .font(.tbSectionTitle)
                         .foregroundStyle(TBTheme.deepSky)
 
@@ -115,7 +115,7 @@ struct OrdersView: View {
             ordersHeaderBlock(statusBarOrders: baseOrders, filterBinding: $selectedFilter)
 
             ScrollView {
-                VStack(spacing: 12) {
+                LazyVStack(spacing: 12) {
                     ForEach(filteredOrders) { order in
                         NavigationLink {
                             OrderDetailView(
@@ -145,8 +145,8 @@ struct OrdersView: View {
         filterBinding: Binding<OrderListFilter>
     ) -> some View {
         GlassCard(cornerRadius: 20) {
-            VStack(alignment: .leading, spacing: 2) {
-                VStack(alignment: .leading, spacing: HeroMetrics.headerSpacing) {
+            VStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .center, spacing: HeroMetrics.headerSpacing) {
                     SnowfallTitleContainer(
                         cornerRadius: HeroMetrics.snowfallCornerRadius,
                         horizontalPadding: HeroMetrics.snowfallHorizontalPadding,
@@ -162,7 +162,7 @@ struct OrdersView: View {
                             .frame(height: HeroMetrics.titleImageHeight)
                             .scaleEffect(HeroMetrics.titleImageScale)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                     Text(mode == .buyer
                          ? "Your purchases and delivery updates."
@@ -170,6 +170,8 @@ struct OrdersView: View {
                         .font(.tbBody)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
 
                 #if DEBUG
@@ -177,6 +179,8 @@ struct OrdersView: View {
                     Text("Preview mode: \(PlaceholderSeller.name) (\(PlaceholderSeller.id))")
                         .font(.tbCaption)
                         .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
                 #endif
 
@@ -186,6 +190,7 @@ struct OrdersView: View {
                     sellerId: mode == .seller ? effectiveSellerId : nil,
                     selectedFilter: filterBinding
                 )
+                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .padding(.horizontal, 16)
@@ -223,6 +228,21 @@ struct OrdersView: View {
         }
 
         return "Orders from your store will appear here."
+    }
+
+    private var emptyStateTitle: String {
+        guard !baseOrders.isEmpty else {
+            return mode == .buyer ? "No orders yet" : "No orders to fulfill"
+        }
+
+        switch selectedFilter {
+        case .all:
+            return mode == .buyer ? "No orders yet" : "No orders to fulfill"
+        case .active:
+            return "No active orders"
+        case .completed:
+            return "No completed orders"
+        }
     }
 
     private func filtered(_ orders: [Order], for filter: OrderListFilter) -> [Order] {

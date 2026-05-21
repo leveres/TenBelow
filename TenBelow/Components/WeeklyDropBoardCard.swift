@@ -247,6 +247,7 @@ struct RotatingPromoText: View {
     let phrases: [String]
 
     @State private var activePhraseIndex = 0
+    @State private var isVisible = false
     private let timer = Timer.publish(every: 3.4, on: .main, in: .common).autoconnect()
 
     private var currentPhrase: String {
@@ -273,8 +274,14 @@ struct RotatingPromoText: View {
         }
         .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
         .clipped()
+        .onAppear {
+            isVisible = true
+        }
+        .onDisappear {
+            isVisible = false
+        }
         .onReceive(timer) { _ in
-            guard phrases.count > 1 else { return }
+            guard isVisible, phrases.count > 1 else { return }
             withAnimation(.easeInOut(duration: 0.4)) {
                 activePhraseIndex = (activePhraseIndex + 1) % phrases.count
             }

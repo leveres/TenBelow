@@ -75,6 +75,7 @@ struct DropView: View {
     @State private var lastDropLoad = Date.distantPast
     @State private var lastSubscriptionRefresh = Date.distantPast
     @State private var isDropLoadInFlight = false
+    @State private var isDropVisible = false
     /// Off by default; turn on from Settings → Developer (DEBUG) to preview the buyer Drop lineup without live data.
     @AppStorage("buyerDropPreviewMode") private var buyerDropPreviewMode = false
     private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -312,10 +313,15 @@ struct DropView: View {
                 await refreshSubscriptionIfNeeded()
             }
             .onReceive(countdownTimer) { now in
+                guard isDropVisible else { return }
                 countdownNow = now
             }
             .onAppear {
+                isDropVisible = true
                 previewAnchorNow = countdownNow
+            }
+            .onDisappear {
+                isDropVisible = false
             }
             .onChange(of: buyerProductListFingerprint) { _, _ in
                 buyerProductsPage = 0
@@ -884,8 +890,8 @@ struct DropView: View {
             priceCents: dropProduct.priceCents,
             category: resolvedCategory(for: dropProduct.category),
             imageNames: dropProduct.imageURLs,
-            demoVideoURL: dropProduct.demoVideoURL.flatMap(URL.init(string:)),
-            productionPreviewURL: dropProduct.productionPreviewURL.flatMap(URL.init(string:)),
+            demoVideoURL: Product.mediaURL(for: dropProduct.demoVideoURL),
+            productionPreviewURL: Product.mediaURL(for: dropProduct.productionPreviewURL),
             pageViewCount: 0,
             favoriteCount: 0,
             material: dropProduct.material,

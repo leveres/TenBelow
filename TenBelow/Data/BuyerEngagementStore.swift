@@ -14,6 +14,7 @@ final class BuyerEngagementStore: ObservableObject {
             key: storageKey,
             default: [:]
         )
+        migrateLegacyGuestSnapshotsIfNeeded()
     }
 
     var currentIdentityKey: String {
@@ -27,7 +28,7 @@ final class BuyerEngagementStore: ObservableObject {
             return "buyer:\(email)"
         }
 
-        return "guest"
+        return GuestInstallIdentity.userKey
     }
 
     var favoriteProductIDs: Set<String> {
@@ -199,6 +200,16 @@ final class BuyerEngagementStore: ObservableObject {
         }
         record.lastInteractedAt = .now
         snapshot.productInteractions[product.id] = record
+    }
+
+    private func migrateLegacyGuestSnapshotsIfNeeded() {
+        let newKey = GuestInstallIdentity.userKey
+        guard snapshotsByIdentity["guest"] != nil else { return }
+        if snapshotsByIdentity[newKey] == nil {
+            snapshotsByIdentity[newKey] = snapshotsByIdentity["guest"]
+        }
+        snapshotsByIdentity.removeValue(forKey: "guest")
+        persist()
     }
 
     private func persist() {

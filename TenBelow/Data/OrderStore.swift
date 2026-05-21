@@ -325,7 +325,7 @@ final class OrderStore: ObservableObject {
             return "buyer:\(email)"
         }
 
-        return "guest"
+        return GuestInstallIdentity.userKey
     }
 
     private func makeShipment(sellerId: String, items: [CartItem]) -> Shipment {

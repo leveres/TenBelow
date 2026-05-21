@@ -21,6 +21,20 @@ private struct MarketplaceAuthSessionResponse: Decodable {
     let sellerId: String?
 }
 
+enum MarketplaceAuthSessionError: LocalizedError {
+    case sellerSessionUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .sellerSessionUnavailable:
+            return """
+            Could not sign in as your seller account on the server. Open Settings, confirm you are in Seller mode, \
+            and use the same seller id and email you registered with while online.
+            """
+        }
+    }
+}
+
 enum MarketplaceAuthSession {
     private nonisolated static let buyerTokenKey = "auth.buyerToken"
     private nonisolated static let sellerTokenKey = "auth.sellerToken"
@@ -28,6 +42,27 @@ enum MarketplaceAuthSession {
     nonisolated static func applyAuthenticatedUserAuth(to request: inout URLRequest) {
         guard let token = currentBearerToken() else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    /// Seller-only writes (profile, products, media). Never falls back to a buyer token.
+    nonisolated static func applySellerAuth(to request: inout URLRequest) {
+        guard let token = sellerBearerToken() else { return }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    nonisolated static var hasActiveSellerSession: Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: "userRole") == "seller",
+              defaults.bool(forKey: "sellerAccountCreated") else {
+            return false
+        }
+        return sellerBearerToken() != nil
+    }
+
+    nonisolated private static func sellerBearerToken() -> String? {
+        let token = UserDefaults.standard.string(forKey: sellerTokenKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return token.isEmpty ? nil : token
     }
 
     static func clearBuyerSession() {
@@ -41,6 +76,29 @@ enum MarketplaceAuthSession {
     /// Stores a freshly issued buyer token after in-app account updates (email/password change).
     static func storeBuyerSessionToken(_ token: String) {
         UserDefaults.standard.set(token, forKey: buyerTokenKey)
+    }
+
+    /// Call before any seller write (profile, products, media). Refreshes the seller JWT when possible.
+    static func ensureSellerSessionReady() async throws {
+        guard AppConstants.isBackendConfigured else {
+            throw MarketplaceAuthSessionError.sellerSessionUnavailable
+        }
+
+        let defaults = UserDefaults.standard
+        let role = defaults.string(forKey: "userRole") ?? ""
+        let sellerId = defaults.string(forKey: "sellerSellerId")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let sellerAccountCreated = defaults.bool(forKey: "sellerAccountCreated")
+
+        guard role == "seller", sellerAccountCreated, !sellerId.isEmpty else {
+            throw MarketplaceAuthSessionError.sellerSessionUnavailable
+        }
+
+        await syncAfterIdentityChange()
+
+        guard hasActiveSellerSession else {
+            throw MarketplaceAuthSessionError.sellerSessionUnavailable
+        }
     }
 
     static func syncAfterIdentityChange() async {

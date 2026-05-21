@@ -34,7 +34,13 @@ private final class RemoteImageLoader: ObservableObject {
 
         do {
             let data = try await loadData(from: url)
-            guard !Task.isCancelled, let uiImage = UIImage(data: data) else { return }
+            let uiImage = try await Task.detached(priority: .userInitiated) {
+                guard let decodedImage = UIImage(data: data) else {
+                    throw URLError(.cannotDecodeContentData)
+                }
+                return decodedImage
+            }.value
+            guard !Task.isCancelled else { return }
 
             await MainActor.run {
                 guard self.currentURL == url else { return }

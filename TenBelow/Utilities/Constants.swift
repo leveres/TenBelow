@@ -49,15 +49,19 @@ enum AppConstants {
     // MARK: - Stripe (replace with your publishable key from dashboard.stripe.com)
 
     static var backendBaseURL: URL? {
+        let rawValue = configurationValue(for: backendBaseURLInfoKey)
         #if DEBUG
         if let override = UserDefaults.standard.string(forKey: debugBackendBaseURLOverrideKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
            !override.isEmpty,
            let url = validBackendURL(from: override) {
-            return url
+            if shouldIgnoreDebugBackendOverride(url, configuredBackendValue: rawValue) {
+                UserDefaults.standard.removeObject(forKey: debugBackendBaseURLOverrideKey)
+            } else {
+                return url
+            }
         }
         #endif
-        let rawValue = configurationValue(for: backendBaseURLInfoKey)
         return validBackendURL(from: rawValue)
     }
 
@@ -83,6 +87,13 @@ enum AppConstants {
 
         return url
     }
+
+    #if DEBUG
+    private static func shouldIgnoreDebugBackendOverride(_ overrideURL: URL, configuredBackendValue: String) -> Bool {
+        guard configuredBackendValue.contains("tenbelow.onrender.com") else { return false }
+        return overrideURL.scheme?.lowercased() != "https"
+    }
+    #endif
 
     static var isBackendConfigured: Bool {
         backendBaseURL != nil || isTestingOverridesEnabled
@@ -110,11 +121,20 @@ enum AppConstants {
     }
 
     static var isStripeConfigured: Bool {
-        stripePublishableKey.hasPrefix("pk_") || isTestingOverridesEnabled
+        isAllowedStripePublishableKey(stripePublishableKey) || isTestingOverridesEnabled
     }
 
     static var hasLiveCheckoutConfiguration: Bool {
-        backendBaseURL != nil && stripePublishableKey.hasPrefix("pk_")
+        backendBaseURL != nil && isAllowedStripePublishableKey(stripePublishableKey)
+    }
+
+    private nonisolated static func isAllowedStripePublishableKey(_ key: String) -> Bool {
+        guard key.hasPrefix("pk_") else { return false }
+        #if DEBUG
+        return true
+        #else
+        return key.hasPrefix("pk_live_")
+        #endif
     }
 
     /// UserDefaults key for DEBUG “Testing mode” in Settings (relaxed checkout / API when backend or Stripe is unset).
@@ -220,6 +240,15 @@ enum TopLevelHeaderMetrics {
     /// Reused on title art that has transparent space at the bottom of the image asset.
     static let titleArtBottomTuck: CGFloat = -18
     static let homeTopInset: CGFloat = 2
+    /// Extra scroll padding below the last home section (Maker spotlight).
+    static let homeBottomInset: CGFloat = 24
+    /// Additional clearance for the floating tab bar capsule (iOS 18+), on top of `homeBottomInset`.
+    static let homeFloatingTabBarClearance: CGFloat = 28
+
+    /// Bottom padding for home scroll content; includes safe area when the reader reports it.
+    static func homeScrollBottomPadding(safeAreaBottom: CGFloat) -> CGFloat {
+        homeBottomInset + homeFloatingTabBarClearance + max(safeAreaBottom, 0)
+    }
     static let shopOuterHorizontalInset: CGFloat = 4
     static let shopTopInset: CGFloat = -8
     static let shopBottomInset: CGFloat = 0

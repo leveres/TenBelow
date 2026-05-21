@@ -28,6 +28,7 @@ struct HomeView: View {
     @State private var cachedFeaturedProducts: [Product] = []
     @State private var lastLiveDropRefresh = Date.distantPast
     @State private var isLiveDropRefreshInFlight = false
+    @State private var isHomeVisible = false
     private let drop = MockData.currentDrop
     private let rotationInterval: TimeInterval = 120
     private let rotationTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
@@ -38,19 +39,22 @@ struct HomeView: View {
         // Give section titles a little more breathing room above cards/banners.
         static let titleToContent = TBTheme.spacingSM + 4
         /// Slightly larger mark; paired with tighter snowfall padding so layout below doesn’t shift.
-        static let logoImageHeight: CGFloat = 158
+        static let logoImageHeight: CGFloat = 166
         static let logoTopOffset: CGFloat = -18
         static let logoSnowfallVerticalPadding: CGFloat = 2
-        /// Pad below the last section on top of `safeAreaInsets.bottom` (tab / home indicator only).
-        static let bottomContentPadding: CGFloat = 0
-        static let floatingTabBarExtraClearance: CGFloat = 0
         static let logoToDealSpacing: CGFloat = 4
         /// Clear separation so the favorites strip (and its pill title) never visually collides with the deal hero.
         static let dealToFavoritesSpacing: CGFloat = 14
-        static let favoritesToSpotlightSpacing: CGFloat = 0
-        static let spotlightBottomSpacing: CGFloat = 0
-        /// Space between the spotlight title pill and the card (pill uses `.spotlight` sizing).
-        static let spotlightTitleToCard: CGFloat = 4
+        /// Gap between Fresh favorites and Maker spotlight (fixed — not device-dependent).
+        static let favoritesToSpotlightSpacing: CGFloat = 16
+        /// Keeps the spotlight card off the tab bar when the catalog finishes loading.
+        static let spotlightBottomSpacing: CGFloat = 8
+        /// Reserved block height so the screen does not jump when live seller profiles arrive.
+        static let spotlightBlockMinHeight: CGFloat = 118
+        /// Fixed row height for the favorites carousel (blended cards size to content otherwise).
+        static let freshFavoritesRowHeight: CGFloat = 198
+        /// Space between the spotlight title pill and the card (pulled slightly up so the pill clears the hero).
+        static let spotlightTitleToCard: CGFloat = 9
         static let dealTitleTopOffset: CGFloat = -4
         static let favoritesTitleTopInset: CGFloat = 14
         static let favoritesTitleToCardsSpacing: CGFloat = TBTheme.spacingSM
@@ -60,7 +64,7 @@ struct HomeView: View {
         static let freshFavoritesMaxStripCards = 6
 
         static func dealBannerHeight(for contentWidth: CGFloat) -> CGFloat {
-            return min(max(contentWidth * 0.295, 104), 124)
+            return min(max(contentWidth * 0.272, 98), 114)
         }
 
         static func freshFavoriteCardWidth(for contentWidth: CGFloat) -> CGFloat {
@@ -549,7 +553,7 @@ struct HomeView: View {
             // Horizontal scroll content must not widen the home column; otherwise sections below
             // (e.g. Maker spotlight) lay out at the inflated width and appear shifted on screen.
             .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
+            .frame(height: HomeMetrics.freshFavoritesRowHeight, alignment: .top)
         }
     }
 
@@ -570,22 +574,9 @@ struct HomeView: View {
     }
 
     @ViewBuilder
-    private func homeContent(
-        bottomInset: CGFloat,
-        pageInset: CGFloat,
-        safeTopInset: CGFloat,
-        contentWidth: CGFloat,
-        layoutWidth: CGFloat
-    ) -> some View {
+    private func homeScrollContent(contentWidth: CGFloat, pageInset: CGFloat) -> some View {
         let dealBannerHeight = HomeMetrics.dealBannerHeight(for: contentWidth)
         let favoriteCardWidth = HomeMetrics.freshFavoriteCardWidth(for: contentWidth)
-        /// Some device + display settings (Dynamic Island, Display Zoom, larger nav bars) can make
-        /// the top chrome noticeably taller than the simulator default. Slightly tuck the mark
-        /// so the rest of the home layout maintains the intended visual rhythm.
-        let topChromeOverage = min(max(safeTopInset - 47, 0), 22)
-        let logoHeight = max(116, HomeMetrics.logoImageHeight - (topChromeOverage * 0.45))
-        let logoOffset = HomeMetrics.logoTopOffset - (topChromeOverage * 0.20)
-        let homeTopPadding = TopLevelHeaderMetrics.homeTopInset - min(6, topChromeOverage * 0.18)
 
         VStack(alignment: .leading, spacing: 0) {
             SnowfallTitleContainer(
@@ -597,8 +588,8 @@ struct HomeView: View {
                 Image("Logo")
                     .resizable()
                     .scaledToFit()
-                    .frame(height: logoHeight)
-                    .offset(y: logoOffset)
+                    .frame(height: HomeMetrics.logoImageHeight)
+                    .offset(y: HomeMetrics.logoTopOffset)
             }
             .frame(maxWidth: .infinity)
 
@@ -618,16 +609,18 @@ struct HomeView: View {
 
             freshFavoritesSection(cardWidth: favoriteCardWidth, pageInset: pageInset)
 
-            if let featuredCreator {
-                Color.clear
-                    .frame(height: HomeMetrics.favoritesToSpotlightSpacing)
-                makerSpotlightSection(featuredCreator)
+            Group {
+                if let featuredCreator {
+                    makerSpotlightSection(featuredCreator)
+                } else {
+                    Color.clear
+                        .frame(height: HomeMetrics.spotlightBlockMinHeight)
+                        .accessibilityHidden(true)
+                }
             }
+            .padding(.top, HomeMetrics.favoritesToSpotlightSpacing)
         }
-        .padding(.horizontal, pageInset)
-        .padding(.top, homeTopPadding)
-        .padding(.bottom, bottomInset + HomeMetrics.bottomContentPadding)
-        .frame(maxWidth: layoutWidth, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     var body: some View {
@@ -635,21 +628,17 @@ struct HomeView: View {
             GeometryReader { geometry in
                 let pageInset = HomeMetrics.pageInset
                 let contentWidth = max(geometry.size.width - (pageInset * 2), 0)
-                let safeTop = geometry.safeAreaInsets.top
-                // Tab content is already laid out above the system tab bar; only the home indicator
-                // (or similar) contributes bottom inset—do not add a second fixed “floor” or it reads as a large empty band.
-                let safeBottom = geometry.safeAreaInsets.bottom
-                let tabBarOverlapPad = HomeMetrics.floatingTabBarExtraClearance
-                let bottomInset = safeBottom + tabBarOverlapPad
-
-                homeContent(
-                    bottomInset: bottomInset,
-                    pageInset: pageInset,
-                    safeTopInset: safeTop,
-                    contentWidth: contentWidth,
-                    layoutWidth: geometry.size.width
+                let scrollBottomPadding = TopLevelHeaderMetrics.homeScrollBottomPadding(
+                    safeAreaBottom: geometry.safeAreaInsets.bottom
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    homeScrollContent(contentWidth: contentWidth, pageInset: pageInset)
+                        .padding(.horizontal, pageInset)
+                        .padding(.top, TopLevelHeaderMetrics.homeTopInset)
+                        .padding(.bottom, scrollBottomPadding)
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
                 .background(TBTheme.cloudWhite)
             }
             .task {
@@ -659,9 +648,14 @@ struct HomeView: View {
                 refreshFeaturedProductsCache()
             }
             .onAppear {
+                isHomeVisible = true
                 seedRotations()
             }
+            .onDisappear {
+                isHomeVisible = false
+            }
             .onReceive(rotationTimer) { _ in
+                guard isHomeVisible else { return }
                 advanceRotations()
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -787,13 +781,13 @@ private struct DealOfDayBanner: View {
 
     /// Matches the “Deal of the Day” label capsule so the CTA does not read larger.
     private enum DealCapsuleMetrics {
-        static let font = Font.system(size: 12, weight: .semibold, design: .rounded)
-        static let horizontalPadding: CGFloat = 10
-        static let verticalPadding: CGFloat = 6
+        static let font = Font.system(size: 11, weight: .bold, design: .rounded)
+        static let horizontalPadding: CGFloat = 9
+        static let verticalPadding: CGFloat = 4
     }
 
     private var artworkContainerSize: CGFloat {
-        min(max(bannerContentWidth * 0.262, 92), 104)
+        min(max(bannerContentWidth * 0.242, 84), 96)
     }
 
     private var artworkImageSize: CGFloat {
@@ -814,9 +808,11 @@ private struct DealOfDayBanner: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: bannerSpacing) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Deal of the Day")
                     .font(DealCapsuleMetrics.font)
+                    .textCase(.uppercase)
+                    .tracking(0.45)
                     .foregroundStyle(.white.opacity(0.96))
                     .padding(.horizontal, DealCapsuleMetrics.horizontalPadding)
                     .padding(.vertical, DealCapsuleMetrics.verticalPadding)
@@ -828,17 +824,19 @@ private struct DealOfDayBanner: View {
                     .clipShape(Capsule())
 
                 Text(product.name)
-                    .font(.tbProductTitleXL)
+                    .font(.system(size: 22, weight: .black, design: .rounded))
+                    .tracking(-0.35)
                     .foregroundStyle(.white)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.78)
+                    .minimumScaleFactor(0.72)
                     .multilineTextAlignment(.leading)
+                    .shadow(color: TBTheme.bannerCTAForeground.opacity(0.18), radius: 1.5, y: 1)
 
                 Text(Money.format(cents: product.priceCents))
-                    .font(.tbProductPriceLG)
+                    .font(.system(size: 29, weight: .heavy, design: .rounded))
+                    .tracking(-0.45)
                     .foregroundStyle(.white)
-
-                Spacer(minLength: 4)
+                    .shadow(color: TBTheme.bannerCTAForeground.opacity(0.16), radius: 1.5, y: 1)
 
                 actionStack
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -879,7 +877,7 @@ private struct DealOfDayBanner: View {
             .frame(width: artworkContainerSize, height: artworkContainerSize)
         }
         .padding(.horizontal, horizontalPadding)
-        .padding(.vertical, TBTheme.spacingMD + 2)
+        .padding(.vertical, TBTheme.spacingSM + 3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background {
             ZStack {
@@ -930,7 +928,7 @@ private struct DealOfDayBanner: View {
             HStack(spacing: 5) {
                 Text("View details")
                 Image(systemName: "arrow.right")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
             }
             .font(DealCapsuleMetrics.font)
             .tracking(-0.04)
@@ -978,13 +976,13 @@ private struct CreatorSpotlightCard: View {
     }
 
     private var avatarDiameter: CGFloat {
-        isAccessibilityLayout ? 52 : 44
+        isAccessibilityLayout ? 56 : 50
     }
 
     var body: some View {
         content
-        .padding(.horizontal, isAccessibilityLayout ? TBTheme.spacingMD + 2 : TBTheme.spacingSM + 2)
-        .padding(.vertical, isAccessibilityLayout ? TBTheme.spacingMD + 6 : TBTheme.spacingSM + 6)
+        .padding(.horizontal, isAccessibilityLayout ? TBTheme.spacingMD + 2 : TBTheme.spacingMD)
+        .padding(.vertical, isAccessibilityLayout ? TBTheme.spacingMD + 6 : TBTheme.spacingSM + 5)
         .frame(maxWidth: .infinity, alignment: .center)
         .background {
             ZStack {
@@ -1059,7 +1057,7 @@ private struct CreatorSpotlightCard: View {
         } else {
             // Keep the CTA beside the *text* column only. Pairing it with the full avatar+titles
             // `HStack` made the pill vertically center against 50pt+3 lines, so it looked oversized / misaligned.
-            HStack(alignment: .center, spacing: TBTheme.spacingSM) {
+            HStack(alignment: .center, spacing: TBTheme.spacingSM + 2) {
                 spotlightAvatar
                 HStack(alignment: .center, spacing: TBTheme.spacingSM - 2) {
                     spotlightTextColumn
@@ -1083,7 +1081,7 @@ private struct CreatorSpotlightCard: View {
                 )
                 .overlay {
                     Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: isAccessibilityLayout ? 22 : 18, weight: .semibold))
+                        .font(.system(size: isAccessibilityLayout ? 23 : 20, weight: .semibold))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(TBTheme.deepSky.opacity(0.65))
                 }
@@ -1099,7 +1097,7 @@ private struct CreatorSpotlightCard: View {
     private var spotlightTextColumn: some View {
         VStack(alignment: .leading, spacing: isAccessibilityLayout ? 4 : 2) {
             Text(creator.displayName)
-                .font(.system(size: isAccessibilityLayout ? 17 : 15, weight: .semibold, design: .rounded))
+                .font(.system(size: isAccessibilityLayout ? 18 : 17, weight: .semibold, design: .rounded))
                 .foregroundStyle(TBTheme.deepSky)
                 .lineLimit(isAccessibilityLayout ? 2 : 1)
                 .multilineTextAlignment(.leading)
@@ -1107,11 +1105,11 @@ private struct CreatorSpotlightCard: View {
                 .minimumScaleFactor(0.88)
 
             Text("Spotlight seller")
-                .font(.system(size: isAccessibilityLayout ? 11 : 10, weight: .medium, design: .rounded))
+                .font(.system(size: isAccessibilityLayout ? 12 : 11, weight: .medium, design: .rounded))
                 .foregroundStyle(TBTheme.icyBlue.opacity(0.88))
 
             Text(metadataText)
-                .font(.system(size: isAccessibilityLayout ? 12 : 10, weight: .medium, design: .rounded))
+                .font(.system(size: isAccessibilityLayout ? 13 : 11, weight: .medium, design: .rounded))
                 .foregroundStyle(TBTheme.icyBlue.opacity(0.94))
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
@@ -1124,17 +1122,17 @@ private struct CreatorSpotlightCard: View {
             HStack(spacing: isAccessibilityLayout ? 4 : 2) {
                 Text("View store")
                 Image(systemName: "chevron.right")
-                    .font(.system(size: isAccessibilityLayout ? 11 : 7, weight: .bold, design: .rounded))
+                    .font(.system(size: isAccessibilityLayout ? 11 : 8, weight: .bold, design: .rounded))
             }
-            .font(.system(size: isAccessibilityLayout ? 15 : 10, weight: .semibold, design: .rounded))
+            .font(.system(size: isAccessibilityLayout ? 15 : 11, weight: .semibold, design: .rounded))
             .tracking(-0.02)
             .foregroundStyle(TBTheme.bannerCTAForeground)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, isAccessibilityLayout ? 14 : 6)
-            .padding(.vertical, isAccessibilityLayout ? 9 : 3)
+            .padding(.horizontal, isAccessibilityLayout ? 14 : 8)
+            .padding(.vertical, isAccessibilityLayout ? 9 : 4)
             .background {
                 Capsule(style: .continuous)
                     .fill(.ultraThinMaterial)

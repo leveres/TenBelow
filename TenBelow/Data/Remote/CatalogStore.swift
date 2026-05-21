@@ -30,6 +30,7 @@ final class CatalogStore: ObservableObject {
     // MARK: - Load
 
     func load() async {
+        guard !isLoading else { return }
         isLoading = true
 
         async let fetchedProducts = CatalogService.loadProducts()
@@ -97,6 +98,13 @@ final class CatalogStore: ObservableObject {
                 }
                 return lhs.sellerId.localizedCaseInsensitiveCompare(rhs.sellerId) == .orderedAscending
             }
+        contentRevision &+= 1
+        recordCatalogEvents(previous: previousProducts, next: products, sellers: sellerProfiles)
+    }
+
+    func removeRemoteProduct(productId: String) {
+        let previousProducts = products
+        products.removeAll { $0.id == productId }
         contentRevision &+= 1
         recordCatalogEvents(previous: previousProducts, next: products, sellers: sellerProfiles)
     }

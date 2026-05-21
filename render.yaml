@@ -6,7 +6,7 @@ services:
     rootDir: tenbelow-backend
     buildCommand: npm install
     startCommand: npm start
-    healthCheckPath: /config
+    healthCheckPath: "/health"
     envVars:
       - key: BACKEND_URL
         sync: false

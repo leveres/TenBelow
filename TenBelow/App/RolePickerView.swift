@@ -559,6 +559,16 @@ struct RolePickerView: View {
                 useOfflinePreview: false
             )
         } catch {
+            if SellerAPI.isSellerAlreadyExistsError(error) {
+                await applyCreatedSellerRegistration(
+                    trimmedSellerId: trimmedSellerId,
+                    trimmedEmail: trimmedEmail,
+                    trimmedBusinessName: trimmedBusinessName,
+                    useOfflinePreview: false
+                )
+                return
+            }
+
             await MainActor.run {
                 sellerAccountCreated = false
                 sellerPreviewMode = false
@@ -606,6 +616,7 @@ struct RolePickerView: View {
         }
 
         await MarketplaceAuthSession.syncAfterIdentityChange()
+        _ = try? await MarketplaceAuthSession.ensureSellerSessionReady()
         await PushDeviceRegistration.syncAfterIdentityChange()
     }
 

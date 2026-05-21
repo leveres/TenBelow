@@ -79,13 +79,16 @@ struct OrdersStatusBar: View {
                 chip(icon: "checkmark.circle.fill", tint: .green, value: "\(completedCount)", label: "Done", filter: .completed)
                 chip(icon: "dollarsign.circle.fill", tint: TBTheme.icyBlue, value: formatMoney(totalCents), label: totalLabel, filter: .all)
             }
+            .frame(maxWidth: .infinity, alignment: .center)
 
             VStack(spacing: 8) {
                 chip(icon: "circle.fill", tint: .orange, value: "\(activeCount)", label: "Active", filter: .active)
                 chip(icon: "checkmark.circle.fill", tint: .green, value: "\(completedCount)", label: "Done", filter: .completed)
                 chip(icon: "dollarsign.circle.fill", tint: TBTheme.icyBlue, value: formatMoney(totalCents), label: totalLabel, filter: .all)
             }
+            .frame(maxWidth: .infinity, alignment: .center)
         }
+        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
     }
@@ -103,12 +106,14 @@ struct OrdersStatusBar: View {
                     .font(.caption.weight(.semibold))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(tint)
+                    .frame(width: 16, height: 16)
                 Text("\(value) \(label)")
                     .font(.caption.weight(isSelected ? .semibold : .medium))
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.8)
             }
+            .frame(minHeight: 20, alignment: .center)
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
             .background(
@@ -120,7 +125,9 @@ struct OrdersStatusBar: View {
                     .strokeBorder(isSelected ? tint.opacity(0.18) : Color.secondary.opacity(0.10), lineWidth: 0.8)
             )
             .foregroundStyle(isSelected ? tint : Color.primary.opacity(0.75))
+            .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

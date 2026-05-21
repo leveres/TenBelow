@@ -18,6 +18,7 @@ final class NotificationStore: ObservableObject {
 
     private let storageKey = "notificationStore.notifications"
     private let processedEventsKey = "notificationStore.processedEventIDs"
+    private let maxPersistedNotifications = 400
     private let deliveries: [NotificationDelivering]
     private let eventStore: CommerceEventStore
     private let buyerEngagement: BuyerEngagementStore
@@ -40,6 +41,7 @@ final class NotificationStore: ObservableObject {
         self.deliveries = deliveries ?? [PushNotificationDeliveryBridge()]
         notifications = LocalCodableStore.load(key: storageKey, default: [])
         processedEventIDs = LocalCodableStore.load(key: processedEventsKey, default: Set<String>())
+        migrateLegacyGuestNotificationsIfNeeded()
 
         processUnseenEvents(in: eventStore.recentEvents)
         evaluateActionNeededNotifications()
@@ -565,6 +567,32 @@ final class NotificationStore: ObservableObject {
     }
 
     private func persistNotifications() {
+        if notifications.count > maxPersistedNotifications {
+            notifications = Array(notifications.prefix(maxPersistedNotifications))
+        }
+        LocalCodableStore.save(notifications, key: storageKey)
+    }
+
+    private func migrateLegacyGuestNotificationsIfNeeded() {
+        let newKey = GuestInstallIdentity.userKey
+        guard notifications.contains(where: { $0.userId == "guest" }) else { return }
+        notifications = notifications.map { note in
+            guard note.userId == "guest" else { return note }
+            return AppNotification(
+                id: note.id,
+                userId: newKey,
+                type: note.type,
+                title: note.title,
+                message: note.message,
+                relatedProductId: note.relatedProductId,
+                relatedOrderId: note.relatedOrderId,
+                relatedSellerId: note.relatedSellerId,
+                relatedExchangeRequestId: note.relatedExchangeRequestId,
+                dedupeKey: note.dedupeKey,
+                isRead: note.isRead,
+                createdAt: note.createdAt
+            )
+        }
         LocalCodableStore.save(notifications, key: storageKey)
     }
 
@@ -580,7 +608,7 @@ final class NotificationStore: ObservableObject {
         "buyer:\(buyerEmail)"
     }
 
-    static let guestUserId = "guest"
+    static var guestUserId: String { GuestInstallIdentity.userKey }
 
     private static func inboxDedupeKey(eventId: String, semantic: String) -> String {
         "\(eventId)|\(semantic)"

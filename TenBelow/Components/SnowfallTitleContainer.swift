@@ -4,14 +4,18 @@ import SwiftUI
 
 /// Same snowfall system as weekly-drop title art; use behind glass or on colored card backgrounds.
 struct SnowfallParticleCanvas: View {
-    var flakeCount: Int = 88
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var flakeCount: Int = 24
     var animates: Bool = true
 
     var body: some View {
-        let flakes = (0..<min(max(flakeCount, 0), 32)).map(TitleSnowParticle.init(seed:))
+        let effectiveAnimates = animates && !reduceMotion
+        let effectiveFlakeCount = reduceMotion ? 0 : min(max(flakeCount, 0), 32)
+        let flakes = (0..<effectiveFlakeCount).map(TitleSnowParticle.init(seed:))
 
-        GeometryReader { _ in
-            if animates {
+        Group {
+            if effectiveAnimates {
                 TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: false)) { timeline in
                     snowCanvas(flakes: flakes, time: CGFloat(timeline.date.timeIntervalSinceReferenceDate))
                 }
@@ -103,4 +107,36 @@ private struct TitleSnowParticle {
         driftAmount = 6.0 + (n6 * 10.0)
         driftFrequency = 0.18 + (n7 * 0.22)
     }
+}
+
+#Preview("SnowfallTitleContainer") {
+    VStack(spacing: 16) {
+        SnowfallTitleContainer(cornerRadius: 24, horizontalPadding: 16, verticalPadding: 12, flakeCount: 24, effectHorizontalInset: 20, effectVerticalInset: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Weekly Drop")
+                    .font(.largeTitle.bold())
+                Text("Limited edition release")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.blue.opacity(0.2))
+        )
+
+        SnowfallTitleContainer(flakeCount: 16) {
+            HStack {
+                Image(systemName: "snow")
+                Text("Snowy Header")
+                    .font(.title2.weight(.semibold))
+                Spacer()
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.gray.opacity(0.15))
+        )
+    }
+    .padding()
 }

@@ -68,7 +68,7 @@ enum PushDeviceRegistration {
             }
         }
 
-        return "guest"
+        return GuestInstallIdentity.userKey
     }
 
     private static func postRegistration(_ body: RegisterPushDeviceRequest) async throws {

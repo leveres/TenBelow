@@ -26,20 +26,40 @@ private struct OrderProductionPreviewUpdateRequest: Codable {
     let removeProductionPreview: Bool
 }
 
+private struct BuyerOrdersLookupRequest: Encodable {
+    let buyerEmail: String
+    let orderId: String?
+
+    init(buyerEmail: String, orderId: String? = nil) {
+        self.buyerEmail = buyerEmail
+        self.orderId = orderId
+    }
+}
+
 enum OrdersAPI {
     private static var baseURL: URL { CheckoutAPI.baseURL }
 
     static func fetchBuyerOrders(email: String) async throws -> [Order] {
-        var components = URLComponents(url: baseURL.appendingPathComponent("orders"), resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "buyerEmail", value: email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-        ]
+        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return [] }
 
-        guard let url = components?.url else {
-            throw URLError(.badURL)
+        let url = baseURL.appendingPathComponent("orders/buyer")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+        request.httpBody = try JSONEncoder().encode(BuyerOrdersLookupRequest(buyerEmail: normalized))
+
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            throw NSError(domain: "OrdersAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
         }
 
-        return try await URLSession.tenBelow.decode(OrdersResponse.self, from: url).orders
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(OrdersResponse.self, from: data).orders
     }
 
     static func fetchSellerOrders(sellerId: String) async throws -> [Order] {

@@ -456,9 +456,25 @@ struct SellerProfileView: View {
             starterProfile.storeLocally()
             catalog.upsertSellerProfile(starterProfile)
             await MarketplaceAuthSession.syncAfterIdentityChange()
+            _ = try? await MarketplaceAuthSession.ensureSellerSessionReady()
             await refreshStatus()
             await sellerSubscription.refresh()
         } catch {
+            if SellerAPI.isSellerAlreadyExistsError(error) {
+                sellerPreviewMode = false
+                accountCreated = true
+                userRole = "seller"
+                pendingLaunchTab = storeTabIndex
+                starterProfile.storeLocally()
+                catalog.upsertSellerProfile(starterProfile)
+                await MarketplaceAuthSession.syncAfterIdentityChange()
+                _ = try? await MarketplaceAuthSession.ensureSellerSessionReady()
+                await refreshStatus()
+                await sellerSubscription.refresh()
+                isCreating = false
+                return
+            }
+
             accountCreated = false
             sellerPreviewMode = false
             status = nil

@@ -180,6 +180,11 @@ struct RemoteProduct: Codable, Identifiable, Hashable {
 }
 
 extension RemoteProduct {
+    /// Same resolution as storefront images: absolute URLs, or `/media/...` against `AppConstants.backendBaseURL`.
+    private static func resolvedMediaURLString(_ raw: String?) -> URL? {
+        Product.mediaURL(for: raw)
+    }
+
     func asStorefrontProduct(fallbackProduct: Product? = nil) -> Product {
         let formatter = ISO8601DateFormatter()
         let createdAtDate =
@@ -193,8 +198,8 @@ extension RemoteProduct {
             priceCents: priceCents,
             category: resolvedCategory,
             imageNames: imageURLs.isEmpty ? (fallbackProduct?.imageNames ?? ["products_image"]) : imageURLs,
-            demoVideoURL: demoVideoURL.flatMap(URL.init(string:)),
-            productionPreviewURL: productionPreviewURL.flatMap(URL.init(string:)) ?? fallbackProduct?.productionPreviewURL,
+            demoVideoURL: Self.resolvedMediaURLString(demoVideoURL),
+            productionPreviewURL: Self.resolvedMediaURLString(productionPreviewURL) ?? fallbackProduct?.productionPreviewURL,
             pageViewCount: fallbackProduct?.pageViewCount ?? 0,
             favoriteCount: fallbackProduct?.favoriteCount ?? 0,
             averageRating: averageRating ?? fallbackProduct?.averageRating ?? 0,

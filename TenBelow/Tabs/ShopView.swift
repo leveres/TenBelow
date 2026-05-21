@@ -273,36 +273,8 @@ struct ShopView: View {
         hasher.combine(selectedCategory.id)
         hasher.combine(selectedHighlight.rawValue)
         hasher.combine(normalizedSearchText)
-
-        for product in catalog.products {
-            hasher.combine(product.id)
-            hasher.combine(product.sellerId)
-            hasher.combine(product.category)
-            hasher.combine(product.priceCents)
-            hasher.combine(product.submittedAt ?? "")
-            hasher.combine(product.demoVideoURL != nil)
-            hasher.combine(product.productionPreviewURL != nil)
-            hasher.combine(product.previousPriceCents ?? 0)
-            hasher.combine(product.isActive)
-            hasher.combine(product.isApproved)
-        }
-
-        for product in localProducts.products {
-            hasher.combine(product.id)
-            hasher.combine(product.sellerId)
-            hasher.combine(product.category.rawValue)
-            hasher.combine(product.priceCents)
-            hasher.combine(product.createdAt)
-            hasher.combine(product.favoriteCount)
-            hasher.combine(product.previousPriceCents ?? 0)
-            hasher.combine(product.hasCreatorClip)
-        }
-
-        for seller in catalog.sellerProfiles.sorted(by: { $0.id < $1.id }) {
-            hasher.combine(seller.id)
-            hasher.combine(seller.displayName)
-            hasher.combine(seller.handle)
-        }
+        hasher.combine(catalog.contentRevision)
+        hasher.combine(localProducts.productsRevision)
 
         return hasher.finalize()
     }

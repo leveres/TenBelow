@@ -34,6 +34,7 @@ struct MainTabView: View {
     @State private var lastSellerOrdersRefresh = Date.distantPast
     @State private var hasPerformedInitialRefresh = false
     @State private var hasCompletedInitialLoad = false
+    @State private var catalogRefreshJitter = Double.random(in: 0...6)
 
     var body: some View {
         ZStack {
@@ -86,6 +87,9 @@ struct MainTabView: View {
             guard phase == .active else { return }
             Task { await refreshCatalog() }
             Task { await refreshSellerOrdersForTabBadgeIfNeeded() }
+            if userRole == "seller" {
+                Task { await MarketplaceAuthSession.syncAfterIdentityChange() }
+            }
         }
         .task(id: "\(userRole)|\(sellerSellerId)") {
             await refreshSellerOrdersForTabBadgeIfNeeded()
@@ -186,9 +190,13 @@ struct MainTabView: View {
 
     private func refreshCatalog(force: Bool = false) async {
         let now = Date()
-        let shouldRefresh = force || now.timeIntervalSince(lastCatalogRefresh) >= 45
+        let threshold = 45 + catalogRefreshJitter
+        let shouldRefresh = force || now.timeIntervalSince(lastCatalogRefresh) >= threshold
         guard shouldRefresh else { return }
         lastCatalogRefresh = now
+        if !force {
+            catalogRefreshJitter = Double.random(in: 0...6)
+        }
         await catalog.load()
     }
 

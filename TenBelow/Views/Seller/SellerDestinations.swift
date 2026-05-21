@@ -117,14 +117,12 @@ struct AddProductView: View {
         }
         .sheet(isPresented: $isShowingVideoPreview) {
             if let selectedVideoURL {
-                VideoPlayer(player: AVPlayer(url: selectedVideoURL))
-                    .ignoresSafeArea()
+                AutoplayVideoPreview(url: selectedVideoURL)
             }
         }
         .sheet(isPresented: $isShowingProductionPreview) {
             if let selectedProductionPreviewURL {
-                VideoPlayer(player: AVPlayer(url: selectedProductionPreviewURL))
-                    .ignoresSafeArea()
+                AutoplayVideoPreview(url: selectedProductionPreviewURL)
             }
         }
     }
@@ -268,7 +266,8 @@ struct AddProductView: View {
                 ) {
                     mediaPickerButtonLabel(
                         title: selectedVideoURL == nil ? "Add Creator Clip" : "Replace Creator Clip",
-                        icon: "video.badge.plus"
+                        icon: "video.badge.plus",
+                        isAttached: selectedVideoURL != nil
                     )
                 }
                 .buttonStyle(.plain)
@@ -336,7 +335,8 @@ struct AddProductView: View {
                 ) {
                     mediaPickerButtonLabel(
                         title: selectedProductionPreviewURL == nil ? "Add Maker Video" : "Replace Maker Video",
-                        icon: "sparkles.tv"
+                        icon: "sparkles.tv",
+                        isAttached: selectedProductionPreviewURL != nil
                     )
                 }
                 .buttonStyle(.plain)
@@ -474,14 +474,14 @@ struct AddProductView: View {
         )
     }
 
-    private func mediaPickerButtonLabel(title: String, icon: String) -> some View {
+    private func mediaPickerButtonLabel(title: String, icon: String, isAttached: Bool = false) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .semibold))
             Text(title)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
             Spacer()
-            Image(systemName: "plus")
+            Image(systemName: isAttached ? "checkmark.circle.fill" : "plus")
                 .font(.system(size: 12, weight: .bold))
         }
         .foregroundStyle(TBTheme.deepSky)
@@ -563,7 +563,10 @@ struct AddProductView: View {
 
     private func loadSelectedVideo(from item: PhotosPickerItem?) async {
         guard let item else {
-            await MainActor.run { selectedVideoURL = nil }
+            await MainActor.run {
+                draft.demoVideoURLString = ""
+                selectedVideoURL = nil
+            }
             return
         }
 
@@ -584,6 +587,7 @@ struct AddProductView: View {
 
             await MainActor.run {
                 mediaErrorMessage = nil
+                draft.demoVideoURLString = outputURL.absoluteString
                 selectedVideoURL = outputURL
             }
         } catch {
@@ -595,7 +599,10 @@ struct AddProductView: View {
 
     private func loadSelectedProductionPreview(from item: PhotosPickerItem?) async {
         guard let item else {
-            await MainActor.run { selectedProductionPreviewURL = nil }
+            await MainActor.run {
+                draft.productionPreviewURLString = ""
+                selectedProductionPreviewURL = nil
+            }
             return
         }
 
@@ -616,6 +623,7 @@ struct AddProductView: View {
 
             await MainActor.run {
                 mediaErrorMessage = nil
+                draft.productionPreviewURLString = outputURL.absoluteString
                 selectedProductionPreviewURL = outputURL
             }
         } catch {
@@ -662,6 +670,28 @@ struct AddProductView: View {
 struct SellerProductMediaSelection {
     let selectedVideoURL: URL?
     let selectedProductionPreviewURL: URL?
+}
+
+private struct AutoplayVideoPreview: View {
+    let url: URL
+    @State private var player: AVPlayer
+
+    init(url: URL) {
+        self.url = url
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .ignoresSafeArea()
+            .onAppear {
+                player.seek(to: .zero)
+                player.play()
+            }
+            .onDisappear {
+                player.pause()
+            }
+    }
 }
 
 private enum SellerProductRemovalReason: String, CaseIterable, Identifiable {
@@ -774,7 +804,7 @@ struct SellerProductsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: TBTheme.spacingLG) {
+            LazyVStack(alignment: .leading, spacing: TBTheme.spacingLG) {
                 headerCard
                 inventorySnapshotCard
 
@@ -806,6 +836,9 @@ struct SellerProductsView: View {
         }
         .onChange(of: catalogRefreshToken) { _, _ in
             Task { await refreshInventoryFromServer() }
+        }
+        .onChange(of: catalog.contentRevision) { _, _ in
+            applyApprovedCatalogProductsToDrafts()
         }
         .background(TBTheme.cloudWhite.ignoresSafeArea())
         .navigationTitle("My Products")
@@ -970,9 +1003,9 @@ struct SellerProductsView: View {
                     )
 
                     productMetricCard(
-                        title: "Avg Price",
-                        value: averagePriceText,
-                        subtitle: "Across saved drafts"
+                        title: "Total Value",
+                        value: totalListingValueText,
+                        subtitle: "Across uploaded products"
                     )
                 }
 
@@ -1097,10 +1130,10 @@ struct SellerProductsView: View {
         )
     }
 
-    private var averagePriceText: String {
+    private var totalListingValueText: String {
         guard !productDrafts.isEmpty else { return "$0" }
-        let average = productDrafts.map(\.priceCents).reduce(0, +) / max(productDrafts.count, 1)
-        return Money.format(cents: average)
+        let total = productDrafts.map(\.priceCents).reduce(0, +)
+        return Money.format(cents: total)
     }
 
     private var pendingReviewCount: Int {
@@ -1126,9 +1159,12 @@ struct SellerProductsView: View {
 
     private func refreshInventoryFromServer() async {
         do {
+            await MarketplaceAuthSession.syncAfterIdentityChange()
+            await catalog.load()
             let remote = try await SellerAPI.fetchSellerProducts(sellerId: seller.id)
             await MainActor.run {
                 mergeRemoteInventory(remote)
+                _ = applyApprovedCatalogProductsToDrafts()
                 if let m = syncMessage,
                    m.contains("Couldn’t refresh") || m.contains("submission failed") {
                     syncMessage = nil
@@ -1136,7 +1172,11 @@ struct SellerProductsView: View {
             }
         } catch {
             await MainActor.run {
-                syncMessage = "Couldn’t refresh listing status from the server. Pull to try again."
+                if applyApprovedCatalogProductsToDrafts() {
+                    syncMessage = nil
+                } else {
+                    syncMessage = "Couldn’t refresh listing status from the server. Pull to try again."
+                }
             }
         }
     }
@@ -1164,6 +1204,34 @@ struct SellerProductsView: View {
         }
     }
 
+    @discardableResult
+    private func applyApprovedCatalogProductsToDrafts() -> Bool {
+        let liveSellerProducts = catalog.products.filter { $0.sellerId == seller.id && $0.isActive && $0.isApproved }
+        guard !liveSellerProducts.isEmpty else { return false }
+
+        let liveById = Dictionary(uniqueKeysWithValues: liveSellerProducts.map { ($0.id, $0) })
+        var didChange = false
+        var result = productDrafts
+
+        for index in result.indices {
+            guard let remote = liveById[result[index].id] else { continue }
+            let nextStatus = SellerMarketplaceStatus.fromServerProduct(remote)
+            if result[index].marketplaceStatus != nextStatus || result[index].serverReviewNotes != nil {
+                result[index].marketplaceStatus = nextStatus
+                result[index].serverReviewNotes = nil
+                didChange = true
+            }
+        }
+
+        guard didChange else { return false }
+        productDrafts = result
+        persistDrafts()
+        for draft in productDrafts {
+            localProducts.saveDraft(draft)
+        }
+        return true
+    }
+
     private func persistDrafts() {
         SellerProductDraft.store(productDrafts, for: seller.id)
     }
@@ -1172,6 +1240,8 @@ struct SellerProductsView: View {
         productDrafts.removeAll { $0.id == draft.id }
         persistDrafts()
         localProducts.removeDraft(productId: draft.id)
+        catalog.removeRemoteProduct(productId: draft.id)
+        catalogRefreshToken += 1
         if selectedDraft?.id == draft.id {
             selectedDraft = nil
         }
@@ -2284,6 +2354,8 @@ struct EditSellerProfileView: View {
     @State private var bannerPan: CGSize = .zero
     @State private var bannerPreviewWidth: CGFloat = 0
     @State private var bannerEditSession = 0
+    @State private var sellerServerSyncReady = true
+    @State private var sellerSessionWarning: String?
 
     init(seller: Binding<SellerProfile>) {
         _seller = seller
@@ -2312,8 +2384,18 @@ struct EditSellerProfileView: View {
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .task {
+            await refreshSellerSessionReadiness()
+        }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 10) {
+                if let sellerSessionWarning {
+                    Text(sellerSessionWarning)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
@@ -2341,8 +2423,8 @@ struct EditSellerProfileView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(isSaving)
-                .opacity(isSaving ? 0.75 : 1)
+                .disabled(isSaving || !sellerServerSyncReady)
+                .opacity(isSaving || !sellerServerSyncReady ? 0.75 : 1)
             }
             .padding(.horizontal, TBTheme.spacingLG)
             .padding(.top, 12)
@@ -2653,6 +2735,21 @@ struct EditSellerProfileView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func refreshSellerSessionReadiness() async {
+        do {
+            try await MarketplaceAuthSession.ensureSellerSessionReady()
+            sellerServerSyncReady = true
+            sellerSessionWarning = nil
+        } catch {
+            sellerServerSyncReady = false
+            if let localized = error as? LocalizedError, let description = localized.errorDescription {
+                sellerSessionWarning = description
+            } else {
+                sellerSessionWarning = "Server sync is unavailable until you sign in as your seller account (Settings → Seller)."
+            }
+        }
+    }
+
     private func saveProfile() async {
         let trimmedDisplayName = draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedLocation = draft.location.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2676,6 +2773,20 @@ struct EditSellerProfileView: View {
 
         guard !trimmedBio.isEmpty else {
             errorMessage = "Add a short bio so buyers know what you make."
+            return
+        }
+
+        isSaving = true
+        defer { isSaving = false }
+
+        do {
+            try await MarketplaceAuthSession.ensureSellerSessionReady()
+            sellerServerSyncReady = true
+            sellerSessionWarning = nil
+        } catch {
+            sellerServerSyncReady = false
+            sellerSessionWarning = profileSaveSyncFailureMessage(for: error)
+            errorMessage = nil
             return
         }
 
@@ -2729,9 +2840,6 @@ struct EditSellerProfileView: View {
         print("[ProfileSave] starting save sellerId=\(seller.id) avatar=\(uploadedAvatarURLString) banner=\(uploadedBannerURLString)")
         #endif
 
-        isSaving = true
-        defer { isSaving = false }
-
         do {
             let updatedSeller = try await SellerAPI.updateProfile(
                 sellerId: seller.id,
@@ -2746,8 +2854,16 @@ struct EditSellerProfileView: View {
             print("[ProfileSave] success sellerId=\(updatedSeller.id) avatar=\(updatedSeller.avatarURL?.absoluteString ?? "nil") banner=\(updatedSeller.bannerURL?.absoluteString ?? "nil") refreshToken=\(catalogRefreshToken)")
             #endif
             errorMessage = nil
+            sellerSessionWarning = nil
             dismiss()
         } catch {
+            if isSellerSessionFailure(error) {
+                sellerServerSyncReady = false
+                sellerSessionWarning = profileSaveSyncFailureMessage(for: error)
+                errorMessage = nil
+                return
+            }
+
             let fallbackSeller = SellerProfile(
                 id: seller.id,
                 displayName: trimmedDisplayName,
@@ -2782,12 +2898,7 @@ struct EditSellerProfileView: View {
             #if DEBUG
             print("[ProfileSave] fallback sellerId=\(fallbackSeller.id) avatar=\(fallbackSeller.avatarURL?.absoluteString ?? "nil") banner=\(fallbackSeller.bannerURL?.absoluteString ?? "nil") error=\((error as NSError).localizedDescription)")
             #endif
-            let detail = (error as NSError).localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-            if detail.isEmpty || detail == "The operation couldn’t be completed." {
-                errorMessage = "Saved on this device. Server sync failed, so other devices will not see it yet. Is the backend running, and does your app’s backend URL match this machine (same Wi‑Fi / correct IP for a real device)?"
-            } else {
-                errorMessage = "Saved on this device. Server sync failed: \(detail)"
-            }
+            errorMessage = profileSaveSyncFailureMessage(for: error)
         }
     }
 
@@ -2824,6 +2935,50 @@ struct EditSellerProfileView: View {
             return fallbackURLString
         }
     }
+}
+
+private func profileSaveSyncFailureMessage(for error: Error) -> String {
+    let detail: String = {
+        if let apiError = error as? SellerAPIError {
+            return apiError.message
+        }
+        return (error as NSError).localizedDescription
+    }()
+    let trimmedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+    let lower = trimmedDetail.lowercased()
+
+    if let apiError = error as? SellerAPIError, apiError.isSellerSessionRequired {
+        return """
+        Server sync is locked until this phone signs in as your seller account. \
+        Open Settings → switch to Seller (or sign in again with your seller email), then return here and save.
+        """
+    }
+
+    if lower.contains("authenticated seller session required") || lower.contains("seller session") {
+        return """
+        Server sync is locked until this phone signs in as your seller account. \
+        Open Settings → switch to Seller (or sign in again with your seller email), then return here and save.
+        """
+    }
+
+    if trimmedDetail.isEmpty || trimmedDetail == "The operation couldn’t be completed." {
+        return "Saved on this device. Server sync failed, so other devices will not see it yet. Check that you’re in Seller mode and online."
+    }
+
+    return "Saved on this device. Server sync failed: \(trimmedDetail)"
+}
+
+private func isSellerSessionFailure(_ error: Error) -> Bool {
+    if let apiError = error as? SellerAPIError, apiError.isSellerSessionRequired {
+        return true
+    }
+
+    if error is MarketplaceAuthSessionError {
+        return true
+    }
+
+    let description = (error as NSError).localizedDescription.lowercased()
+    return description.contains("authenticated seller session required") || description.contains("seller session")
 }
 
 private struct SellerProfileDraft {
