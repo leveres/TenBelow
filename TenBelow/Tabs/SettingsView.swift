@@ -51,7 +51,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Seller account") {
+                Section {
                     if userRole == "seller" {
                         if !sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Label(sellerSellerId, systemImage: "person.text.rectangle")
@@ -73,6 +73,8 @@ struct SettingsView: View {
                             Label("Sign in as seller", systemImage: "storefront")
                         }
                     }
+                } header: {
+                    Text("Seller account")
                 } footer: {
                     Text("Seller sign-out only removes this device’s seller session. Your shop, products, and review status stay on TenBelow.")
                 }
