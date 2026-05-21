@@ -10,6 +10,9 @@ struct SettingsView: View {
     @AppStorage("userRole") private var userRole = ""
     @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
     @AppStorage("sellerAccountCreated") private var sellerAccountCreated = false
+    @AppStorage("sellerSellerId") private var sellerSellerId = ""
+    @AppStorage("sellerEmail") private var sellerEmail = ""
+    @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
     #if DEBUG
     @AppStorage(AppConstants.testingModeUserDefaultsKey) private var testingModeEnabled = false
     @AppStorage("buyerDropPreviewMode") private var buyerDropPreviewMode = false
@@ -48,6 +51,32 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Seller account") {
+                    if userRole == "seller" {
+                        if !sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Label(sellerSellerId, systemImage: "person.text.rectangle")
+                        }
+
+                        if !sellerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Label(sellerEmail, systemImage: "envelope")
+                        }
+
+                        Button(role: .destructive) {
+                            signOutSeller()
+                        } label: {
+                            Label("Sign out of seller account", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    } else {
+                        NavigationLink {
+                            RolePickerView(startInSellerAccount: true)
+                        } label: {
+                            Label("Sign in as seller", systemImage: "storefront")
+                        }
+                    }
+                } footer: {
+                    Text("Seller sign-out only removes this device’s seller session. Your shop, products, and review status stay on TenBelow.")
+                }
+
                 Section("Account") {
                     NavigationLink {
                         NotificationSettingsView()
@@ -64,7 +93,7 @@ struct SettingsView: View {
                             }
                         } else {
                             NavigationLink {
-                                SellOnTenBelowLandingView()
+                                RolePickerView(startInSellerAccount: true)
                             } label: {
                                 Label("Become a seller", systemImage: "storefront")
                             }
@@ -129,6 +158,13 @@ struct SettingsView: View {
                 await sellerSubscription.refresh()
             }
         }
+    }
+
+    private func signOutSeller() {
+        MarketplaceAuthSession.clearSellerSession()
+        sellerAccountCreated = false
+        sellerPreviewMode = false
+        switchAppMode(to: "buyer", launchTab: 0)
     }
 
     private func switchAppMode(to role: String, launchTab: Int) {
