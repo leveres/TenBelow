@@ -115,7 +115,7 @@ enum SellerAPI {
 
     static func onboardingStatus(sellerId: String) async throws -> SellerStatusResponse {
         let url = baseURL.appendingPathComponent("seller-onboarding-status/\(sellerId)")
-        var request = URLRequest(url: url)
+        let request = URLRequest(url: url)
         let (data, _) = try await performSellerAuthorizedRequest { request }
         return try JSONDecoder().decode(SellerStatusResponse.self, from: data)
     }

@@ -788,6 +788,8 @@ struct SellerProductsView: View {
     @State private var pendingDeleteDraft: SellerProductDraft?
     @State private var draggingProductId: String?
     @State private var productSwipeOffset: CGFloat = 0
+    @State private var isRefreshingInventory = false
+    @State private var submittingProductIDs = Set<String>()
 
     init(
         seller: SellerProfile = .sample,
@@ -866,7 +868,7 @@ struct SellerProductsView: View {
                     productDrafts.insert(submittedDraft, at: 0)
                     persistDrafts()
                     localProducts.saveDraft(submittedDraft)
-                    syncMessage = "Submitting listing for TenBelow review..."
+                    markSubmissionStarted(for: submittedDraft.id)
                     Task {
                         await syncDraftToServer(submittedDraft, mediaSelection: mediaSelection)
                     }
@@ -887,7 +889,7 @@ struct SellerProductsView: View {
                     }
                     persistDrafts()
                     localProducts.saveDraft(submittedDraft)
-                    syncMessage = "Submitting listing for TenBelow review..."
+                    markSubmissionStarted(for: submittedDraft.id)
                     Task {
                         await syncDraftToServer(submittedDraft, mediaSelection: mediaSelection)
                     }
@@ -1149,7 +1151,10 @@ struct SellerProductsView: View {
     }
 
     private func syncMessageForeground(for message: String) -> Color {
-        if message.contains("failed") || message.contains("Failed") {
+        if message.contains("Loading") || message.contains("Submitting") || message.contains("review queue") {
+            return TBTheme.icyBlue
+        }
+        if message.contains("Couldn’t") || message.contains("failed") || message.contains("Failed") {
             return .orange
         }
         if message.contains("not approved") || message.contains("rejected") || message.contains("archived") || message.contains("Archived") {
@@ -1162,6 +1167,24 @@ struct SellerProductsView: View {
     }
 
     private func refreshInventoryFromServer() async {
+        var shouldStartRefresh = false
+        await MainActor.run {
+            if !isRefreshingInventory {
+                isRefreshingInventory = true
+                shouldStartRefresh = true
+                if submittingProductIDs.isEmpty {
+                    syncMessage = "Loading product status..."
+                }
+            }
+        }
+        guard shouldStartRefresh else { return }
+
+        defer {
+            Task { @MainActor in
+                isRefreshingInventory = false
+            }
+        }
+
         do {
             await MarketplaceAuthSession.syncAfterIdentityChange()
             await catalog.load()
@@ -1170,7 +1193,9 @@ struct SellerProductsView: View {
                 mergeRemoteInventory(remote)
                 _ = applyApprovedCatalogProductsToDrafts()
                 if let m = syncMessage,
-                   m.contains("Couldn’t refresh") || m.contains("submission failed") {
+                   m.contains("Loading product status")
+                    || m.contains("Couldn’t refresh")
+                    || m.contains("submission failed") {
                     syncMessage = nil
                 }
             }
@@ -1178,6 +1203,8 @@ struct SellerProductsView: View {
             await MainActor.run {
                 if applyApprovedCatalogProductsToDrafts() {
                     syncMessage = nil
+                } else if !submittingProductIDs.isEmpty {
+                    syncMessage = "Submitting listing for TenBelow review..."
                 } else {
                     syncMessage = "Couldn’t refresh listing status from the server. Pull to try again."
                 }
@@ -1247,6 +1274,15 @@ struct SellerProductsView: View {
         return submittedDraft
     }
 
+    private func markSubmissionStarted(for productId: String) {
+        submittingProductIDs.insert(productId)
+        syncMessage = "Submitting listing for TenBelow review..."
+    }
+
+    private func markSubmissionFinished(for productId: String) {
+        submittingProductIDs.remove(productId)
+    }
+
     private func deleteDraft(_ draft: SellerProductDraft, reason: SellerProductRemovalReason) {
         productDrafts.removeAll { $0.id == draft.id }
         persistDrafts()
@@ -1291,6 +1327,7 @@ struct SellerProductsView: View {
         mediaSelection: SellerProductMediaSelection
     ) async {
         await MainActor.run {
+            markSubmissionStarted(for: draft.id)
             let submittedDraft = draftForMarketplaceSubmission(draft)
             if let index = productDrafts.firstIndex(where: { $0.id == submittedDraft.id }) {
                 productDrafts[index] = submittedDraft
@@ -1357,10 +1394,12 @@ struct SellerProductsView: View {
                 localProducts.saveDraft(syncedDraft)
                 catalog.upsertRemoteProduct(remoteProduct)
                 catalogRefreshToken += 1
+                markSubmissionFinished(for: draft.id)
                 syncMessage = syncSummaryMessage(for: syncedDraft.marketplaceStatus)
             }
         } catch {
             await MainActor.run {
+                markSubmissionFinished(for: draft.id)
                 let details = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
                 if details.isEmpty || details == "The operation couldn’t be completed." {
                     syncMessage = "Saved on this device. Marketplace submission failed for now."
