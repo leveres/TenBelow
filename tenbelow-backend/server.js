@@ -4628,7 +4628,7 @@ function sellerAccountActivity(sellerId, products, orders, exchangeRequests, cus
   if (exchangeCount) blockers.push(`${exchangeCount} exchange${exchangeCount === 1 ? "" : "s"}`);
   if (customOrderCount) blockers.push(`${customOrderCount} custom request${customOrderCount === 1 ? "" : "s"}`);
   if (reviewCount) blockers.push(`${reviewCount} review${reviewCount === 1 ? "" : "s"}`);
-  return { productCount, orderCount, exchangeCount, customOrderCount, reviewCount, canDelete: blockers.length === 0, blockers };
+  return { productCount, orderCount, exchangeCount, customOrderCount, reviewCount, canDelete: true, blockers };
 }
 
 function buyerAccountActivity(email, orders, exchangeRequests, customOrderRequests, productReviews) {
@@ -4649,7 +4649,7 @@ function buyerAccountActivity(email, orders, exchangeRequests, customOrderReques
   if (exchangeCount) blockers.push(`${exchangeCount} exchange${exchangeCount === 1 ? "" : "s"}`);
   if (customOrderCount) blockers.push(`${customOrderCount} custom request${customOrderCount === 1 ? "" : "s"}`);
   if (reviewCount) blockers.push(`${reviewCount} review${reviewCount === 1 ? "" : "s"}`);
-  return { orderCount, exchangeCount, customOrderCount, reviewCount, canDelete: blockers.length === 0, blockers };
+  return { orderCount, exchangeCount, customOrderCount, reviewCount, canDelete: true, blockers };
 }
 
 function paginateAdminAccounts(accounts, page, pageSize) {
@@ -4737,13 +4737,10 @@ app.delete("/admin/accounts/:kind/:accountId", adminMutationLimiter, requireAdmi
       const buyers = loadBuyersFile();
       if (!buyers[email]) return res.status(404).json({ error: "Buyer account not found" });
       const activity = buyerAccountActivity(email, orders, exchangeRequests, customOrderRequests, productReviews);
-      if (!activity.canDelete) {
-        return res.status(409).json({ error: "Buyer account has activity and cannot be deleted.", blockers: activity.blockers });
-      }
       delete buyers[email];
       saveBuyersFile(buyers);
-      auditLog(auditContext(req, { action: "admin_buyer_account_deleted", buyerEmail: email }));
-      return res.json({ deleted: true, kind: "buyer", id: email });
+      auditLog(auditContext(req, { action: "admin_buyer_account_deleted", buyerEmail: email, activity }));
+      return res.json({ deleted: true, kind: "buyer", id: email, activity });
     }
 
     if (kind === "sellers") {
@@ -4755,13 +4752,10 @@ app.delete("/admin/accounts/:kind/:accountId", adminMutationLimiter, requireAdmi
         ? catalog.products.map((product) => normalizeCatalogProduct(product))
         : [];
       const activity = sellerAccountActivity(sellerId, products, orders, exchangeRequests, customOrderRequests, productReviews);
-      if (!activity.canDelete) {
-        return res.status(409).json({ error: "Seller account has activity and cannot be deleted.", blockers: activity.blockers });
-      }
       delete sellers[sellerId];
       saveSellersFile(sellers);
-      auditLog(auditContext(req, { action: "admin_seller_account_deleted", sellerId }));
-      return res.json({ deleted: true, kind: "seller", id: sellerId });
+      auditLog(auditContext(req, { action: "admin_seller_account_deleted", sellerId, activity }));
+      return res.json({ deleted: true, kind: "seller", id: sellerId, activity });
     }
 
     return res.status(400).json({ error: "kind must be sellers or buyers" });

@@ -418,8 +418,9 @@ function renderAccounts(payload) {
     titleWrap.append(title, meta);
 
     const status = document.createElement("span");
-    status.className = account.activity?.canDelete ? "account-status is-inactive" : "account-status";
-    status.textContent = account.activity?.canDelete ? "Inactive" : "Has activity";
+    const linkedActivity = activityTotal(account.activity || {});
+    status.className = linkedActivity > 0 ? "account-status" : "account-status is-inactive";
+    status.textContent = linkedActivity > 0 ? "Has activity" : "Inactive";
     header.append(titleWrap, status);
 
     const stats = document.createElement("div");
@@ -450,15 +451,14 @@ function renderAccounts(payload) {
     footer.className = "account-card-footer";
     const note = document.createElement("p");
     note.className = "account-card-meta";
-    note.textContent = account.activity?.canDelete
-      ? "No activity found. This account can be permanently deleted."
-      : `Cannot delete while linked to ${account.activity?.blockers?.join(", ") || `${activityTotal(activity)} activity records`}.`;
+    note.textContent = linkedActivity > 0
+      ? `Delete is available. Linked activity remains in records: ${account.activity?.blockers?.join(", ") || `${linkedActivity} activity records`}.`
+      : "No activity found. This account can be permanently deleted.";
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "danger-button";
     deleteButton.textContent = "Delete account";
-    deleteButton.disabled = account.activity?.canDelete !== true;
     deleteButton.addEventListener("click", () => deleteAccount(account));
     footer.append(note, deleteButton);
 
@@ -494,7 +494,11 @@ async function loadAccounts() {
 async function deleteAccount(account) {
   const kind = account.kind === "buyer" ? "buyers" : "sellers";
   const label = account.displayName || account.id;
-  const confirmed = window.confirm(`Permanently delete ${label}? This cannot be undone.`);
+  const linkedActivity = activityTotal(account.activity || {});
+  const activityWarning = linkedActivity > 0
+    ? `\n\nThis account has linked activity (${account.activity?.blockers?.join(", ") || `${linkedActivity} records`}). The account will be removed, but those records may remain for history/audit.`
+    : "";
+  const confirmed = window.confirm(`Permanently delete ${label}? This cannot be undone.${activityWarning}`);
   if (!confirmed) return;
 
   try {
