@@ -4478,6 +4478,74 @@ app.get("/admin/products/review-queue", adminMutationLimiter, requireAdmin, asyn
   }
 });
 
+app.get("/admin/sellers", adminMutationLimiter, requireAdmin, async (req, res) => {
+  try {
+    const catalog = await fetchCatalog();
+    const sellers = await fetchSellers();
+    const orders = loadOrdersFile();
+    const products = Array.isArray(catalog.products)
+      ? catalog.products.map((product) => normalizeCatalogProduct(product))
+      : [];
+    const profiles = buildSellerProfiles(sellers, products, orders);
+    const productsBySeller = new Map();
+
+    for (const product of products) {
+      const sellerId = String(product.sellerId || "").trim();
+      if (!sellerId) continue;
+      const current = productsBySeller.get(sellerId) || [];
+      current.push(product);
+      productsBySeller.set(sellerId, current);
+    }
+
+    const directory = profiles.map((profile) => {
+      const sellerProducts = productsBySeller.get(profile.id) || [];
+      const counts = {
+        submitted: 0,
+        approved: 0,
+        rejected: 0,
+        archived: 0,
+        other: 0,
+      };
+
+      for (const product of sellerProducts) {
+        const status = String(product.approvalStatus || "submitted").trim().toLowerCase();
+        if (Object.prototype.hasOwnProperty.call(counts, status)) {
+          counts[status] += 1;
+        } else {
+          counts.other += 1;
+        }
+      }
+
+      const latestSubmittedAt = sellerProducts.reduce((latest, product) => {
+        const submittedAt = new Date(product.submittedAt || 0).getTime();
+        return Math.max(latest, Number.isFinite(submittedAt) ? submittedAt : 0);
+      }, 0);
+
+      return {
+        id: profile.id,
+        displayName: profile.displayName,
+        handle: profile.handle,
+        email: sellers[profile.id]?.email || "",
+        productCounts: counts,
+        totalProducts: sellerProducts.length,
+        totalValueCents: sellerProducts.reduce((sum, product) => sum + asFiniteNumber(product.priceCents, 0), 0),
+        latestSubmittedAt: latestSubmittedAt ? new Date(latestSubmittedAt).toISOString() : null,
+      };
+    }).sort((lhs, rhs) => {
+      const lhsTime = new Date(lhs.latestSubmittedAt || 0).getTime();
+      const rhsTime = new Date(rhs.latestSubmittedAt || 0).getTime();
+      if (lhsTime !== rhsTime) return rhsTime - lhsTime;
+      return lhs.displayName.localeCompare(rhs.displayName);
+    });
+
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.json({ sellers: directory });
+  } catch (err) {
+    console.error("admin sellers directory error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/admin/exchange-requests", adminMutationLimiter, requireAdmin, (req, res) => {
   try {
     const requestedStatus = String(req.query.status || "").trim().toLowerCase();

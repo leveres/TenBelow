@@ -178,7 +178,20 @@ enum MarketplaceAuthSession {
             )
             UserDefaults.standard.set(response.token, forKey: sellerTokenKey)
         } catch {
-            UserDefaults.standard.removeObject(forKey: sellerTokenKey)
+            guard email != nil else {
+                UserDefaults.standard.removeObject(forKey: sellerTokenKey)
+                return
+            }
+
+            do {
+                let response: MarketplaceAuthSessionResponse = try await issueSession(
+                    path: "auth/seller-session",
+                    body: SellerSessionRequest(sellerId: sellerId, email: nil)
+                )
+                UserDefaults.standard.set(response.token, forKey: sellerTokenKey)
+            } catch {
+                UserDefaults.standard.removeObject(forKey: sellerTokenKey)
+            }
         }
     }
 

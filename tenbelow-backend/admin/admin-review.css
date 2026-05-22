@@ -206,6 +206,70 @@ textarea {
   line-height: 1.4;
 }
 
+.seller-directory-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(127, 178, 255, 0.18);
+}
+
+.seller-directory-header strong {
+  color: #2e5fb9;
+  font-size: 26px;
+}
+
+.seller-directory-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.seller-directory-card {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid rgba(127, 178, 255, 0.2);
+  border-radius: 18px;
+  background: rgba(245, 250, 255, 0.92);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.seller-directory-card.is-selected {
+  border-color: rgba(53, 111, 215, 0.6);
+  box-shadow: 0 10px 24px rgba(53, 111, 215, 0.12);
+}
+
+.seller-directory-name {
+  margin: 0;
+  color: #2e5fb9;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.seller-directory-meta {
+  margin: 0;
+  color: #667892;
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.seller-directory-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .exchange-section {
   margin: 0 0 20px;
   padding: 18px 20px;

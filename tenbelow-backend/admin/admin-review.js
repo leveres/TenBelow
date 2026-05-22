@@ -11,6 +11,8 @@ const refreshSnapshotsButton = document.querySelector("#refreshSnapshotsButton")
 const statusFilter = document.querySelector("#statusFilter");
 const sellerFilter = document.querySelector("#sellerFilter");
 const sellerQueueSummary = document.querySelector("#sellerQueueSummary");
+const sellerDirectoryList = document.querySelector("#sellerDirectoryList");
+const sellerDirectoryCount = document.querySelector("#sellerDirectoryCount");
 const exchangeStatusFilter = document.querySelector("#exchangeStatusFilter");
 const exchangeQueueList = document.querySelector("#exchangeQueueList");
 const exchangeQueueEmpty = document.querySelector("#exchangeQueueEmpty");
@@ -71,6 +73,7 @@ let restoresPage = 1;
 let auditPage = 1;
 let auditEntriesCache = [];
 let productQueueCache = [];
+let sellerDirectoryCache = [];
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -205,11 +208,23 @@ function sellerFilterLabel(product) {
   return name === sellerId ? name : `${name} (${sellerId})`;
 }
 
+function sellerDirectoryLabel(seller) {
+  const name = String(seller?.displayName || seller?.id || "Unknown seller").trim();
+  const sellerId = String(seller?.id || "unknown-seller").trim();
+  return name === sellerId ? name : `${name} (${sellerId})`;
+}
+
 function updateSellerFilterOptions(products) {
   if (!sellerFilter) return;
 
   const selectedSellerId = sellerFilter.value;
   const sellersById = new Map();
+  for (const seller of sellerDirectoryCache) {
+    const sellerId = String(seller?.id || "").trim();
+    if (sellerId) {
+      sellersById.set(sellerId, sellerDirectoryLabel(seller));
+    }
+  }
   for (const product of products) {
     const sellerId = productSellerId(product);
     if (!sellersById.has(sellerId)) {
@@ -266,6 +281,66 @@ function updateSellerQueueSummary(visibleProducts, groups) {
   sellerQueueSummary.textContent = visibleProducts.length
     ? `${visibleProducts.length} ${productWord} grouped under ${groups.length} ${sellerWord}.`
     : "No products match the current seller/status filters.";
+}
+
+function renderSellerDirectory(sellers) {
+  if (!sellerDirectoryList || !sellerDirectoryCount) return;
+
+  sellerDirectoryList.replaceChildren();
+  sellerDirectoryCount.textContent = String(sellers.length);
+
+  if (!sellers.length) {
+    const empty = document.createElement("p");
+    empty.className = "audit-empty";
+    empty.textContent = "No seller accounts found yet.";
+    sellerDirectoryList.appendChild(empty);
+    return;
+  }
+
+  const selectedSellerId = sellerFilter?.value || "";
+  for (const seller of sellers) {
+    const sellerId = String(seller?.id || "").trim();
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "seller-directory-card";
+    if (sellerId && sellerId === selectedSellerId) {
+      card.classList.add("is-selected");
+    }
+
+    const name = document.createElement("p");
+    name.className = "seller-directory-name";
+    name.textContent = seller?.displayName || sellerId || "Unknown seller";
+
+    const meta = document.createElement("p");
+    meta.className = "seller-directory-meta";
+    const handle = seller?.handle ? ` · ${seller.handle}` : "";
+    const email = seller?.email ? ` · ${seller.email}` : "";
+    meta.textContent = `Seller ID: ${sellerId}${handle}${email}`;
+
+    const stats = document.createElement("div");
+    stats.className = "seller-directory-stats";
+    const counts = seller?.productCounts || {};
+    [
+      `${seller?.totalProducts || 0} total`,
+      `${counts.submitted || 0} submitted`,
+      `${counts.approved || 0} approved`,
+      `${currencyFormatter.format((Number(seller?.totalValueCents) || 0) / 100)} value`,
+    ].forEach((text) => {
+      const pill = document.createElement("span");
+      pill.className = "seller-stat-pill";
+      pill.textContent = text;
+      stats.appendChild(pill);
+    });
+
+    card.append(name, meta, stats);
+    card.addEventListener("click", () => {
+      if (!sellerFilter || !sellerId) return;
+      sellerFilter.value = sellerFilter.value === sellerId ? "" : sellerId;
+      renderSellerDirectory(sellerDirectoryCache);
+      renderQueue(productQueueCache);
+    });
+    sellerDirectoryList.appendChild(card);
+  }
 }
 
 function buildProductCard(product) {
@@ -1301,6 +1376,31 @@ async function loadQueue(shouldAttemptSessionRefresh = true) {
   }
 }
 
+async function loadSellerDirectory() {
+  if (!isAdminAuthenticated) {
+    sellerDirectoryCache = [];
+    renderSellerDirectory([]);
+    return;
+  }
+
+  try {
+    const response = await fetch("/admin/sellers", {
+      headers: adminHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const payload = await response.json();
+    sellerDirectoryCache = Array.isArray(payload.sellers) ? payload.sellers : [];
+    renderSellerDirectory(sellerDirectoryCache);
+    renderQueue(productQueueCache);
+  } catch (error) {
+    sellerDirectoryCache = [];
+    renderSellerDirectory([]);
+    console.error(error);
+  }
+}
+
 async function refreshAdminSessionState(options = {}) {
   const { loadData = true } = options;
   if (isRefreshingAdminSession) {
@@ -1320,6 +1420,7 @@ async function refreshAdminSessionState(options = {}) {
     if (isAdminAuthenticated && loadData) {
       await Promise.all([
         loadQueue(false),
+        loadSellerDirectory(),
         loadExchangeQueue(),
         loadAuditLog(),
         loadSecurityMetrics(),
@@ -1331,7 +1432,9 @@ async function refreshAdminSessionState(options = {}) {
       restoresPage = 1;
       selectedExchangeRequestId = null;
       productQueueCache = [];
+      sellerDirectoryCache = [];
       renderQueue([]);
+      renderSellerDirectory([]);
       renderExchangeQueue([]);
       renderExchangeDetail(null);
       renderAuditEntries([]);
@@ -1348,8 +1451,10 @@ async function refreshAdminSessionState(options = {}) {
     restoresPage = 1;
     selectedExchangeRequestId = null;
     productQueueCache = [];
+    sellerDirectoryCache = [];
     syncAdminKeyVisibility();
     renderQueue([]);
+    renderSellerDirectory([]);
     renderExchangeQueue([]);
     renderExchangeDetail(null);
     renderAuditEntries([]);
@@ -1397,8 +1502,10 @@ async function logoutAdminSession() {
     restoresPage = 1;
     selectedExchangeRequestId = null;
     productQueueCache = [];
+    sellerDirectoryCache = [];
     syncAdminKeyVisibility();
     renderQueue([]);
+    renderSellerDirectory([]);
     renderExchangeQueue([]);
     renderExchangeDetail(null);
     renderAuditEntries([]);
@@ -1434,7 +1541,7 @@ async function reviewProduct(productId, decision, notes, approveButton, rejectBu
     }
 
     setFeedback(decision === "approve" ? "Product approved" : "Product rejected");
-    await loadQueue();
+    await Promise.all([loadQueue(), loadSellerDirectory()]);
   } catch (error) {
     setFeedback("Review action failed");
     console.error(error);
@@ -1458,7 +1565,7 @@ async function archiveProduct(productId, notes, approveButton, rejectButton, arc
     }
 
     setFeedback("Product archived");
-    await loadQueue();
+    await Promise.all([loadQueue(), loadSellerDirectory()]);
   } catch (error) {
     setFeedback("Archive failed");
     console.error(error);
@@ -1472,7 +1579,10 @@ refreshIncidentsButton.addEventListener("click", loadIncidentHistory);
 refreshSnapshotsButton.addEventListener("click", loadSnapshots);
 statusFilter.addEventListener("change", loadQueue);
 if (sellerFilter) {
-  sellerFilter.addEventListener("change", () => renderQueue(productQueueCache));
+  sellerFilter.addEventListener("change", () => {
+    renderSellerDirectory(sellerDirectoryCache);
+    renderQueue(productQueueCache);
+  });
 }
 if (refreshExchangeButton) {
   refreshExchangeButton.addEventListener("click", loadExchangeQueue);
