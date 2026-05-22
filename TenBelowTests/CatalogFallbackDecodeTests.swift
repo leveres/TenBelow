@@ -6,6 +6,7 @@
 import XCTest
 @testable import TenBelow
 
+@MainActor
 final class CatalogFallbackDecodeTests: XCTestCase {
     func testBundleCatalogFallbackDecodesNonEmpty() throws {
         let response = try XCTUnwrap(
