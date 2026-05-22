@@ -670,6 +670,11 @@ struct AddProductView: View {
 struct SellerProductMediaSelection {
     let selectedVideoURL: URL?
     let selectedProductionPreviewURL: URL?
+
+    static let none = SellerProductMediaSelection(
+        selectedVideoURL: nil,
+        selectedProductionPreviewURL: nil
+    )
 }
 
 private struct AutoplayVideoPreview: View {
@@ -790,6 +795,7 @@ struct SellerProductsView: View {
     @State private var productSwipeOffset: CGFloat = 0
     @State private var isRefreshingInventory = false
     @State private var submittingProductIDs = Set<String>()
+    @State private var productIDsAwaitingServerConfirmation = Set<String>()
 
     init(
         seller: SellerProfile = .sample,
@@ -1073,7 +1079,7 @@ struct SellerProductsView: View {
                 .background(statusBackground(for: draft.marketplaceStatus), in: Capsule(style: .continuous))
             }
 
-            Text(draft.marketplaceStatus.subtitle)
+            Text(sellerProductSubtitle(for: draft))
                 .font(.tbCaption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -1189,15 +1195,24 @@ struct SellerProductsView: View {
             await MarketplaceAuthSession.syncAfterIdentityChange()
             await catalog.load()
             let remote = try await SellerAPI.fetchSellerProducts(sellerId: seller.id)
-            await MainActor.run {
+            let remoteProductIDs = Set(remote.map(\.id))
+            let draftsNeedingRetry = await MainActor.run {
                 mergeRemoteInventory(remote)
                 _ = applyApprovedCatalogProductsToDrafts()
+                let retryDrafts = pendingDraftsMissingFromServer(remoteProductIDs: remoteProductIDs)
                 if let m = syncMessage,
                    m.contains("Loading product status")
                     || m.contains("Couldn’t refresh")
                     || m.contains("submission failed") {
                     syncMessage = nil
                 }
+                if !retryDrafts.isEmpty {
+                    syncMessage = "Retrying marketplace submission so it appears in the admin review queue..."
+                }
+                return retryDrafts
+            }
+            for draft in draftsNeedingRetry {
+                await syncDraftToServer(draft, mediaSelection: .none)
             }
         } catch {
             await MainActor.run {
@@ -1222,11 +1237,15 @@ struct SellerProductsView: View {
                 result[i].marketplaceStatus = SellerMarketplaceStatus.fromServerProduct(r)
                 let trimmed = r.reviewNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 result[i].serverReviewNotes = trimmed.isEmpty ? nil : trimmed
+                productIDsAwaitingServerConfirmation.remove(result[i].id)
+            } else if result[i].marketplaceStatus == .pendingReview {
+                productIDsAwaitingServerConfirmation.insert(result[i].id)
             }
         }
         let localIds = Set(result.map(\.id))
         for r in remote where !localIds.contains(r.id) {
             result.append(SellerProductDraft.fromRemoteProduct(r))
+            productIDsAwaitingServerConfirmation.remove(r.id)
         }
         productDrafts = result.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -1234,6 +1253,14 @@ struct SellerProductsView: View {
         persistDrafts()
         for d in productDrafts {
             localProducts.saveDraft(d)
+        }
+    }
+
+    private func pendingDraftsMissingFromServer(remoteProductIDs: Set<String>) -> [SellerProductDraft] {
+        productDrafts.filter { draft in
+            draft.marketplaceStatus == .pendingReview
+                && !remoteProductIDs.contains(draft.id)
+                && !submittingProductIDs.contains(draft.id)
         }
     }
 
@@ -1278,6 +1305,7 @@ struct SellerProductsView: View {
 
     private func markSubmissionStarted(for productId: String) {
         submittingProductIDs.insert(productId)
+        productIDsAwaitingServerConfirmation.insert(productId)
         syncMessage = "Submitting listing for TenBelow review..."
     }
 
@@ -1397,6 +1425,7 @@ struct SellerProductsView: View {
                 catalog.upsertRemoteProduct(remoteProduct)
                 catalogRefreshToken += 1
                 markSubmissionFinished(for: draft.id)
+                productIDsAwaitingServerConfirmation.remove(draft.id)
                 syncMessage = syncSummaryMessage(for: syncedDraft.marketplaceStatus)
             }
         } catch {
@@ -1425,6 +1454,17 @@ struct SellerProductsView: View {
         case .draft:
             return "Saved on this device."
         }
+    }
+
+    private func sellerProductSubtitle(for draft: SellerProductDraft) -> String {
+        if submittingProductIDs.contains(draft.id) {
+            return "Submitting to TenBelow..."
+        }
+        if productIDsAwaitingServerConfirmation.contains(draft.id),
+           draft.marketplaceStatus == .pendingReview {
+            return "Waiting for TenBelow server confirmation"
+        }
+        return draft.marketplaceStatus.subtitle
     }
 
     private func statusTint(for status: SellerMarketplaceStatus) -> Color {
