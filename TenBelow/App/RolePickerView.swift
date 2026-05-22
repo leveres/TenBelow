@@ -23,20 +23,24 @@ struct RolePickerView: View {
     @AppStorage("sellerAccountCreated") private var sellerAccountCreated = false
     @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
     private let startsInSellerAccount: Bool
+    private let sellerEntryMode: SellerAccountEntryMode
     @State private var step: RolePickerStep = .roleSelection
     @State private var buyerNameInput = ""
     @State private var buyerEmailInput = ""
     @State private var sellerIdInput = ""
     @State private var sellerEmailInput = ""
     @State private var sellerBusinessNameInput = ""
+    @State private var sellerIdentifierInput = ""
+    @State private var sellerPasswordInput = ""
     @State private var buyerErrorMessage: String?
     @State private var sellerErrorMessage: String?
     @State private var isCreatingBuyerAccount = false
     @State private var isCreatingSellerAccount = false
     @FocusState private var focusedSellerField: SellerAccountFieldFocus?
 
-    init(startInSellerAccount: Bool = false) {
+    init(startInSellerAccount: Bool = false, sellerEntryMode: SellerAccountEntryMode = .create) {
         startsInSellerAccount = startInSellerAccount
+        self.sellerEntryMode = sellerEntryMode
         _step = State(initialValue: startInSellerAccount ? .sellerAccount : .roleSelection)
     }
 
@@ -88,12 +92,14 @@ struct RolePickerView: View {
     }
 
     private var loadingOverlayTitle: String {
-        return isCreatingSellerAccount ? "Creating Seller Account" : "Setting Up Your Account"
+        return isCreatingSellerAccount
+            ? (sellerEntryMode == .signIn ? "Signing In" : "Creating Seller Account")
+            : "Setting Up Your Account"
     }
 
     private var loadingOverlaySubtitle: String {
         return isCreatingSellerAccount
-            ? "Saving your seller account."
+            ? (sellerEntryMode == .signIn ? "Checking your seller credentials." : "Saving your seller account.")
             : "Saving your buyer details and preferences."
     }
 
@@ -233,7 +239,13 @@ struct RolePickerView: View {
             VStack(spacing: 8) {
                 Button {
                     dismissSellerKeyboard()
-                    Task { await createSellerAccount() }
+                    Task {
+                        if sellerEntryMode == .signIn {
+                            await signInSellerAccount()
+                        } else {
+                            await createSellerAccount()
+                        }
+                    }
                 } label: {
                     if isCreatingSellerAccount {
                         ProgressView()
@@ -241,7 +253,7 @@ struct RolePickerView: View {
                     } else {
                         HStack(spacing: 8) {
                             Image(systemName: "storefront")
-                            Text("Create seller account")
+                            Text(sellerEntryMode == .signIn ? "Sign in as seller" : "Create seller account")
                         }
                     }
                 }
@@ -253,9 +265,13 @@ struct RolePickerView: View {
         }
         .frame(maxWidth: 560)
         .onAppear {
-            sellerIdInput = sellerId
-            sellerEmailInput = sellerEmail
-            sellerBusinessNameInput = sellerBusinessName
+            if sellerEntryMode == .signIn {
+                sellerIdentifierInput = sellerEmail.isEmpty ? sellerId : sellerEmail
+            } else {
+                sellerIdInput = sellerId
+                sellerEmailInput = sellerEmail
+                sellerBusinessNameInput = sellerBusinessName
+            }
         }
     }
 
@@ -313,11 +329,11 @@ struct RolePickerView: View {
                     .tracking(0.9)
                     .foregroundStyle(TBTheme.accent)
 
-                Text("Your seller details")
+                Text(sellerEntryMode == .signIn ? "Sign in details" : "Your seller details")
                     .font(.system(size: 19, weight: .semibold, design: .rounded))
                     .foregroundStyle(TBTheme.deepSky)
 
-                Text("Add the core info needed to open your seller space.")
+                Text(sellerEntryMode == .signIn ? "Use your seller ID or email and password." : "Add the core info needed to open your seller space.")
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(Color.primary.opacity(0.58))
                     .lineSpacing(2)
@@ -327,34 +343,68 @@ struct RolePickerView: View {
             .padding(.bottom, 12)
 
             VStack(spacing: 0) {
-                sellerAccountField(
-                    title: "Seller ID",
-                    text: $sellerIdInput,
-                    prompt: "my_shop",
-                    keyboard: .default,
-                    autocapitalize: false,
-                    focus: .sellerId,
-                    submitLabel: .next
-                )
-                Divider().overlay(TBTheme.skyBlue.opacity(0.10))
-                sellerAccountField(
-                    title: "Email",
-                    text: $sellerEmailInput,
-                    prompt: "you@example.com",
-                    keyboard: .emailAddress,
-                    autocapitalize: false,
-                    focus: .email,
-                    submitLabel: .next
-                )
-                Divider().overlay(TBTheme.skyBlue.opacity(0.10))
-                sellerAccountField(
-                    title: "Business Name",
-                    text: $sellerBusinessNameInput,
-                    prompt: "Optional",
-                    keyboard: .default,
-                    focus: .businessName,
-                    submitLabel: .done
-                )
+                if sellerEntryMode == .signIn {
+                    sellerAccountField(
+                        title: "Seller ID or Email",
+                        text: $sellerIdentifierInput,
+                        prompt: "fff or fff@gmail.com",
+                        keyboard: .emailAddress,
+                        autocapitalize: false,
+                        focus: .identifier,
+                        submitLabel: .next
+                    )
+                    Divider().overlay(TBTheme.skyBlue.opacity(0.10))
+                    sellerAccountField(
+                        title: "Password",
+                        text: $sellerPasswordInput,
+                        prompt: "Password",
+                        keyboard: .default,
+                        autocapitalize: false,
+                        focus: .password,
+                        submitLabel: .done,
+                        isSecure: true
+                    )
+                } else {
+                    sellerAccountField(
+                        title: "Seller ID",
+                        text: $sellerIdInput,
+                        prompt: "my_shop",
+                        keyboard: .default,
+                        autocapitalize: false,
+                        focus: .sellerId,
+                        submitLabel: .next
+                    )
+                    Divider().overlay(TBTheme.skyBlue.opacity(0.10))
+                    sellerAccountField(
+                        title: "Email",
+                        text: $sellerEmailInput,
+                        prompt: "you@example.com",
+                        keyboard: .emailAddress,
+                        autocapitalize: false,
+                        focus: .email,
+                        submitLabel: .next
+                    )
+                    Divider().overlay(TBTheme.skyBlue.opacity(0.10))
+                    sellerAccountField(
+                        title: "Password",
+                        text: $sellerPasswordInput,
+                        prompt: "At least 8 characters",
+                        keyboard: .default,
+                        autocapitalize: false,
+                        focus: .password,
+                        submitLabel: .next,
+                        isSecure: true
+                    )
+                    Divider().overlay(TBTheme.skyBlue.opacity(0.10))
+                    sellerAccountField(
+                        title: "Business Name",
+                        text: $sellerBusinessNameInput,
+                        prompt: "Optional",
+                        keyboard: .default,
+                        focus: .businessName,
+                        submitLabel: .done
+                    )
+                }
             }
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -536,6 +586,11 @@ struct RolePickerView: View {
             return
         }
 
+        guard sellerPasswordInput.count >= 8 else {
+            sellerErrorMessage = "Password must be at least 8 characters."
+            return
+        }
+
         await MainActor.run {
             sellerErrorMessage = nil
             isCreatingSellerAccount = true
@@ -549,7 +604,8 @@ struct RolePickerView: View {
             try await SellerAPI.createAccount(
                 sellerId: trimmedSellerId,
                 email: trimmedEmail,
-                businessName: trimmedBusinessName.isEmpty ? nil : trimmedBusinessName
+                businessName: trimmedBusinessName.isEmpty ? nil : trimmedBusinessName,
+                password: sellerPasswordInput
             )
 
             await applyCreatedSellerRegistration(
@@ -560,12 +616,10 @@ struct RolePickerView: View {
             )
         } catch {
             if SellerAPI.isSellerAlreadyExistsError(error) {
-                await applyCreatedSellerRegistration(
-                    trimmedSellerId: trimmedSellerId,
-                    trimmedEmail: trimmedEmail,
-                    trimmedBusinessName: trimmedBusinessName,
-                    useOfflinePreview: false
-                )
+                await MainActor.run {
+                    sellerErrorMessage = "That seller ID already exists. Use Sign in as seller from Settings."
+                    isCreatingSellerAccount = false
+                }
                 return
             }
 
@@ -584,6 +638,56 @@ struct RolePickerView: View {
                 let localhostHint = ""
                 #endif
                 sellerErrorMessage = "We couldn't create your seller account right now. Connect the backend and try again. \(error.localizedDescription)\(localhostHint)"
+                isCreatingSellerAccount = false
+            }
+        }
+    }
+
+    private func signInSellerAccount() async {
+        await MainActor.run {
+            dismissSellerKeyboard()
+        }
+
+        let identifier = sellerIdentifierInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let password = sellerPasswordInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !identifier.isEmpty else {
+            sellerErrorMessage = "Enter your seller ID or email."
+            return
+        }
+
+        guard password.count >= 8 else {
+            sellerErrorMessage = "Enter your seller password."
+            return
+        }
+
+        await MainActor.run {
+            sellerErrorMessage = nil
+            isCreatingSellerAccount = true
+            #if os(iOS)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            #endif
+        }
+
+        do {
+            let response = try await SellerAPI.login(identifier: identifier, password: password)
+            await MainActor.run {
+                sellerId = response.sellerId
+                sellerEmail = response.sellerEmail ?? identifier
+                sellerBusinessName = response.businessName ?? ""
+                sellerAccountCreated = true
+                sellerPreviewMode = false
+                sellerErrorMessage = nil
+                isCreatingSellerAccount = false
+                userRole = "seller"
+                pendingLaunchTab = 1
+                hasSeenOnboarding = false
+                MarketplaceAuthSession.storeSellerSessionToken(response.token)
+            }
+            await PushDeviceRegistration.syncAfterIdentityChange()
+        } catch {
+            await MainActor.run {
+                sellerErrorMessage = error.localizedDescription
                 isCreatingSellerAccount = false
             }
         }
@@ -938,24 +1042,31 @@ struct RolePickerView: View {
         keyboard: UIKeyboardType,
         autocapitalize: Bool = true,
         focus: SellerAccountFieldFocus,
-        submitLabel: SubmitLabel
+        submitLabel: SubmitLabel,
+        isSecure: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(TBTheme.deepSky.opacity(0.92))
 
-            TextField(prompt, text: text)
-                .textInputAutocapitalization(autocapitalize ? .words : .never)
-                .autocorrectionDisabled()
-                .keyboardType(keyboard)
-                .focused($focusedSellerField, equals: focus)
-                .submitLabel(submitLabel)
-                .onSubmit {
-                    advanceSellerField(from: focus)
+            Group {
+                if isSecure {
+                    SecureField(prompt, text: text)
+                } else {
+                    TextField(prompt, text: text)
                 }
-                .font(.system(size: 17, weight: .medium, design: .rounded))
-                .foregroundStyle(.primary.opacity(0.78))
+            }
+            .textInputAutocapitalization(autocapitalize ? .words : .never)
+            .autocorrectionDisabled()
+            .keyboardType(keyboard)
+            .focused($focusedSellerField, equals: focus)
+            .submitLabel(submitLabel)
+            .onSubmit {
+                advanceSellerField(from: focus)
+            }
+            .font(.system(size: 17, weight: .medium, design: .rounded))
+            .foregroundStyle(.primary.opacity(0.78))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -963,14 +1074,18 @@ struct RolePickerView: View {
 
     private func advanceSellerField(from field: SellerAccountFieldFocus?) {
         switch field {
+        case .identifier:
+            focusedSellerField = .password
         case .sellerId:
             focusedSellerField = .email
         case .email:
-            focusedSellerField = .businessName
+            focusedSellerField = sellerEntryMode == .signIn ? .password : .password
+        case .password:
+            focusedSellerField = sellerEntryMode == .signIn ? nil : .businessName
         case .businessName:
             dismissSellerKeyboard()
         case .none:
-            focusedSellerField = .sellerId
+            focusedSellerField = sellerEntryMode == .signIn ? .identifier : .sellerId
         }
     }
 
@@ -1092,8 +1207,15 @@ private enum BuyerCheckoutPreference: String {
 }
 
 private enum SellerAccountFieldFocus: Hashable {
+    case identifier
     case sellerId
     case email
+    case password
     case businessName
+}
+
+enum SellerAccountEntryMode {
+    case create
+    case signIn
 }
 

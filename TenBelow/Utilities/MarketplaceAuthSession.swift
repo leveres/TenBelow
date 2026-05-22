@@ -78,6 +78,11 @@ enum MarketplaceAuthSession {
         UserDefaults.standard.set(token, forKey: buyerTokenKey)
     }
 
+    /// Stores a freshly issued seller token after explicit seller sign-in.
+    static func storeSellerSessionToken(_ token: String) {
+        UserDefaults.standard.set(token, forKey: sellerTokenKey)
+    }
+
     /// Call before any seller write (profile, products, media). Refreshes the seller JWT when possible.
     static func ensureSellerSessionReady() async throws {
         guard AppConstants.isBackendConfigured else {

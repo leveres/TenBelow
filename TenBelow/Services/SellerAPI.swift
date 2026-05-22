@@ -4,6 +4,19 @@ private struct SellerAPIServerError: Decodable {
     let error: String
 }
 
+private struct SellerLoginRequest: Encodable {
+    let identifier: String
+    let password: String
+}
+
+struct SellerLoginResponse: Decodable {
+    let token: String
+    let role: String
+    let sellerId: String
+    let sellerEmail: String?
+    let businessName: String?
+}
+
 struct SellerAPIError: LocalizedError {
     let statusCode: Int
     let message: String
@@ -33,14 +46,14 @@ enum SellerAPI {
     }
 
     @discardableResult
-    static func createAccount(sellerId: String, email: String, businessName: String?) async throws -> CreateSellerResponse {
+    static func createAccount(sellerId: String, email: String, businessName: String?, password: String? = nil) async throws -> CreateSellerResponse {
         let url = baseURL.appendingPathComponent("create-seller-account")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         AppConstants.applyAppClientAuth(to: &request)
         request.httpBody = try JSONEncoder().encode(
-            CreateSellerRequest(sellerId: sellerId, email: email, businessName: businessName)
+            CreateSellerRequest(sellerId: sellerId, email: email, businessName: businessName, password: password)
         )
 
         let (data, resp) = try await URLSession.tenBelow.data(for: request)
@@ -49,6 +62,21 @@ enum SellerAPI {
             throw SellerAPIError(statusCode: http.statusCode, message: msg)
         }
         return try JSONDecoder().decode(CreateSellerResponse.self, from: data)
+    }
+
+    static func login(identifier: String, password: String) async throws -> SellerLoginResponse {
+        let url = baseURL.appendingPathComponent("auth/seller-login")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        request.httpBody = try JSONEncoder().encode(SellerLoginRequest(identifier: identifier, password: password))
+
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw SellerAPIError(statusCode: http.statusCode, message: serverErrorMessage(from: data))
+        }
+        return try JSONDecoder().decode(SellerLoginResponse.self, from: data)
     }
 
     private static func serverErrorMessage(from data: Data) -> String {

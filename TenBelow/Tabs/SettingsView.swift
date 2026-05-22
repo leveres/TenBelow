@@ -68,7 +68,7 @@ struct SettingsView: View {
                         }
                     } else {
                         NavigationLink {
-                            RolePickerView(startInSellerAccount: true)
+                            RolePickerView(startInSellerAccount: true, sellerEntryMode: .signIn)
                         } label: {
                             Label("Sign in as seller", systemImage: "storefront")
                         }
@@ -95,7 +95,7 @@ struct SettingsView: View {
                             }
                         } else {
                             NavigationLink {
-                                RolePickerView(startInSellerAccount: true)
+                                RolePickerView(startInSellerAccount: true, sellerEntryMode: .create)
                             } label: {
                                 Label("Become a seller", systemImage: "storefront")
                             }

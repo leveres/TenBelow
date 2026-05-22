@@ -1558,6 +1558,7 @@ function normalizeSellerRecord(record = {}, sellerId = "") {
   return {
     stripeAccountId: record.stripeAccountId || "",
     email: record.email || "",
+    passwordHash: String(record.passwordHash || "").trim(),
     businessName: record.businessName || "",
     membership: normalizeMembership(record.membership),
     profile: normalizeSellerPublicProfile(record.profile, sellerId, record.businessName),
@@ -1807,6 +1808,10 @@ function isValidBuyerEmail(email = "") {
 }
 
 function hashBuyerPassword(password = "") {
+  return crypto.createHash("sha256").update(String(password)).digest("hex");
+}
+
+function hashSellerPassword(password = "") {
   return crypto.createHash("sha256").update(String(password)).digest("hex");
 }
 
@@ -2497,6 +2502,56 @@ app.post("/auth/seller-session", authLimiter, requireAppClient, (req, res) => {
       token,
       role: "seller",
       sellerId,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/auth/seller-login", authLimiter, requireAppClient, (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    if (!identifier || !password) {
+      return res.status(400).json({ error: "Seller ID/email and password are required" });
+    }
+
+    const sellers = loadSellersFile();
+    const entry = Object.entries(sellers).find(([sellerId, seller]) =>
+      sellerId.toLowerCase() === identifier ||
+      String(seller.email || "").trim().toLowerCase() === identifier
+    );
+    if (!entry) {
+      return res.status(404).json({ error: "Seller account not found" });
+    }
+
+    const [sellerId, seller] = entry;
+    const passwordHash = hashSellerPassword(password);
+    if (seller.passwordHash && seller.passwordHash !== passwordHash) {
+      return res.status(401).json({ error: "Incorrect seller password" });
+    }
+
+    // Legacy seller accounts were created before password sign-in existed. The first successful
+    // credential sign-in claims a password so future sign-ins are protected.
+    if (!seller.passwordHash) {
+      seller.passwordHash = passwordHash;
+      sellers[sellerId] = seller;
+      saveSellersFile(sellers);
+    }
+
+    const sellerEmail = String(seller.email || "").trim().toLowerCase();
+    const token = issueUserSessionToken({
+      role: "seller",
+      sellerId,
+      sellerEmail,
+    });
+
+    res.json({
+      token,
+      role: "seller",
+      sellerId,
+      sellerEmail,
+      businessName: seller.businessName || seller.profile?.displayName || sellerId,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3744,9 +3799,11 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
     const rawSellerId = String(req.body.sellerId || "").trim().toLowerCase();
     const sellerId = rawSellerId.replace(/\s+/g, "-");
     const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
     const businessName = req.body.businessName;
 
     if (!sellerId || !email) return res.status(400).json({ error: "sellerId and email required" });
+    if (password && password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
     if (!isValidSellerId(sellerId)) {
       return res.status(400).json({ error: "Seller ID must be 3 to 24 characters using letters, numbers, hyphens, or underscores." });
     }
@@ -3763,6 +3820,7 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
     sellers[sellerId] = {
       stripeAccountId: account.id,
       email,
+      passwordHash: password ? hashSellerPassword(password) : "",
       businessName: businessName || "",
       membership: normalizeMembership(),
       profile: normalizeSellerPublicProfile({}, sellerId, businessName || sellerId),

@@ -4,6 +4,7 @@ struct CreateSellerRequest: Codable {
     let sellerId: String
     let email: String
     let businessName: String?
+    let password: String?
 }
 
 struct CreateSellerResponse: Codable {
