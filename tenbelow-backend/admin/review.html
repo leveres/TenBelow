@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TenBelow Admin Review</title>
-    <link rel="stylesheet" href="/admin/assets/admin-review.css?v=6" />
+    <link rel="stylesheet" href="/admin/assets/admin-review.css?v=7" />
   </head>
   <body>
     <main class="app-shell">
@@ -74,6 +74,15 @@
         <div id="admin-panel-products-body" class="admin-panel-body">
           <p class="audit-subcopy">Approve, reject, or archive submitted listings from one compact queue.</p>
           <section class="queue-section">
+            <div class="seller-queue-toolbar">
+              <label class="field field-small">
+                <span>Seller</span>
+                <select id="sellerFilter">
+                  <option value="">All sellers</option>
+                </select>
+              </label>
+              <p id="sellerQueueSummary" class="seller-queue-summary">Products are grouped by seller.</p>
+            </div>
             <section id="emptyState" class="empty-state hidden">
               <h2>No products in this queue</h2>
               <p>Submitted products will appear here as soon as sellers send them for review.</p>
@@ -370,6 +379,6 @@
       </article>
     </template>
 
-    <script type="module" src="/admin/assets/admin-review.js?v=5"></script>
+    <script type="module" src="/admin/assets/admin-review.js?v=6"></script>
   </body>
 </html>

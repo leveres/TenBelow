@@ -9,6 +9,8 @@ const refreshAuditButton = document.querySelector("#refreshAuditButton");
 const refreshIncidentsButton = document.querySelector("#refreshIncidentsButton");
 const refreshSnapshotsButton = document.querySelector("#refreshSnapshotsButton");
 const statusFilter = document.querySelector("#statusFilter");
+const sellerFilter = document.querySelector("#sellerFilter");
+const sellerQueueSummary = document.querySelector("#sellerQueueSummary");
 const exchangeStatusFilter = document.querySelector("#exchangeStatusFilter");
 const exchangeQueueList = document.querySelector("#exchangeQueueList");
 const exchangeQueueEmpty = document.querySelector("#exchangeQueueEmpty");
@@ -68,6 +70,7 @@ let incidentsPage = 1;
 let restoresPage = 1;
 let auditPage = 1;
 let auditEntriesCache = [];
+let productQueueCache = [];
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -188,121 +191,250 @@ function syncAdminKeyVisibility() {
   }
 }
 
+function productSellerId(product) {
+  return String(product?.sellerId || "").trim() || "unknown-seller";
+}
+
+function productSellerDisplayName(product) {
+  return String(product?.sellerDisplayName || product?.sellerId || "Unknown seller").trim();
+}
+
+function sellerFilterLabel(product) {
+  const name = productSellerDisplayName(product);
+  const sellerId = productSellerId(product);
+  return name === sellerId ? name : `${name} (${sellerId})`;
+}
+
+function updateSellerFilterOptions(products) {
+  if (!sellerFilter) return;
+
+  const selectedSellerId = sellerFilter.value;
+  const sellersById = new Map();
+  for (const product of products) {
+    const sellerId = productSellerId(product);
+    if (!sellersById.has(sellerId)) {
+      sellersById.set(sellerId, sellerFilterLabel(product));
+    }
+  }
+
+  sellerFilter.replaceChildren();
+  const allOption = document.createElement("option");
+  allOption.value = "";
+  allOption.textContent = "All sellers";
+  sellerFilter.appendChild(allOption);
+
+  Array.from(sellersById.entries())
+    .sort((lhs, rhs) => lhs[1].localeCompare(rhs[1]))
+    .forEach(([sellerId, label]) => {
+      const option = document.createElement("option");
+      option.value = sellerId;
+      option.textContent = label;
+      sellerFilter.appendChild(option);
+    });
+
+  sellerFilter.value = sellersById.has(selectedSellerId) ? selectedSellerId : "";
+}
+
+function visibleQueueProducts(products) {
+  const selectedSellerId = sellerFilter?.value || "";
+  if (!selectedSellerId) return products;
+  return products.filter((product) => productSellerId(product) === selectedSellerId);
+}
+
+function groupedProductsBySeller(products) {
+  const groupsById = new Map();
+  for (const product of products) {
+    const sellerId = productSellerId(product);
+    const group = groupsById.get(sellerId) || {
+      sellerId,
+      sellerDisplayName: productSellerDisplayName(product),
+      products: [],
+    };
+    group.products.push(product);
+    groupsById.set(sellerId, group);
+  }
+  return Array.from(groupsById.values()).sort((lhs, rhs) =>
+    lhs.sellerDisplayName.localeCompare(rhs.sellerDisplayName),
+  );
+}
+
+function updateSellerQueueSummary(visibleProducts, groups) {
+  if (!sellerQueueSummary) return;
+
+  const sellerWord = groups.length === 1 ? "seller" : "sellers";
+  const productWord = visibleProducts.length === 1 ? "product" : "products";
+  sellerQueueSummary.textContent = visibleProducts.length
+    ? `${visibleProducts.length} ${productWord} grouped under ${groups.length} ${sellerWord}.`
+    : "No products match the current seller/status filters.";
+}
+
+function buildProductCard(product) {
+  const fragment = template.content.cloneNode(true);
+  const image = fragment.querySelector(".product-image");
+  const mediaCount = fragment.querySelector(".media-count");
+  const thumbnails = fragment.querySelector(".media-thumbnails");
+  const sellerName = fragment.querySelector(".seller-name");
+  const productName = fragment.querySelector(".product-name");
+  const statusPill = fragment.querySelector(".status-pill");
+  const productPrice = fragment.querySelector(".product-price");
+  const productCategory = fragment.querySelector(".product-category");
+  const productMaterial = fragment.querySelector(".product-material");
+  const productSubmitted = fragment.querySelector(".product-submitted");
+  const productNote = fragment.querySelector(".product-note");
+  const notesField = fragment.querySelector("textarea");
+  const approveButton = fragment.querySelector(".approve-button");
+  const rejectButton = fragment.querySelector(".reject-button");
+  const archiveButton = fragment.querySelector(".archive-button");
+
+  const imageURLs = Array.isArray(product.imageURLs) && product.imageURLs.length
+    ? product.imageURLs
+    : [fallbackImageURL()];
+
+  let selectedImageIndex = 0;
+  image.src = imageURLs[selectedImageIndex];
+  image.alt = product.name || "Product media";
+
+  if (imageURLs.length > 1) {
+    mediaCount.textContent = `${imageURLs.length} photos`;
+    mediaCount.classList.remove("hidden");
+  } else {
+    mediaCount.classList.add("hidden");
+  }
+
+  imageURLs.forEach((url, index) => {
+    const thumbnailButton = document.createElement("button");
+    thumbnailButton.type = "button";
+    thumbnailButton.className = "thumbnail-button";
+    if (index === 0) {
+      thumbnailButton.classList.add("is-selected");
+    }
+
+    const thumbnailImage = document.createElement("img");
+    thumbnailImage.className = "thumbnail-image";
+    thumbnailImage.src = url;
+    thumbnailImage.alt = `${product.name || "Product"} image ${index + 1}`;
+
+    thumbnailButton.addEventListener("click", () => {
+      selectedImageIndex = index;
+      image.src = url;
+      image.alt = product.name || "Product media";
+      thumbnails.querySelectorAll(".thumbnail-button").forEach((button) => {
+        button.classList.remove("is-selected");
+      });
+      thumbnailButton.classList.add("is-selected");
+    });
+
+    thumbnailButton.appendChild(thumbnailImage);
+    thumbnails.appendChild(thumbnailButton);
+  });
+
+  image.addEventListener("click", () => openLightbox(imageURLs, selectedImageIndex, image.alt));
+
+  sellerName.textContent = `Seller ID: ${productSellerId(product)}`;
+  productName.textContent = product.name || "Untitled product";
+
+  const status = String(product.approvalStatus || "submitted").trim().toLowerCase();
+  statusPill.textContent =
+    status === "approved"
+      ? "Approved"
+      : status === "rejected"
+        ? "Rejected"
+        : status === "archived"
+          ? "Archived"
+          : "Submitted";
+  statusPill.classList.add(`status-${status}`);
+
+  productPrice.textContent = currencyFormatter.format((Number(product.priceCents || 0) / 100));
+  productCategory.textContent = product.category || "Desk";
+  productMaterial.textContent = product.material || "PLA+";
+  productSubmitted.textContent = product.submittedAt
+    ? dateTimeFormatter.format(new Date(product.submittedAt))
+    : "Just now";
+  productNote.textContent = product.durabilityNote || "No durability note provided.";
+  notesField.value = product.reviewNotes || "";
+
+  if (status === "archived") {
+    approveButton.classList.add("hidden");
+    rejectButton.classList.add("hidden");
+    archiveButton.classList.add("hidden");
+    notesField.readOnly = true;
+  } else {
+    approveButton.addEventListener("click", () =>
+      reviewProduct(product.id, "approve", notesField.value, approveButton, rejectButton, archiveButton),
+    );
+    rejectButton.addEventListener("click", () =>
+      reviewProduct(product.id, "reject", notesField.value, approveButton, rejectButton, archiveButton),
+    );
+    archiveButton.addEventListener("click", () =>
+      archiveProduct(product.id, notesField.value, approveButton, rejectButton, archiveButton),
+    );
+  }
+
+  return fragment;
+}
+
 function renderQueue(products) {
   queueGrid.replaceChildren();
-  queueCount.textContent = String(products.length);
+  updateSellerFilterOptions(products);
+  const visibleProducts = visibleQueueProducts(products);
+  const sellerGroups = groupedProductsBySeller(visibleProducts);
+  queueCount.textContent = String(visibleProducts.length);
   queueFilterLabel.textContent = selectedFilterLabel();
+  updateSellerQueueSummary(visibleProducts, sellerGroups);
 
-  if (!products.length) {
+  if (!visibleProducts.length) {
     emptyState.classList.remove("hidden");
     return;
   }
 
   emptyState.classList.add("hidden");
 
-  for (const product of products) {
-    const fragment = template.content.cloneNode(true);
-    const image = fragment.querySelector(".product-image");
-    const mediaCount = fragment.querySelector(".media-count");
-    const thumbnails = fragment.querySelector(".media-thumbnails");
-    const sellerName = fragment.querySelector(".seller-name");
-    const productName = fragment.querySelector(".product-name");
-    const statusPill = fragment.querySelector(".status-pill");
-    const productPrice = fragment.querySelector(".product-price");
-    const productCategory = fragment.querySelector(".product-category");
-    const productMaterial = fragment.querySelector(".product-material");
-    const productSubmitted = fragment.querySelector(".product-submitted");
-    const productNote = fragment.querySelector(".product-note");
-    const notesField = fragment.querySelector("textarea");
-    const approveButton = fragment.querySelector(".approve-button");
-    const rejectButton = fragment.querySelector(".reject-button");
-    const archiveButton = fragment.querySelector(".archive-button");
+  for (const group of sellerGroups) {
+    const sellerSection = document.createElement("section");
+    sellerSection.className = "seller-product-group";
 
-    const imageURLs = Array.isArray(product.imageURLs) && product.imageURLs.length
-      ? product.imageURLs
-      : [fallbackImageURL()];
+    const totalCents = group.products.reduce(
+      (sum, product) => sum + (Number(product.priceCents) || 0),
+      0,
+    );
+    const latestSubmittedAt = group.products.reduce((latest, product) => {
+      const submittedAt = new Date(product.submittedAt || 0).getTime();
+      return Math.max(latest, Number.isFinite(submittedAt) ? submittedAt : 0);
+    }, 0);
 
-    let selectedImageIndex = 0;
-    image.src = imageURLs[selectedImageIndex];
-    image.alt = product.name || "Product media";
+    const header = document.createElement("div");
+    header.className = "seller-product-group-header";
+    const sellerTitleWrap = document.createElement("div");
+    const sellerTitle = document.createElement("h2");
+    sellerTitle.className = "seller-product-group-title";
+    sellerTitle.textContent = group.sellerDisplayName;
+    const sellerId = document.createElement("p");
+    sellerId.className = "seller-product-group-id";
+    sellerId.textContent = `Seller ID: ${group.sellerId}`;
+    sellerTitleWrap.append(sellerTitle, sellerId);
 
-    if (imageURLs.length > 1) {
-      mediaCount.textContent = `${imageURLs.length} photos`;
-      mediaCount.classList.remove("hidden");
-    } else {
-      mediaCount.classList.add("hidden");
-    }
-
-    imageURLs.forEach((url, index) => {
-      const thumbnailButton = document.createElement("button");
-      thumbnailButton.type = "button";
-      thumbnailButton.className = "thumbnail-button";
-      if (index === 0) {
-        thumbnailButton.classList.add("is-selected");
-      }
-
-      const thumbnailImage = document.createElement("img");
-      thumbnailImage.className = "thumbnail-image";
-      thumbnailImage.src = url;
-      thumbnailImage.alt = `${product.name || "Product"} image ${index + 1}`;
-
-      thumbnailButton.addEventListener("click", () => {
-        selectedImageIndex = index;
-        image.src = url;
-        image.alt = product.name || "Product media";
-        thumbnails.querySelectorAll(".thumbnail-button").forEach((button) => {
-          button.classList.remove("is-selected");
-        });
-        thumbnailButton.classList.add("is-selected");
-      });
-
-      thumbnailButton.appendChild(thumbnailImage);
-      thumbnails.appendChild(thumbnailButton);
+    const stats = document.createElement("div");
+    stats.className = "seller-product-group-stats";
+    [
+      `${group.products.length} product${group.products.length === 1 ? "" : "s"}`,
+      `${currencyFormatter.format(totalCents / 100)} total`,
+      `Latest ${latestSubmittedAt ? dateTimeFormatter.format(new Date(latestSubmittedAt)) : "unknown"}`,
+    ].forEach((text) => {
+      const pill = document.createElement("span");
+      pill.className = "seller-stat-pill";
+      pill.textContent = text;
+      stats.appendChild(pill);
     });
+    header.append(sellerTitleWrap, stats);
 
-    image.addEventListener("click", () => openLightbox(imageURLs, selectedImageIndex, image.alt));
-
-    sellerName.textContent = product.sellerDisplayName || product.sellerId || "Seller";
-    productName.textContent = product.name || "Untitled product";
-
-    const status = String(product.approvalStatus || "submitted").trim().toLowerCase();
-    statusPill.textContent =
-      status === "approved"
-        ? "Approved"
-        : status === "rejected"
-          ? "Rejected"
-          : status === "archived"
-            ? "Archived"
-            : "Submitted";
-    statusPill.classList.add(`status-${status}`);
-
-    productPrice.textContent = currencyFormatter.format((Number(product.priceCents || 0) / 100));
-    productCategory.textContent = product.category || "Desk";
-    productMaterial.textContent = product.material || "PLA+";
-    productSubmitted.textContent = product.submittedAt
-      ? dateTimeFormatter.format(new Date(product.submittedAt))
-      : "Just now";
-    productNote.textContent = product.durabilityNote || "No durability note provided.";
-    notesField.value = product.reviewNotes || "";
-
-    if (status === "archived") {
-      approveButton.classList.add("hidden");
-      rejectButton.classList.add("hidden");
-      archiveButton.classList.add("hidden");
-      notesField.readOnly = true;
-    } else {
-      approveButton.addEventListener("click", () =>
-        reviewProduct(product.id, "approve", notesField.value, approveButton, rejectButton, archiveButton),
-      );
-      rejectButton.addEventListener("click", () =>
-        reviewProduct(product.id, "reject", notesField.value, approveButton, rejectButton, archiveButton),
-      );
-      archiveButton.addEventListener("click", () =>
-        archiveProduct(product.id, notesField.value, approveButton, rejectButton, archiveButton),
-      );
+    const productList = document.createElement("div");
+    productList.className = "seller-product-list";
+    for (const product of group.products) {
+      productList.appendChild(buildProductCard(product));
     }
 
-    queueGrid.appendChild(fragment);
+    sellerSection.append(header, productList);
+    queueGrid.appendChild(sellerSection);
   }
 }
 
@@ -1140,6 +1272,7 @@ async function loadQueue(shouldAttemptSessionRefresh = true) {
       }
     }
     setFeedback("Sign in required");
+    productQueueCache = [];
     renderQueue([]);
     return;
   }
@@ -1157,9 +1290,11 @@ async function loadQueue(shouldAttemptSessionRefresh = true) {
     }
 
     const payload = await response.json();
-    renderQueue(Array.isArray(payload.products) ? payload.products : []);
+    productQueueCache = Array.isArray(payload.products) ? payload.products : [];
+    renderQueue(productQueueCache);
     setFeedback("Queue ready");
   } catch (error) {
+    productQueueCache = [];
     renderQueue([]);
     setFeedback("Failed to load queue");
     console.error(error);
@@ -1195,6 +1330,7 @@ async function refreshAdminSessionState(options = {}) {
       incidentsPage = 1;
       restoresPage = 1;
       selectedExchangeRequestId = null;
+      productQueueCache = [];
       renderQueue([]);
       renderExchangeQueue([]);
       renderExchangeDetail(null);
@@ -1211,6 +1347,7 @@ async function refreshAdminSessionState(options = {}) {
     incidentsPage = 1;
     restoresPage = 1;
     selectedExchangeRequestId = null;
+    productQueueCache = [];
     syncAdminKeyVisibility();
     renderQueue([]);
     renderExchangeQueue([]);
@@ -1259,6 +1396,7 @@ async function logoutAdminSession() {
     incidentsPage = 1;
     restoresPage = 1;
     selectedExchangeRequestId = null;
+    productQueueCache = [];
     syncAdminKeyVisibility();
     renderQueue([]);
     renderExchangeQueue([]);
@@ -1333,6 +1471,9 @@ refreshAuditButton.addEventListener("click", () => Promise.all([loadAuditLog(), 
 refreshIncidentsButton.addEventListener("click", loadIncidentHistory);
 refreshSnapshotsButton.addEventListener("click", loadSnapshots);
 statusFilter.addEventListener("change", loadQueue);
+if (sellerFilter) {
+  sellerFilter.addEventListener("change", () => renderQueue(productQueueCache));
+}
 if (refreshExchangeButton) {
   refreshExchangeButton.addEventListener("click", loadExchangeQueue);
 }
