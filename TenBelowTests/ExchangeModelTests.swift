@@ -6,6 +6,7 @@
 import XCTest
 @testable import TenBelow
 
+@MainActor
 final class ExchangeModelTests: XCTestCase {
     func testExchangeReasonCodeTitlesAreNonEmpty() {
         for code in ExchangeReasonCode.allCases {
