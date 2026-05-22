@@ -4746,16 +4746,36 @@ app.delete("/admin/accounts/:kind/:accountId", adminMutationLimiter, requireAdmi
     if (kind === "sellers") {
       const sellerId = accountId;
       const sellers = loadSellersFile();
-      if (!sellers[sellerId]) return res.status(404).json({ error: "Seller account not found" });
       const catalog = await fetchCatalog();
       const products = Array.isArray(catalog.products)
         ? catalog.products.map((product) => normalizeCatalogProduct(product))
         : [];
+      const sellerProducts = products.filter((product) => product.sellerId === sellerId);
+      if (!sellers[sellerId] && sellerProducts.length === 0) {
+        return res.status(404).json({ error: "Seller account not found" });
+      }
       const activity = sellerAccountActivity(sellerId, products, orders, exchangeRequests, customOrderRequests, productReviews);
+      if (sellerProducts.length > 0) {
+        saveCatalog({
+          version: catalog.version,
+          products: products.filter((product) => product.sellerId !== sellerId),
+        });
+      }
       delete sellers[sellerId];
       saveSellersFile(sellers);
-      auditLog(auditContext(req, { action: "admin_seller_account_deleted", sellerId, activity }));
-      return res.json({ deleted: true, kind: "seller", id: sellerId, activity });
+      auditLog(auditContext(req, {
+        action: "admin_seller_account_deleted",
+        sellerId,
+        activity,
+        deletedProductCount: sellerProducts.length,
+      }));
+      return res.json({
+        deleted: true,
+        kind: "seller",
+        id: sellerId,
+        activity,
+        deletedProductCount: sellerProducts.length,
+      });
     }
 
     return res.status(400).json({ error: "kind must be sellers or buyers" });

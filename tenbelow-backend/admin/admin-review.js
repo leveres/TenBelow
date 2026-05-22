@@ -451,8 +451,11 @@ function renderAccounts(payload) {
     footer.className = "account-card-footer";
     const note = document.createElement("p");
     note.className = "account-card-meta";
+    const productCount = Number(account.activity?.productCount) || 0;
     note.textContent = linkedActivity > 0
-      ? `Delete is available. Linked activity remains in records: ${account.activity?.blockers?.join(", ") || `${linkedActivity} activity records`}.`
+      ? account.kind === "seller" && productCount > 0
+        ? `Delete is available. ${productCount} linked product${productCount === 1 ? "" : "s"} will be removed from the app; other history may remain for audit.`
+        : `Delete is available. Linked activity remains in records: ${account.activity?.blockers?.join(", ") || `${linkedActivity} activity records`}.`
       : "No activity found. This account can be permanently deleted.";
 
     const deleteButton = document.createElement("button");
@@ -495,9 +498,13 @@ async function deleteAccount(account) {
   const kind = account.kind === "buyer" ? "buyers" : "sellers";
   const label = account.displayName || account.id;
   const linkedActivity = activityTotal(account.activity || {});
-  const activityWarning = linkedActivity > 0
-    ? `\n\nThis account has linked activity (${account.activity?.blockers?.join(", ") || `${linkedActivity} records`}). The account will be removed, but those records may remain for history/audit.`
-    : "";
+  const productCount = Number(account.activity?.productCount) || 0;
+  let activityWarning = "";
+  if (linkedActivity > 0) {
+    activityWarning = account.kind === "seller" && productCount > 0
+      ? `\n\nThis seller has ${productCount} linked product${productCount === 1 ? "" : "s"}. The seller account and those products will be removed from the app. Other linked history may remain for audit.`
+      : `\n\nThis account has linked activity (${account.activity?.blockers?.join(", ") || `${linkedActivity} records`}). The account will be removed, but those records may remain for history/audit.`;
+  }
   const confirmed = window.confirm(`Permanently delete ${label}? This cannot be undone.${activityWarning}`);
   if (!confirmed) return;
 
