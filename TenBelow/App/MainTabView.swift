@@ -18,6 +18,7 @@ private enum MainTab: Int, Hashable {
 
 struct MainTabView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var notifications: NotificationStore
     @EnvironmentObject private var orderStore: OrderStore
@@ -35,6 +36,9 @@ struct MainTabView: View {
     @State private var hasPerformedInitialRefresh = false
     @State private var hasCompletedInitialLoad = false
     @State private var catalogRefreshJitter = Double.random(in: 0...6)
+    @State private var activeNotificationBanner: AppNotification?
+    @State private var lastPresentedNotificationID: String?
+    @State private var notificationBannerDismissTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -51,8 +55,29 @@ struct MainTabView: View {
                 .transition(.opacity)
                 .zIndex(1)
             }
+
+            if let activeNotificationBanner {
+                VStack {
+                    InAppNotificationBanner(
+                        notification: activeNotificationBanner,
+                        audienceLabel: notificationAudienceLabel,
+                        dismissAction: dismissNotificationBanner
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .onTapGesture {
+                        openNotificationBanner(activeNotificationBanner)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .transition(notificationBannerTransition)
+                .zIndex(2)
+                .accessibilitySortPriority(1)
+            }
         }
         .animation(.easeInOut(duration: 0.5), value: shouldDisplayLoadingOverlay)
+        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: activeNotificationBanner?.id)
         .task {
             guard !hasPerformedInitialRefresh else { return }
             hasPerformedInitialRefresh = true
@@ -60,6 +85,7 @@ struct MainTabView: View {
             hasCompletedInitialLoad = true
         }
         .onAppear {
+            lastPresentedNotificationID = notifications.currentNotifications.first?.id
             if shouldShowHomeEntrySplash {
                 shouldShowHomeEntrySplash = false
                 isShowingEntrySplash = true
@@ -82,6 +108,13 @@ struct MainTabView: View {
         }
         .onChange(of: catalogRefreshToken) { _, _ in
             Task { await refreshCatalog(force: true) }
+        }
+        .onChange(of: notifications.currentNotifications.first?.id) { _, newValue in
+            presentNotificationBannerIfNeeded(newNotificationID: newValue)
+        }
+        .onChange(of: "\(userRole)|\(sellerSellerId)") { _, _ in
+            lastPresentedNotificationID = notifications.currentNotifications.first?.id
+            dismissNotificationBanner()
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -141,6 +174,60 @@ struct MainTabView: View {
                 .badge(settingsTabBadge)
         }
         .tint(TBTheme.icyBlue)
+    }
+
+    private var notificationAudienceLabel: String {
+        userRole == "seller" ? "Seller alert" : "Buyer update"
+    }
+
+    private var notificationBannerTransition: AnyTransition {
+        if reduceMotion {
+            return .opacity
+        }
+
+        return .move(edge: .top).combined(with: .opacity)
+    }
+
+    private func presentNotificationBannerIfNeeded(newNotificationID: String?) {
+        guard let newNotificationID else { return }
+        guard newNotificationID != lastPresentedNotificationID else { return }
+        lastPresentedNotificationID = newNotificationID
+
+        guard let notification = notifications.currentNotifications.first(where: { $0.id == newNotificationID }) else {
+            return
+        }
+
+        activeNotificationBanner = notification
+        notificationBannerDismissTask?.cancel()
+        notificationBannerDismissTask = Task {
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            await MainActor.run {
+                guard activeNotificationBanner?.id == notification.id else { return }
+                dismissNotificationBanner()
+            }
+        }
+    }
+
+    private func dismissNotificationBanner() {
+        notificationBannerDismissTask?.cancel()
+        notificationBannerDismissTask = nil
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+            activeNotificationBanner = nil
+        }
+    }
+
+    private func openNotificationBanner(_ notification: AppNotification) {
+        notifications.markAsRead(notification.id)
+
+        if notification.relatedOrderId != nil || notification.relatedExchangeRequestId != nil {
+            selectedTab = .orders
+        } else if notification.relatedProductId != nil {
+            selectedTab = .store
+        } else {
+            selectedTab = .home
+        }
+
+        dismissNotificationBanner()
     }
 
     private var settingsTabBadge: String? {
@@ -211,6 +298,146 @@ struct MainTabView: View {
         }
 
         pendingLaunchTab = MainTab.home.rawValue
+    }
+}
+
+private struct InAppNotificationBanner: View {
+    let notification: AppNotification
+    let audienceLabel: String
+    let dismissAction: () -> Void
+
+    private var style: BannerStyle {
+        BannerStyle(notificationType: notification.type)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(style.tint.opacity(0.15))
+                    .frame(width: 44, height: 44)
+
+                Image(systemName: style.iconName)
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(style.tint)
+            }
+            .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(audienceLabel)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .tracking(0.7)
+                        .textCase(.uppercase)
+                        .foregroundStyle(style.tint)
+
+                    Text(style.typeLabel)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Text(notification.title)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                Text(notification.message)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: dismissAction) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(.white.opacity(0.64), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss notification")
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.72),
+                                    style.tint.opacity(0.13),
+                                    TBTheme.skyLight.opacity(0.18)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            .white.opacity(0.88),
+                            style.tint.opacity(0.24)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: style.tint.opacity(0.16), radius: 22, y: 10)
+        .shadow(color: .white.opacity(0.28), radius: 4, y: -1)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(audienceLabel). \(notification.title). \(notification.message)")
+        .accessibilityHint("Tap to open the related area.")
+    }
+}
+
+private struct BannerStyle {
+    let iconName: String
+    let typeLabel: String
+    let tint: Color
+
+    init(notificationType: NotificationType) {
+        switch notificationType {
+        case .priceDrop:
+            iconName = "tag.fill"
+            typeLabel = "Price drop"
+            tint = Color(red: 0.96, green: 0.36, blue: 0.22)
+        case .newProduct:
+            iconName = "sparkles"
+            typeLabel = "New drop"
+            tint = TBTheme.icyBlue
+        case .orderReceived:
+            iconName = "shippingbox.fill"
+            typeLabel = "New order"
+            tint = Color(red: 0.22, green: 0.62, blue: 0.36)
+        case .orderStatusUpdate:
+            iconName = "truck.box.fill"
+            typeLabel = "Order update"
+            tint = TBTheme.deepSky
+        case .exchangeUpdate:
+            iconName = "arrow.triangle.2.circlepath"
+            typeLabel = "Exchange"
+            tint = Color(red: 0.56, green: 0.39, blue: 0.88)
+        case .itemFavorited:
+            iconName = "heart.fill"
+            typeLabel = "Product love"
+            tint = Color(red: 0.94, green: 0.25, blue: 0.47)
+        case .system:
+            iconName = "exclamationmark.circle.fill"
+            typeLabel = "Action needed"
+            tint = Color(red: 0.96, green: 0.58, blue: 0.18)
+        }
     }
 }
 
