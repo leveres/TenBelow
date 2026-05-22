@@ -1145,13 +1145,28 @@ struct RolePickerView: View {
     }
 
     private func errorCard(message: String) -> some View {
-        Text(message)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.red)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.red)
+                .padding(.top, 1)
+
+            Text(message)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.leading)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+        }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .background(Color.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.red.opacity(0.16), lineWidth: 1)
+            )
     }
 }
 
