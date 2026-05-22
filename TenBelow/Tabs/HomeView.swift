@@ -628,17 +628,13 @@ struct HomeView: View {
             GeometryReader { geometry in
                 let pageInset = HomeMetrics.pageInset
                 let contentWidth = max(geometry.size.width - (pageInset * 2), 0)
-                let scrollBottomPadding = TopLevelHeaderMetrics.homeScrollBottomPadding(
-                    safeAreaBottom: geometry.safeAreaInsets.bottom
-                )
 
-                ScrollView(.vertical, showsIndicators: false) {
-                    homeScrollContent(contentWidth: contentWidth, pageInset: pageInset)
-                        .padding(.horizontal, pageInset)
-                        .padding(.top, TopLevelHeaderMetrics.homeTopInset)
-                        .padding(.bottom, scrollBottomPadding)
-                }
+                homeScrollContent(contentWidth: contentWidth, pageInset: pageInset)
+                    .padding(.horizontal, pageInset)
+                    .padding(.top, TopLevelHeaderMetrics.homeTopInset)
+                    .padding(.bottom, TopLevelHeaderMetrics.homeFloatingTabBarClearance)
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+                .clipped()
                 .background(TBTheme.cloudWhite)
             }
             .task {
