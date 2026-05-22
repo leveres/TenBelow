@@ -13,6 +13,15 @@ const sellerFilter = document.querySelector("#sellerFilter");
 const sellerQueueSummary = document.querySelector("#sellerQueueSummary");
 const sellerDirectoryList = document.querySelector("#sellerDirectoryList");
 const sellerDirectoryCount = document.querySelector("#sellerDirectoryCount");
+const accountKindFilter = document.querySelector("#accountKindFilter");
+const accountSearchInput = document.querySelector("#accountSearchInput");
+const accountPageSizeSelect = document.querySelector("#accountPageSizeSelect");
+const refreshAccountsButton = document.querySelector("#refreshAccountsButton");
+const accountTotalCount = document.querySelector("#accountTotalCount");
+const accountList = document.querySelector("#accountList");
+const accountPrevPage = document.querySelector("#accountPrevPage");
+const accountNextPage = document.querySelector("#accountNextPage");
+const accountPageInfo = document.querySelector("#accountPageInfo");
 const exchangeStatusFilter = document.querySelector("#exchangeStatusFilter");
 const exchangeQueueList = document.querySelector("#exchangeQueueList");
 const exchangeQueueEmpty = document.querySelector("#exchangeQueueEmpty");
@@ -71,6 +80,7 @@ let selectedExchangeRequestId = null;
 let incidentsPage = 1;
 let restoresPage = 1;
 let auditPage = 1;
+let accountPage = 1;
 let auditEntriesCache = [];
 let productQueueCache = [];
 let sellerDirectoryCache = [];
@@ -340,6 +350,176 @@ function renderSellerDirectory(sellers) {
       renderQueue(productQueueCache);
     });
     sellerDirectoryList.appendChild(card);
+  }
+}
+
+function accountKind() {
+  return accountKindFilter?.value === "buyers" ? "buyers" : "sellers";
+}
+
+function accountPageSize() {
+  return Math.max(5, Math.min(50, Number(accountPageSizeSelect?.value) || 12));
+}
+
+function accountQueryString() {
+  const params = new URLSearchParams();
+  params.set("kind", accountKind());
+  params.set("page", String(accountPage));
+  params.set("pageSize", String(accountPageSize()));
+  const q = accountSearchInput?.value?.trim() || "";
+  if (q) params.set("q", q);
+  return params.toString();
+}
+
+function activityTotal(activity = {}) {
+  return Object.entries(activity)
+    .filter(([, value]) => typeof value === "number")
+    .reduce((sum, [, value]) => sum + value, 0);
+}
+
+function renderAccounts(payload) {
+  if (!accountList || !accountTotalCount || !accountPageInfo || !accountPrevPage || !accountNextPage) return;
+
+  const accounts = Array.isArray(payload?.accounts) ? payload.accounts : [];
+  const total = Number(payload?.total) || 0;
+  const page = Number(payload?.page) || 1;
+  const pages = Math.max(1, Number(payload?.pages) || 1);
+  const kindLabel = accountKind() === "buyers" ? "buyer" : "seller";
+
+  accountList.replaceChildren();
+  accountTotalCount.textContent = String(total);
+  accountPageInfo.textContent = total ? `Page ${page} of ${pages} (${total} ${kindLabel} accounts)` : `No ${kindLabel} accounts`;
+  accountPrevPage.disabled = page <= 1;
+  accountNextPage.disabled = page >= pages || total === 0;
+
+  if (!accounts.length) {
+    const empty = document.createElement("p");
+    empty.className = "audit-empty";
+    empty.textContent = `No ${kindLabel} accounts match these filters.`;
+    accountList.appendChild(empty);
+    return;
+  }
+
+  for (const account of accounts) {
+    const card = document.createElement("article");
+    card.className = "account-card";
+
+    const header = document.createElement("div");
+    header.className = "account-card-header";
+    const titleWrap = document.createElement("div");
+    const title = document.createElement("h3");
+    title.className = "account-card-title";
+    title.textContent = account.displayName || account.id || "Account";
+    const meta = document.createElement("p");
+    meta.className = "account-card-meta";
+    const handle = account.handle ? ` · ${account.handle}` : "";
+    const email = account.email ? ` · ${account.email}` : "";
+    meta.textContent = `${account.kind || kindLabel} ID: ${account.id}${handle}${email}`;
+    titleWrap.append(title, meta);
+
+    const status = document.createElement("span");
+    status.className = account.activity?.canDelete ? "account-status is-inactive" : "account-status";
+    status.textContent = account.activity?.canDelete ? "Inactive" : "Has activity";
+    header.append(titleWrap, status);
+
+    const stats = document.createElement("div");
+    stats.className = "account-stat-grid";
+    const activity = account.activity || {};
+    const statEntries = account.kind === "buyer"
+      ? [
+          ["Orders", activity.orderCount || 0],
+          ["Exchanges", activity.exchangeCount || 0],
+          ["Requests", activity.customOrderCount || 0],
+          ["Reviews", activity.reviewCount || 0],
+        ]
+      : [
+          ["Products", activity.productCount || 0],
+          ["Orders", activity.orderCount || 0],
+          ["Exchanges", activity.exchangeCount || 0],
+          ["Requests", activity.customOrderCount || 0],
+          ["Reviews", activity.reviewCount || 0],
+        ];
+    statEntries.forEach(([label, value]) => {
+      const stat = document.createElement("span");
+      stat.className = "seller-stat-pill";
+      stat.textContent = `${label}: ${value}`;
+      stats.appendChild(stat);
+    });
+
+    const footer = document.createElement("div");
+    footer.className = "account-card-footer";
+    const note = document.createElement("p");
+    note.className = "account-card-meta";
+    note.textContent = account.activity?.canDelete
+      ? "No activity found. This account can be permanently deleted."
+      : `Cannot delete while linked to ${account.activity?.blockers?.join(", ") || `${activityTotal(activity)} activity records`}.`;
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "danger-button";
+    deleteButton.textContent = "Delete account";
+    deleteButton.disabled = account.activity?.canDelete !== true;
+    deleteButton.addEventListener("click", () => deleteAccount(account));
+    footer.append(note, deleteButton);
+
+    card.append(header, stats, footer);
+    accountList.appendChild(card);
+  }
+}
+
+async function loadAccounts() {
+  if (!isAdminAuthenticated) {
+    renderAccounts({ accounts: [], total: 0, page: 1, pages: 1 });
+    return;
+  }
+
+  try {
+    setFeedback("Loading accounts...");
+    const response = await fetch(`/admin/accounts?${accountQueryString()}`, {
+      headers: adminHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const payload = await response.json();
+    renderAccounts(payload);
+    setFeedback("Accounts ready");
+  } catch (error) {
+    renderAccounts({ accounts: [], total: 0, page: 1, pages: 1 });
+    setFeedback("Failed to load accounts");
+    console.error(error);
+  }
+}
+
+async function deleteAccount(account) {
+  const kind = account.kind === "buyer" ? "buyers" : "sellers";
+  const label = account.displayName || account.id;
+  const confirmed = window.confirm(`Permanently delete ${label}? This cannot be undone.`);
+  if (!confirmed) return;
+
+  try {
+    setFeedback("Deleting account...");
+    const response = await fetch(`/admin/accounts/${encodeURIComponent(kind)}/${encodeURIComponent(account.id)}`, {
+      method: "DELETE",
+      headers: adminHeaders(),
+    });
+    if (!response.ok) {
+      let message = await response.text();
+      try {
+        const parsed = JSON.parse(message);
+        message = parsed.blockers?.length
+          ? `${parsed.error} Blocked by: ${parsed.blockers.join(", ")}`
+          : parsed.error || message;
+      } catch {
+        // Use raw message.
+      }
+      throw new Error(message);
+    }
+    setFeedback("Account deleted");
+    await Promise.all([loadAccounts(), loadSellerDirectory(), loadQueue(false)]);
+  } catch (error) {
+    setFeedback(error.message || "Account delete failed");
+    console.error(error);
   }
 }
 
@@ -1421,6 +1601,7 @@ async function refreshAdminSessionState(options = {}) {
       await Promise.all([
         loadQueue(false),
         loadSellerDirectory(),
+        loadAccounts(),
         loadExchangeQueue(),
         loadAuditLog(),
         loadSecurityMetrics(),
@@ -1430,11 +1611,13 @@ async function refreshAdminSessionState(options = {}) {
     } else {
       incidentsPage = 1;
       restoresPage = 1;
+      accountPage = 1;
       selectedExchangeRequestId = null;
       productQueueCache = [];
       sellerDirectoryCache = [];
       renderQueue([]);
       renderSellerDirectory([]);
+      renderAccounts({ accounts: [], total: 0, page: 1, pages: 1 });
       renderExchangeQueue([]);
       renderExchangeDetail(null);
       renderAuditEntries([]);
@@ -1449,12 +1632,14 @@ async function refreshAdminSessionState(options = {}) {
     isAdminAuthenticated = false;
     incidentsPage = 1;
     restoresPage = 1;
+    accountPage = 1;
     selectedExchangeRequestId = null;
     productQueueCache = [];
     sellerDirectoryCache = [];
     syncAdminKeyVisibility();
     renderQueue([]);
     renderSellerDirectory([]);
+    renderAccounts({ accounts: [], total: 0, page: 1, pages: 1 });
     renderExchangeQueue([]);
     renderExchangeDetail(null);
     renderAuditEntries([]);
@@ -1500,12 +1685,14 @@ async function logoutAdminSession() {
     isAdminAuthenticated = false;
     incidentsPage = 1;
     restoresPage = 1;
+    accountPage = 1;
     selectedExchangeRequestId = null;
     productQueueCache = [];
     sellerDirectoryCache = [];
     syncAdminKeyVisibility();
     renderQueue([]);
     renderSellerDirectory([]);
+    renderAccounts({ accounts: [], total: 0, page: 1, pages: 1 });
     renderExchangeQueue([]);
     renderExchangeDetail(null);
     renderAuditEntries([]);
@@ -1582,6 +1769,39 @@ if (sellerFilter) {
   sellerFilter.addEventListener("change", () => {
     renderSellerDirectory(sellerDirectoryCache);
     renderQueue(productQueueCache);
+  });
+}
+if (refreshAccountsButton) {
+  refreshAccountsButton.addEventListener("click", loadAccounts);
+}
+if (accountKindFilter) {
+  accountKindFilter.addEventListener("change", () => {
+    accountPage = 1;
+    loadAccounts();
+  });
+}
+if (accountPageSizeSelect) {
+  accountPageSizeSelect.addEventListener("change", () => {
+    accountPage = 1;
+    loadAccounts();
+  });
+}
+if (accountSearchInput) {
+  accountSearchInput.addEventListener("input", debounce(() => {
+    accountPage = 1;
+    loadAccounts();
+  }, 300));
+}
+if (accountPrevPage) {
+  accountPrevPage.addEventListener("click", () => {
+    accountPage = Math.max(1, accountPage - 1);
+    loadAccounts();
+  });
+}
+if (accountNextPage) {
+  accountNextPage.addEventListener("click", () => {
+    accountPage += 1;
+    loadAccounts();
   });
 }
 if (refreshExchangeButton) {
@@ -1681,7 +1901,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-const ADMIN_PANEL_IDS = ["products", "exchanges", "audit", "incidents", "snapshots"];
+const ADMIN_PANEL_IDS = ["products", "accounts", "exchanges", "audit", "incidents", "snapshots"];
 const OPEN_PANEL_STORAGE_KEY = "tenbelow.admin.openPanel";
 
 function getAdminPanelElements() {

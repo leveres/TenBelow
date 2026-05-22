@@ -4546,6 +4546,173 @@ app.get("/admin/sellers", adminMutationLimiter, requireAdmin, async (req, res) =
   }
 });
 
+function adminAccountPageParams(req) {
+  const page = Math.max(1, Math.floor(asFiniteNumber(req.query.page, 1)));
+  const pageSize = Math.max(5, Math.min(50, Math.floor(asFiniteNumber(req.query.pageSize, 12))));
+  const q = String(req.query.q || "").trim().toLowerCase();
+  return { page, pageSize, q };
+}
+
+function sellerAccountActivity(sellerId, products, orders, exchangeRequests, customOrderRequests, productReviews) {
+  const normalizedSellerId = String(sellerId || "").trim();
+  const productCount = products.filter((product) => product.sellerId === normalizedSellerId).length;
+  const orderCount = orders.filter((order) =>
+    (order.shipments || []).some((shipment) => shipment.sellerId === normalizedSellerId)
+  ).length;
+  const exchangeCount = exchangeRequests.filter((request) =>
+    String(request.sellerUserId || "").replace(/^seller:/, "").trim() === normalizedSellerId
+  ).length;
+  const customOrderCount = customOrderRequests.filter((request) => request.sellerId === normalizedSellerId).length;
+  const reviewCount = productReviews.filter((review) => String(review.sellerId || "").trim() === normalizedSellerId).length;
+  const blockers = [];
+  if (productCount) blockers.push(`${productCount} product${productCount === 1 ? "" : "s"}`);
+  if (orderCount) blockers.push(`${orderCount} order${orderCount === 1 ? "" : "s"}`);
+  if (exchangeCount) blockers.push(`${exchangeCount} exchange${exchangeCount === 1 ? "" : "s"}`);
+  if (customOrderCount) blockers.push(`${customOrderCount} custom request${customOrderCount === 1 ? "" : "s"}`);
+  if (reviewCount) blockers.push(`${reviewCount} review${reviewCount === 1 ? "" : "s"}`);
+  return { productCount, orderCount, exchangeCount, customOrderCount, reviewCount, canDelete: blockers.length === 0, blockers };
+}
+
+function buyerAccountActivity(email, orders, exchangeRequests, customOrderRequests, productReviews) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const buyerUserId = exchangeBuyerUserId(normalizedEmail);
+  const orderCount = orders.filter((order) => String(order.buyerEmail || "").trim().toLowerCase() === normalizedEmail).length;
+  const exchangeCount = exchangeRequests.filter((request) =>
+    request.buyerUserId === buyerUserId || String(request.buyerEmail || "").trim().toLowerCase() === normalizedEmail
+  ).length;
+  const customOrderCount = customOrderRequests.filter((request) =>
+    String(request.buyerEmail || "").trim().toLowerCase() === normalizedEmail
+  ).length;
+  const reviewCount = productReviews.filter((review) =>
+    String(review.buyerEmail || "").trim().toLowerCase() === normalizedEmail
+  ).length;
+  const blockers = [];
+  if (orderCount) blockers.push(`${orderCount} order${orderCount === 1 ? "" : "s"}`);
+  if (exchangeCount) blockers.push(`${exchangeCount} exchange${exchangeCount === 1 ? "" : "s"}`);
+  if (customOrderCount) blockers.push(`${customOrderCount} custom request${customOrderCount === 1 ? "" : "s"}`);
+  if (reviewCount) blockers.push(`${reviewCount} review${reviewCount === 1 ? "" : "s"}`);
+  return { orderCount, exchangeCount, customOrderCount, reviewCount, canDelete: blockers.length === 0, blockers };
+}
+
+function paginateAdminAccounts(accounts, page, pageSize) {
+  const total = accounts.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize) || 1);
+  const safePage = Math.min(page, pages);
+  const start = (safePage - 1) * pageSize;
+  return { accounts: accounts.slice(start, start + pageSize), page: safePage, pageSize, total, pages };
+}
+
+app.get("/admin/accounts", adminMutationLimiter, requireAdmin, async (req, res) => {
+  try {
+    const kind = String(req.query.kind || "sellers").trim().toLowerCase();
+    const { page, pageSize, q } = adminAccountPageParams(req);
+    const catalog = await fetchCatalog();
+    const products = Array.isArray(catalog.products)
+      ? catalog.products.map((product) => normalizeCatalogProduct(product))
+      : [];
+    const orders = loadOrdersFile();
+    const exchangeRequests = loadExchangeRequestsFile();
+    const customOrderRequests = loadCustomOrderRequestsFile();
+    const productReviews = loadProductReviewsFile();
+
+    let accounts;
+    if (kind === "buyers") {
+      const buyers = loadBuyersFile();
+      accounts = Object.entries(buyers).map(([email, buyer]) => ({
+        kind: "buyer",
+        id: email,
+        email,
+        displayName: buyer.fullName || email,
+        createdAt: buyer.createdAt || null,
+        updatedAt: buyer.updatedAt || null,
+        activity: buyerAccountActivity(email, orders, exchangeRequests, customOrderRequests, productReviews),
+      }));
+    } else {
+      const sellers = await fetchSellers();
+      const profiles = buildSellerProfiles(sellers, products, orders);
+      accounts = profiles.map((profile) => ({
+        kind: "seller",
+        id: profile.id,
+        email: sellers[profile.id]?.email || "",
+        displayName: profile.displayName,
+        handle: profile.handle,
+        createdAt: profile.joinedAt || null,
+        updatedAt: sellers[profile.id]?.membership?.lastSyncedAt || null,
+        activity: sellerAccountActivity(profile.id, products, orders, exchangeRequests, customOrderRequests, productReviews),
+      }));
+    }
+
+    if (q) {
+      accounts = accounts.filter((account) =>
+        [account.id, account.displayName, account.email, account.handle].some((value) =>
+          String(value || "").toLowerCase().includes(q)
+        )
+      );
+    }
+
+    accounts.sort((lhs, rhs) => {
+      const lhsActivity = Object.values(lhs.activity || {}).filter((value) => typeof value === "number").reduce((sum, value) => sum + value, 0);
+      const rhsActivity = Object.values(rhs.activity || {}).filter((value) => typeof value === "number").reduce((sum, value) => sum + value, 0);
+      if (lhsActivity !== rhsActivity) return lhsActivity - rhsActivity;
+      return String(lhs.displayName || lhs.id).localeCompare(String(rhs.displayName || rhs.id));
+    });
+
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.json({ kind: kind === "buyers" ? "buyers" : "sellers", ...paginateAdminAccounts(accounts, page, pageSize) });
+  } catch (err) {
+    console.error("admin accounts fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/admin/accounts/:kind/:accountId", adminMutationLimiter, requireAdmin, async (req, res) => {
+  try {
+    const kind = String(req.params.kind || "").trim().toLowerCase();
+    const accountId = String(req.params.accountId || "").trim();
+    const orders = loadOrdersFile();
+    const exchangeRequests = loadExchangeRequestsFile();
+    const customOrderRequests = loadCustomOrderRequestsFile();
+    const productReviews = loadProductReviewsFile();
+
+    if (kind === "buyers") {
+      const email = accountId.toLowerCase();
+      const buyers = loadBuyersFile();
+      if (!buyers[email]) return res.status(404).json({ error: "Buyer account not found" });
+      const activity = buyerAccountActivity(email, orders, exchangeRequests, customOrderRequests, productReviews);
+      if (!activity.canDelete) {
+        return res.status(409).json({ error: "Buyer account has activity and cannot be deleted.", blockers: activity.blockers });
+      }
+      delete buyers[email];
+      saveBuyersFile(buyers);
+      auditLog(auditContext(req, { action: "admin_buyer_account_deleted", buyerEmail: email }));
+      return res.json({ deleted: true, kind: "buyer", id: email });
+    }
+
+    if (kind === "sellers") {
+      const sellerId = accountId;
+      const sellers = loadSellersFile();
+      if (!sellers[sellerId]) return res.status(404).json({ error: "Seller account not found" });
+      const catalog = await fetchCatalog();
+      const products = Array.isArray(catalog.products)
+        ? catalog.products.map((product) => normalizeCatalogProduct(product))
+        : [];
+      const activity = sellerAccountActivity(sellerId, products, orders, exchangeRequests, customOrderRequests, productReviews);
+      if (!activity.canDelete) {
+        return res.status(409).json({ error: "Seller account has activity and cannot be deleted.", blockers: activity.blockers });
+      }
+      delete sellers[sellerId];
+      saveSellersFile(sellers);
+      auditLog(auditContext(req, { action: "admin_seller_account_deleted", sellerId }));
+      return res.json({ deleted: true, kind: "seller", id: sellerId });
+    }
+
+    return res.status(400).json({ error: "kind must be sellers or buyers" });
+  } catch (err) {
+    console.error("admin account delete error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/admin/exchange-requests", adminMutationLimiter, requireAdmin, (req, res) => {
   try {
     const requestedStatus = String(req.query.status || "").trim().toLowerCase();

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TenBelow Admin Review</title>
-    <link rel="stylesheet" href="/admin/assets/admin-review.css?v=8" />
+    <link rel="stylesheet" href="/admin/assets/admin-review.css?v=9" />
   </head>
   <body>
     <main class="app-shell">
@@ -55,6 +55,7 @@
 
       <nav class="admin-section-nav" aria-label="Jump to section">
         <button type="button" class="admin-section-link is-active" data-panel-id="products">Products</button>
+        <button type="button" class="admin-section-link" data-panel-id="accounts">Accounts</button>
         <button type="button" class="admin-section-link" data-panel-id="exchanges">Exchanges</button>
         <button type="button" class="admin-section-link" data-panel-id="audit">Audit</button>
         <button type="button" class="admin-section-link" data-panel-id="incidents">Incidents</button>
@@ -72,16 +73,8 @@
           <span class="admin-panel-chevron" aria-hidden="true">▾</span>
         </button>
         <div id="admin-panel-products-body" class="admin-panel-body">
-          <p class="audit-subcopy">Approve, reject, or archive submitted listings from one compact queue. Seller accounts appear here even before they have products in review.</p>
+          <p class="audit-subcopy">Approve, reject, or archive submitted listings from one compact queue. Use the Accounts tab for paged seller and buyer account management.</p>
           <section class="queue-section">
-            <div class="seller-directory-header">
-              <div>
-                <span class="summary-label">Seller accounts</span>
-                <strong id="sellerDirectoryCount">0</strong>
-              </div>
-              <p class="seller-queue-summary">Tap a seller to filter their products below.</p>
-            </div>
-            <div id="sellerDirectoryList" class="seller-directory-list"></div>
             <div class="seller-queue-toolbar">
               <label class="field field-small">
                 <span>Seller</span>
@@ -96,6 +89,55 @@
               <p>Submitted products will appear here as soon as sellers send them for review.</p>
             </section>
             <section id="queueGrid" class="queue-grid"></section>
+          </section>
+        </div>
+      </section>
+
+      <section id="admin-panel-accounts" class="admin-panel" data-panel-id="accounts">
+        <button type="button" class="admin-panel-toggle" aria-expanded="false" aria-controls="admin-panel-accounts-body">
+          <span class="admin-panel-toggle-text">Account Management</span>
+          <span class="admin-panel-chevron" aria-hidden="true">▾</span>
+        </button>
+        <div id="admin-panel-accounts-body" class="admin-panel-body" hidden>
+          <p class="audit-subcopy">
+            Page through seller and buyer accounts. Delete is only available for inactive accounts with no products,
+            orders, exchanges, custom requests, or reviews.
+          </p>
+          <section class="account-section">
+            <div class="account-toolbar">
+              <label class="field field-small">
+                <span>Account type</span>
+                <select id="accountKindFilter">
+                  <option value="sellers">Sellers</option>
+                  <option value="buyers">Buyers</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Search accounts</span>
+                <input id="accountSearchInput" type="search" placeholder="Name, seller id, handle, or email" autocomplete="off" />
+              </label>
+              <label class="field field-small">
+                <span>Per page</span>
+                <select id="accountPageSizeSelect">
+                  <option value="8">8</option>
+                  <option value="12" selected>12</option>
+                  <option value="24">24</option>
+                </select>
+              </label>
+              <button id="refreshAccountsButton" class="secondary-button" type="button">Refresh accounts</button>
+            </div>
+            <section class="queue-summary queue-summary-tight">
+              <div class="summary-card">
+                <span class="summary-label">Accounts</span>
+                <strong id="accountTotalCount">0</strong>
+              </div>
+            </section>
+            <div id="accountList" class="account-list"></div>
+            <div class="ops-pagination" aria-label="Account pagination">
+              <button type="button" id="accountPrevPage" class="secondary-button">Previous</button>
+              <span id="accountPageInfo" class="page-info"></span>
+              <button type="button" id="accountNextPage" class="secondary-button">Next</button>
+            </div>
           </section>
         </div>
       </section>
@@ -387,6 +429,6 @@
       </article>
     </template>
 
-    <script type="module" src="/admin/assets/admin-review.js?v=7"></script>
+    <script type="module" src="/admin/assets/admin-review.js?v=8"></script>
   </body>
 </html>
