@@ -796,6 +796,7 @@ struct SellerProductsView: View {
     @State private var isRefreshingInventory = false
     @State private var submittingProductIDs = Set<String>()
     @State private var productIDsAwaitingServerConfirmation = Set<String>()
+    @State private var locallyDeletedProductIDs: Set<String>
 
     init(
         seller: SellerProfile = .sample,
@@ -805,9 +806,12 @@ struct SellerProductsView: View {
         self.seller = seller
         self.products = products
         self.startInAddMode = startInAddMode
+        let deletedIDs = SellerDeletedProductStorage.load(for: seller.id)
         _productDrafts = State(
             initialValue: SellerProductDraft.load(for: seller.id, fallbackProducts: products)
+                .filter { !deletedIDs.contains($0.id) }
         )
+        _locallyDeletedProductIDs = State(initialValue: deletedIDs)
     }
 
     var body: some View {
@@ -871,6 +875,7 @@ struct SellerProductsView: View {
                     initialDraft: .new(sellerId: seller.id)
                 ) { savedDraft, mediaSelection in
                     let submittedDraft = draftForMarketplaceSubmission(savedDraft)
+                    restoreLocallyDeletedProductIfNeeded(submittedDraft.id)
                     productDrafts.insert(submittedDraft, at: 0)
                     persistDrafts()
                     localProducts.saveDraft(submittedDraft)
@@ -888,6 +893,7 @@ struct SellerProductsView: View {
                     initialDraft: draft
                 ) { updatedDraft, mediaSelection in
                     let submittedDraft = draftForMarketplaceSubmission(updatedDraft)
+                    restoreLocallyDeletedProductIfNeeded(submittedDraft.id)
                     if let index = productDrafts.firstIndex(where: { $0.id == submittedDraft.id }) {
                         productDrafts[index] = submittedDraft
                     } else {
@@ -1230,8 +1236,9 @@ struct SellerProductsView: View {
     }
 
     private func mergeRemoteInventory(_ remote: [RemoteProduct]) {
-        let remoteById = Dictionary(uniqueKeysWithValues: remote.map { ($0.id, $0) })
-        var result = productDrafts
+        let visibleRemote = remote.filter { !locallyDeletedProductIDs.contains($0.id) }
+        let remoteById = Dictionary(uniqueKeysWithValues: visibleRemote.map { ($0.id, $0) })
+        var result = productDrafts.filter { !locallyDeletedProductIDs.contains($0.id) }
         for i in result.indices {
             if let r = remoteById[result[i].id] {
                 result[i].marketplaceStatus = SellerMarketplaceStatus.fromServerProduct(r)
@@ -1243,7 +1250,7 @@ struct SellerProductsView: View {
             }
         }
         let localIds = Set(result.map(\.id))
-        for r in remote where !localIds.contains(r.id) {
+        for r in visibleRemote where !localIds.contains(r.id) {
             result.append(SellerProductDraft.fromRemoteProduct(r))
             productIDsAwaitingServerConfirmation.remove(r.id)
         }
@@ -1259,6 +1266,7 @@ struct SellerProductsView: View {
     private func pendingDraftsMissingFromServer(remoteProductIDs: Set<String>) -> [SellerProductDraft] {
         productDrafts.filter { draft in
             draft.marketplaceStatus == .pendingReview
+                && !locallyDeletedProductIDs.contains(draft.id)
                 && !remoteProductIDs.contains(draft.id)
                 && !submittingProductIDs.contains(draft.id)
         }
@@ -1266,7 +1274,9 @@ struct SellerProductsView: View {
 
     @discardableResult
     private func applyApprovedCatalogProductsToDrafts() -> Bool {
-        let liveSellerProducts = catalog.products.filter { $0.sellerId == seller.id && $0.isActive && $0.isApproved }
+        let liveSellerProducts = catalog.products.filter {
+            $0.sellerId == seller.id && $0.isActive && $0.isApproved && !locallyDeletedProductIDs.contains($0.id)
+        }
         guard !liveSellerProducts.isEmpty else { return false }
 
         let liveById = Dictionary(uniqueKeysWithValues: liveSellerProducts.map { ($0.id, $0) })
@@ -1296,6 +1306,11 @@ struct SellerProductsView: View {
         SellerProductDraft.store(productDrafts, for: seller.id)
     }
 
+    private func restoreLocallyDeletedProductIfNeeded(_ productId: String) {
+        guard locallyDeletedProductIDs.remove(productId) != nil else { return }
+        SellerDeletedProductStorage.store(locallyDeletedProductIDs, for: seller.id)
+    }
+
     private func draftForMarketplaceSubmission(_ draft: SellerProductDraft) -> SellerProductDraft {
         var submittedDraft = draft
         submittedDraft.marketplaceStatus = .pendingReview
@@ -1314,6 +1329,10 @@ struct SellerProductsView: View {
     }
 
     private func deleteDraft(_ draft: SellerProductDraft, reason: SellerProductRemovalReason) {
+        locallyDeletedProductIDs.insert(draft.id)
+        SellerDeletedProductStorage.store(locallyDeletedProductIDs, for: seller.id)
+        submittingProductIDs.remove(draft.id)
+        productIDsAwaitingServerConfirmation.remove(draft.id)
         productDrafts.removeAll { $0.id == draft.id }
         persistDrafts()
         localProducts.removeDraft(productId: draft.id)
@@ -1356,6 +1375,8 @@ struct SellerProductsView: View {
         _ draft: SellerProductDraft,
         mediaSelection: SellerProductMediaSelection
     ) async {
+        guard !locallyDeletedProductIDs.contains(draft.id) else { return }
+
         await MainActor.run {
             markSubmissionStarted(for: draft.id)
             let submittedDraft = draftForMarketplaceSubmission(draft)
@@ -3453,6 +3474,23 @@ private struct SellerPolicySettingsDraft: Codable {
 private enum SellerProductDraftStorage {
     static func key(for sellerId: String) -> String {
         "sellerProductDraftsData.\(sellerId)"
+    }
+}
+
+private enum SellerDeletedProductStorage {
+    static func key(for sellerId: String) -> String {
+        "sellerDeletedProductIDs.\(sellerId)"
+    }
+
+    static func load(for sellerId: String) -> Set<String> {
+        guard let saved = UserDefaults.standard.array(forKey: key(for: sellerId)) as? [String] else {
+            return []
+        }
+        return Set(saved)
+    }
+
+    static func store(_ productIDs: Set<String>, for sellerId: String) {
+        UserDefaults.standard.set(Array(productIDs).sorted(), forKey: key(for: sellerId))
     }
 }
 
