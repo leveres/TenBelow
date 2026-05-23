@@ -22,6 +22,10 @@ struct AddProductView: View {
     @State private var isShowingVideoPreview = false
     @State private var isShowingProductionPreview = false
     @State private var mediaErrorMessage: String?
+    @State private var isLoadingPhotos = false
+    @State private var loadingPhotoPlaceholderCount = 0
+    @State private var isLoadingCreatorClip = false
+    @State private var isLoadingProductionPreview = false
 
     init(
         title: String = "Add Product",
@@ -232,6 +236,8 @@ struct AddProductView: View {
                     Text(mediaErrorMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 PhotosPicker(
@@ -241,22 +247,31 @@ struct AddProductView: View {
                     photoLibrary: .shared()
                 ) {
                     mediaPickerButtonLabel(
-                        title: draft.imageURLStrings.isEmpty ? "Add Photos" : "Add More Photos",
-                        icon: "photo.on.rectangle.angled"
+                        title: isLoadingPhotos
+                            ? "Adding Photos..."
+                            : (draft.imageURLStrings.isEmpty ? "Add Photos" : "Add More Photos"),
+                        icon: "photo.on.rectangle.angled",
+                        isProcessing: isLoadingPhotos
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(remainingPhotoSlots == 0)
+                .disabled(remainingPhotoSlots == 0 || isLoadingPhotos)
                 .opacity(remainingPhotoSlots == 0 ? 0.6 : 1)
 
-                if !draft.imageURLStrings.isEmpty {
+                if !draft.imageURLStrings.isEmpty || isLoadingPhotos {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(Array(draft.imageURLStrings.enumerated()), id: \.offset) { index, reference in
                                 productPhotoThumbnail(reference: reference, index: index)
                             }
+                            ForEach(0..<loadingPhotoPlaceholderCount, id: \.self) { _ in
+                                productPhotoLoadingThumbnail
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
+                    .frame(height: 114)
+                    .transition(.opacity)
                 }
 
                 PhotosPicker(
@@ -265,53 +280,27 @@ struct AddProductView: View {
                     photoLibrary: .shared()
                 ) {
                     mediaPickerButtonLabel(
-                        title: selectedVideoURL == nil ? "Add Creator Clip" : "Replace Creator Clip",
+                        title: isLoadingCreatorClip
+                            ? "Loading Creator Clip..."
+                            : (selectedVideoURL == nil ? "Add Creator Clip" : "Replace Creator Clip"),
                         icon: "video.badge.plus",
-                        isAttached: selectedVideoURL != nil
+                        isAttached: selectedVideoURL != nil,
+                        isProcessing: isLoadingCreatorClip
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(isLoadingCreatorClip)
 
-                if let selectedVideoURL {
-                    HStack(spacing: 12) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "video.fill")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(TBTheme.accent)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Creator clip ready")
-                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(TBTheme.deepSky)
-                                Text(selectedVideoURL.lastPathComponent)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-
-                        Spacer()
-
-                        Button("Preview") {
-                            isShowingVideoPreview = true
-                        }
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(TBTheme.accent)
-                        .buttonStyle(.plain)
-
-                        Button("Remove") {
-                            clearSelectedVideo()
-                        }
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.red)
-                        .buttonStyle(.plain)
-                    }
-                    .padding(12)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 1)
+                if isLoadingCreatorClip || selectedVideoURL != nil {
+                    mediaAttachmentRow(
+                        title: isLoadingCreatorClip ? "Preparing creator clip" : "Creator clip ready",
+                        fileName: selectedVideoURL?.lastPathComponent ?? "Importing video...",
+                        icon: "video.fill",
+                        isProcessing: isLoadingCreatorClip,
+                        previewAction: { isShowingVideoPreview = true },
+                        removeAction: clearSelectedVideo
                     )
+                    .transition(.opacity)
                 }
 
                 Divider()
@@ -334,55 +323,35 @@ struct AddProductView: View {
                     photoLibrary: .shared()
                 ) {
                     mediaPickerButtonLabel(
-                        title: selectedProductionPreviewURL == nil ? "Add Maker Video" : "Replace Maker Video",
+                        title: isLoadingProductionPreview
+                            ? "Loading Maker Video..."
+                            : (selectedProductionPreviewURL == nil ? "Add Maker Video" : "Replace Maker Video"),
                         icon: "sparkles.tv",
-                        isAttached: selectedProductionPreviewURL != nil
+                        isAttached: selectedProductionPreviewURL != nil,
+                        isProcessing: isLoadingProductionPreview
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(isLoadingProductionPreview)
 
-                if let selectedProductionPreviewURL {
-                    HStack(spacing: 12) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "sparkles.tv")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(TBTheme.accent)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Maker video ready")
-                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(TBTheme.deepSky)
-                                Text(selectedProductionPreviewURL.lastPathComponent)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-
-                        Spacer()
-
-                        Button("Preview") {
-                            isShowingProductionPreview = true
-                        }
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(TBTheme.accent)
-                        .buttonStyle(.plain)
-
-                        Button("Remove") {
-                            clearSelectedProductionPreview()
-                        }
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.red)
-                        .buttonStyle(.plain)
-                    }
-                    .padding(12)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 1)
+                if isLoadingProductionPreview || selectedProductionPreviewURL != nil {
+                    mediaAttachmentRow(
+                        title: isLoadingProductionPreview ? "Preparing maker video" : "Maker video ready",
+                        fileName: selectedProductionPreviewURL?.lastPathComponent ?? "Importing video...",
+                        icon: "sparkles.tv",
+                        isProcessing: isLoadingProductionPreview,
+                        previewAction: { isShowingProductionPreview = true },
+                        removeAction: clearSelectedProductionPreview
                     )
+                    .transition(.opacity)
                 }
             }
+            .animation(.spring(response: 0.32, dampingFraction: 0.88), value: draft.imageURLStrings)
+            .animation(.spring(response: 0.32, dampingFraction: 0.88), value: selectedVideoURL)
+            .animation(.spring(response: 0.32, dampingFraction: 0.88), value: selectedProductionPreviewURL)
+            .animation(.easeInOut(duration: 0.18), value: isLoadingPhotos)
+            .animation(.easeInOut(duration: 0.18), value: isLoadingCreatorClip)
+            .animation(.easeInOut(duration: 0.18), value: isLoadingProductionPreview)
         }
     }
 
@@ -474,15 +443,26 @@ struct AddProductView: View {
         )
     }
 
-    private func mediaPickerButtonLabel(title: String, icon: String, isAttached: Bool = false) -> some View {
+    private func mediaPickerButtonLabel(
+        title: String,
+        icon: String,
+        isAttached: Bool = false,
+        isProcessing: Bool = false
+    ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 15, weight: .semibold))
             Text(title)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
             Spacer()
-            Image(systemName: isAttached ? "checkmark.circle.fill" : "plus")
-                .font(.system(size: 12, weight: .bold))
+            if isProcessing {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(TBTheme.deepSky)
+            } else {
+                Image(systemName: isAttached ? "checkmark.circle.fill" : "plus")
+                    .font(.system(size: 12, weight: .bold))
+            }
         }
         .foregroundStyle(TBTheme.deepSky)
         .padding(.horizontal, 14)
@@ -526,8 +506,86 @@ struct AddProductView: View {
         }
     }
 
+    private var productPhotoLoadingThumbnail: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(TBTheme.skyLight.opacity(0.26))
+            .overlay {
+                VStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(TBTheme.deepSky)
+                    Text("Adding")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.8))
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.white.opacity(0.68), lineWidth: 1)
+            )
+            .frame(width: 108, height: 108)
+            .shadow(color: TBTheme.deepSky.opacity(0.06), radius: 8, y: 4)
+    }
+
+    private func mediaAttachmentRow(
+        title: String,
+        fileName: String,
+        icon: String,
+        isProcessing: Bool,
+        previewAction: @escaping () -> Void,
+        removeAction: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(TBTheme.accent)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky)
+                    Text(fileName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if isProcessing {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(TBTheme.accent)
+            } else {
+                Button("Preview") {
+                    previewAction()
+                }
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(TBTheme.accent)
+                .buttonStyle(.plain)
+
+                Button("Remove") {
+                    removeAction()
+                }
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.red)
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(minHeight: 44)
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 1)
+        )
+    }
+
     private func loadSelectedImages(from items: [PhotosPickerItem]) async {
-        guard remainingPhotoSlots > 0 else {
+        let availableSlots = remainingPhotoSlots
+        guard availableSlots > 0 else {
             await MainActor.run {
                 mediaErrorMessage = "You can add up to 6 photos."
                 selectedImageItems = []
@@ -535,9 +593,15 @@ struct AddProductView: View {
             return
         }
 
+        await MainActor.run {
+            isLoadingPhotos = true
+            loadingPhotoPlaceholderCount = min(items.count, availableSlots)
+            mediaErrorMessage = nil
+        }
+
         var loadedReferences: [String] = []
 
-        for item in items.prefix(remainingPhotoSlots) {
+        for item in items.prefix(availableSlots) {
             guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
             let fileExtension = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
             let outputURL = FileManager.default.temporaryDirectory
@@ -554,9 +618,11 @@ struct AddProductView: View {
         await MainActor.run {
             draft.imageURLStrings.append(contentsOf: loadedReferences)
             draft.imageURLStrings = Array(draft.imageURLStrings.prefix(6))
-            mediaErrorMessage = items.count > remainingPhotoSlots
+            mediaErrorMessage = items.count > availableSlots
                 ? "You can add up to 6 photos."
                 : nil
+            isLoadingPhotos = false
+            loadingPhotoPlaceholderCount = 0
             selectedImageItems = []
         }
     }
@@ -570,9 +636,15 @@ struct AddProductView: View {
             return
         }
 
+        await MainActor.run {
+            isLoadingCreatorClip = true
+            mediaErrorMessage = nil
+        }
+
         do {
             guard let data = try await item.loadTransferable(type: Data.self) else {
                 await MainActor.run {
+                    isLoadingCreatorClip = false
                     mediaErrorMessage = "We couldn't load that video clip."
                 }
                 return
@@ -589,9 +661,11 @@ struct AddProductView: View {
                 mediaErrorMessage = nil
                 draft.demoVideoURLString = outputURL.absoluteString
                 selectedVideoURL = outputURL
+                isLoadingCreatorClip = false
             }
         } catch {
             await MainActor.run {
+                isLoadingCreatorClip = false
                 mediaErrorMessage = "We couldn't load that video clip."
             }
         }
@@ -606,9 +680,15 @@ struct AddProductView: View {
             return
         }
 
+        await MainActor.run {
+            isLoadingProductionPreview = true
+            mediaErrorMessage = nil
+        }
+
         do {
             guard let data = try await item.loadTransferable(type: Data.self) else {
                 await MainActor.run {
+                    isLoadingProductionPreview = false
                     mediaErrorMessage = "We couldn't load that production preview clip."
                 }
                 return
@@ -625,9 +705,11 @@ struct AddProductView: View {
                 mediaErrorMessage = nil
                 draft.productionPreviewURLString = outputURL.absoluteString
                 selectedProductionPreviewURL = outputURL
+                isLoadingProductionPreview = false
             }
         } catch {
             await MainActor.run {
+                isLoadingProductionPreview = false
                 mediaErrorMessage = "We couldn't load that production preview clip."
             }
         }
