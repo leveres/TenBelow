@@ -3,17 +3,21 @@
 //
 
 import Foundation
+#if os(iOS)
+import UIKit
+import UserNotifications
+#endif
 
 enum PushDeviceRegistration {
-    private static let lastUploadedKey = "pushRegistration.lastUploadedToken"
+    private static let lastUploadedKey = "pushRegistration.lastUploadedIdentity"
 
     /// Call after APNs gives a token, and when account context changes (role / seller id / buyer email).
     static func uploadTokenIfNeeded(_ deviceTokenHex: String) async {
         #if os(iOS)
         guard !deviceTokenHex.isEmpty else { return }
         guard AppConstants.isBackendConfigured else { return }
+        guard let userKey = currentUserKeyForPush() else { return }
 
-        let userKey = currentUserKeyForPush()
         let payload = RegisterPushDeviceRequest(
             deviceToken: deviceTokenHex,
             userKey: userKey,
@@ -24,6 +28,8 @@ enum PushDeviceRegistration {
         if UserDefaults.standard.string(forKey: lastUploadedKey) == "\(userKey)|\(deviceTokenHex)" {
             return
         }
+
+        await MarketplaceAuthSession.syncAfterIdentityChange()
 
         do {
             try await postRegistration(payload)
@@ -41,20 +47,34 @@ enum PushDeviceRegistration {
 
     /// Re-uploads the last known APNs token after role / email / seller id changes.
     static func syncAfterIdentityChange() async {
+        #if os(iOS)
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            await MainActor.run {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        case .denied, .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+        #endif
+
         guard let hex = UserDefaults.standard.string(forKey: "pushRegistration.deviceTokenHex"),
               !hex.isEmpty else { return }
         invalidateCachedRegistration()
         await uploadTokenIfNeeded(hex)
     }
 
-    private static func currentUserKeyForPush() -> String {
+    private static func currentUserKeyForPush() -> String? {
         let defaults = UserDefaults.standard
         let role = defaults.string(forKey: "userRole") ?? ""
 
         if role == "seller" {
             let id = defaults.string(forKey: "sellerSellerId")?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !id.isEmpty {
+            if defaults.bool(forKey: "sellerAccountCreated"), !id.isEmpty {
                 return "seller:\(id)"
             }
         }
@@ -68,7 +88,7 @@ enum PushDeviceRegistration {
             }
         }
 
-        return GuestInstallIdentity.userKey
+        return nil
     }
 
     private static func postRegistration(_ body: RegisterPushDeviceRequest) async throws {
@@ -80,7 +100,7 @@ enum PushDeviceRegistration {
         MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await URLSession.tenBelow.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }

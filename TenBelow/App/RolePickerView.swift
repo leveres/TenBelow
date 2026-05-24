@@ -560,6 +560,11 @@ struct RolePickerView: View {
         isCreatingBuyerAccount = false
 
         transitionToOnboarding(as: "buyer")
+
+        Task {
+            await MarketplaceAuthSession.syncAfterIdentityChange()
+            await PushDeviceRegistration.syncAfterIdentityChange()
+        }
     }
 
     private func createSellerAccount() async {

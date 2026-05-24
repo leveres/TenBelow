@@ -40,6 +40,12 @@ Optional but recommended:
 
 - `RESEND_API_KEY=re_...`
 - `EMAIL_FROM=TenBelow <orders@yourdomain.com>`
+- Apple Push Notifications for iPhone lock-screen/banner alerts:
+  - `APNS_KEY_ID=...`
+  - `APNS_TEAM_ID=...`
+  - `APNS_BUNDLE_ID=com.innovativecodeworks.com.TenBelow`
+  - `APNS_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----`
+  - `APNS_ENV=sandbox` for development device testing, then `APNS_ENV=production` for production pushes
 - SMTP fallback if you do not use Resend:
   - `SMTP_HOST=smtp.yourmailhost.com`
   - `SMTP_PORT=587`

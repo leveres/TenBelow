@@ -3,13 +3,16 @@ import fs from "fs";
 import jwt from "jsonwebtoken";
 
 const BUNDLE_ID = process.env.APNS_BUNDLE_ID || "com.innovativecodeworks.com.TenBelow";
+const APNS_ENV = String(process.env.APNS_ENV || "").trim().toLowerCase();
 
 export function isApnsConfigured() {
+  const hasInlineKey = Boolean(String(process.env.APNS_PRIVATE_KEY || "").trim());
+  const hasKeyPath = Boolean(process.env.APNS_KEY_PATH && fs.existsSync(process.env.APNS_KEY_PATH));
   return Boolean(
-    process.env.APNS_KEY_PATH &&
+    (hasInlineKey || hasKeyPath) &&
       process.env.APNS_KEY_ID &&
       process.env.APNS_TEAM_ID &&
-      fs.existsSync(process.env.APNS_KEY_PATH)
+      BUNDLE_ID
   );
 }
 
@@ -21,7 +24,10 @@ function apnsBearerToken() {
     return cachedJwt.token;
   }
 
-  const key = fs.readFileSync(process.env.APNS_KEY_PATH, "utf8");
+  const inlineKey = String(process.env.APNS_PRIVATE_KEY || "").trim();
+  const key = inlineKey
+    ? inlineKey.replace(/\\n/g, "\n")
+    : fs.readFileSync(process.env.APNS_KEY_PATH, "utf8");
   const token = jwt.sign(
     { iss: process.env.APNS_TEAM_ID, iat: now },
     key,
@@ -43,8 +49,11 @@ export function sendApnsAlert(deviceTokenHex, { title, body, sound = "default" }
     }
 
     const tokenHex = String(deviceTokenHex).toLowerCase();
-    const host =
-      process.env.APNS_USE_PRODUCTION === "1" ? "api.push.apple.com" : "api.sandbox.push.apple.com";
+    const useProduction =
+      process.env.APNS_USE_PRODUCTION === "1" ||
+      APNS_ENV === "production" ||
+      APNS_ENV === "prod";
+    const host = useProduction ? "api.push.apple.com" : "api.sandbox.push.apple.com";
     const client = http2.connect(`https://${host}`);
 
     client.on("error", (err) => {

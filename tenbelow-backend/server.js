@@ -13,7 +13,7 @@ import {
   isAppStoreVerificationConfigured,
   verifySubscriptionWithAppStore,
 } from "./appStoreMembershipVerification.js";
-import { registerPushDevice } from "./pushDevicesStore.js";
+import { registerPushDevice, unregisterPushDevice } from "./pushDevicesStore.js";
 import { notifyOrderStatusChanged, notifyPaymentSucceeded } from "./pushOrderNotifications.js";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
@@ -2908,15 +2908,58 @@ app.get("/config", publicReadLimiter, async (req, res) => {
   }
 });
 
-app.post("/register-push-device", requireAppClient, (req, res) => {
+function pushUserKeyForAuth(auth = {}) {
+  if (auth.role === "seller" && auth.sellerId) {
+    return `seller:${String(auth.sellerId).trim()}`;
+  }
+  if (auth.role === "buyer" && auth.buyerEmail) {
+    return `buyer:${String(auth.buyerEmail).trim().toLowerCase()}`;
+  }
+  return null;
+}
+
+app.post("/register-push-device", requireAppClient, requireAuthenticatedUser, (req, res) => {
   try {
-    const { deviceToken, userKey } = req.body || {};
+    const { deviceToken } = req.body || {};
     if (!deviceToken) return res.status(400).json({ error: "deviceToken required" });
+    const userKey = pushUserKeyForAuth(req.auth);
+    if (!userKey) return res.status(401).json({ error: "Authenticated buyer or seller required" });
     registerPushDevice(userKey, deviceToken);
-    res.json({ ok: true });
+    res.json({ ok: true, userKey });
   } catch (e) {
     console.warn("register-push-device:", e.message);
     res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete("/register-push-device", requireAppClient, requireAuthenticatedUser, (req, res) => {
+  try {
+    const { deviceToken } = req.body || {};
+    if (!deviceToken) return res.status(400).json({ error: "deviceToken required" });
+    const userKey = pushUserKeyForAuth(req.auth);
+    if (!userKey) return res.status(401).json({ error: "Authenticated buyer or seller required" });
+    const removed = unregisterPushDevice(userKey, deviceToken);
+    res.json({ ok: true, removed });
+  } catch (e) {
+    console.warn("unregister-push-device:", e.message);
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/push/test", requireAppClient, requireAuthenticatedUser, async (req, res) => {
+  try {
+    const title = "TenBelow test alert";
+    const body = "Your iPhone push notifications are connected.";
+    const result = await notifyOrderStatusChanged({
+      buyerEmail: req.auth.role === "buyer" ? req.auth.buyerEmail : undefined,
+      sellerId: req.auth.role === "seller" ? req.auth.sellerId : undefined,
+      title,
+      body,
+    });
+    res.json({ ok: true, result });
+  } catch (e) {
+    console.warn("push-test:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -3153,7 +3196,7 @@ app.post("/exchange-requests/eligibility-check", requireAppClient, requireAuthen
   }
 });
 
-app.post("/exchange-requests", requireAppClient, requireAuthenticatedBuyer, (req, res) => {
+app.post("/exchange-requests", requireAppClient, requireAuthenticatedBuyer, async (req, res) => {
   try {
     const {
       orderId,
@@ -3256,6 +3299,16 @@ app.post("/exchange-requests", requireAppClient, requireAuthenticatedBuyer, (req
         reasonCode: nextRequest.reasonCode,
       })
     );
+
+    try {
+      await notifyOrderStatusChanged({
+        sellerId: resolved.shipment.sellerId,
+        title: "Exchange request submitted",
+        body: `${resolved.item.productName || "An item"} has a new exchange request to review.`,
+      });
+    } catch (pushErr) {
+      console.warn("Exchange request push notification error:", pushErr?.message || pushErr);
+    }
 
     res.status(201).json({
       exchangeRequest: nextRequest,
@@ -4208,6 +4261,16 @@ ${imageList ? `<p><strong>Reference images</strong></p><ul>${imageList}</ul>` : 
       console.warn("custom order request stored but transactional email is not configured");
     }
 
+    try {
+      await notifyOrderStatusChanged({
+        sellerId,
+        title: "New custom order request",
+        body: `${buyerName || "A buyer"} sent a custom order request for ${profile.displayName}.`,
+      });
+    } catch (pushErr) {
+      console.warn("Custom order push notification error:", pushErr?.message || pushErr);
+    }
+
     auditLog(
       auditContext(req, {
         action: "custom_order_request_created",
@@ -4253,7 +4316,7 @@ app.patch(
   requireAuthenticatedSeller,
   sellerWriteLimiter,
   express.json({ limit: "32kb" }),
-  (req, res) => {
+  async (req, res) => {
     try {
       const requestId = String(req.params.requestId || "").trim();
       if (!requestId) return res.status(400).json({ error: "Request id is required" });
@@ -4293,6 +4356,20 @@ app.patch(
           sellerId: next.sellerId,
         })
       );
+
+      if (next.buyerEmail && ["accepted", "declined"].includes(status)) {
+        try {
+          await notifyOrderStatusChanged({
+            buyerEmail: next.buyerEmail,
+            title: status === "accepted" ? "Custom order accepted" : "Custom order update",
+            body: status === "accepted"
+              ? "Your custom order request was accepted. Check TenBelow for the next steps."
+              : "Your custom order request was declined. Open TenBelow for details.",
+          });
+        } catch (pushErr) {
+          console.warn("Custom order status push notification error:", pushErr?.message || pushErr);
+        }
+      }
 
       res.json({ request: next });
     } catch (err) {
@@ -4893,6 +4970,18 @@ app.post("/admin/products/:productId/review", adminMutationLimiter, requireAdmin
         decision,
       })
     );
+
+    try {
+      await notifyOrderStatusChanged({
+        sellerId: reviewedProduct.sellerId,
+        title: decision === "approve" ? "Product approved" : "Product needs updates",
+        body: decision === "approve"
+          ? `${reviewedProduct.name || "Your listing"} is now live on TenBelow.`
+          : `${reviewedProduct.name || "Your listing"} was not approved. Check the admin notes and update it when ready.`,
+      });
+    } catch (pushErr) {
+      console.warn("Product review push notification error:", pushErr?.message || pushErr);
+    }
 
     res.json({ product: reviewedProduct });
   } catch (err) {

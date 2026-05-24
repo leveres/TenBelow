@@ -3,13 +3,19 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UserNotifications
+#endif
 
 struct NotificationSettingsView: View {
     @AppStorage("userRole") private var userRole = "buyer"
+    @State private var externalAlertStatus = "Not checked yet"
+    @State private var isEnablingExternalAlerts = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                externalAlertsSection
                 notificationSettingsSection
                 deliveryBehaviorSection
             }
@@ -18,6 +24,71 @@ struct NotificationSettingsView: View {
             .padding(.bottom, 24)
         }
         .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .task {
+            await refreshExternalAlertStatus()
+        }
+    }
+
+    private var externalAlertsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("iPhone alerts")
+                .font(.tbHeadline)
+                .foregroundStyle(TBTheme.icyBlue)
+
+            Text("Allow TenBelow to show lock-screen, banner, sound, and Notification Center alerts for important buyer and seller activity.")
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                Task { await enableExternalAlerts() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "bell.badge.fill")
+                    Text(isEnablingExternalAlerts ? "Enabling iPhone alerts..." : "Enable iPhone alerts")
+                    Spacer()
+                    if isEnablingExternalAlerts {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(TBTheme.deepSky)
+                    }
+                }
+                .font(.tbBodyStrong)
+                .foregroundStyle(TBTheme.deepSky)
+                .padding(14)
+                .background(TBTheme.skyLight.opacity(0.55), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isEnablingExternalAlerts)
+
+            Button {
+                Task { await sendTestAlert() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "paperplane.fill")
+                    Text("Send test alert")
+                    Spacer()
+                }
+                .font(.tbCaption)
+                .foregroundStyle(TBTheme.icyBlue)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isEnablingExternalAlerts)
+
+            Text(externalAlertStatus)
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
+        )
     }
 
     private var notificationSettingsSection: some View {
@@ -172,6 +243,94 @@ struct NotificationSettingsView: View {
     private func setAllTypesEnabled(_ enabled: Bool) {
         for type in roleNotificationTypes {
             UserDefaults.standard.set(enabled, forKey: NotificationPreferences.appStorageKey(for: type))
+        }
+    }
+
+    @MainActor
+    private func setExternalAlertStatus(_ message: String) {
+        externalAlertStatus = message
+    }
+
+    private func refreshExternalAlertStatus() async {
+        #if os(iOS)
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let message: String
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            message = "iPhone alerts are enabled. Make sure Settings → Notifications → TenBelow has Banners, Sounds, and Lock Screen turned on."
+        case .denied:
+            message = "iPhone alerts are blocked. Open Settings → Notifications → TenBelow and turn on Allow Notifications."
+        case .notDetermined:
+            message = "Tap Enable iPhone alerts to let TenBelow ask for notification permission."
+        @unknown default:
+            message = "Notification permission status is unknown."
+        }
+        await setExternalAlertStatus(message)
+        #else
+        await setExternalAlertStatus("iPhone alerts are available on iOS devices.")
+        #endif
+    }
+
+    private func enableExternalAlerts() async {
+        await MainActor.run {
+            isEnablingExternalAlerts = true
+            externalAlertStatus = "Requesting iPhone notification permission..."
+        }
+
+        #if os(iOS)
+        await AppDelegate.ensureNotificationsAuthorizedIfNeeded()
+        await PushDeviceRegistration.syncAfterIdentityChange()
+        await refreshExternalAlertStatus()
+        #else
+        await setExternalAlertStatus("iPhone alerts are available on iOS devices.")
+        #endif
+
+        await MainActor.run {
+            isEnablingExternalAlerts = false
+        }
+    }
+
+    private func sendTestAlert() async {
+        await MainActor.run {
+            isEnablingExternalAlerts = true
+            externalAlertStatus = "Sending a test alert to this iPhone..."
+        }
+
+        #if os(iOS)
+        await AppDelegate.ensureNotificationsAuthorizedIfNeeded()
+        await PushDeviceRegistration.syncAfterIdentityChange()
+
+        do {
+            guard let url = AppConstants.backendBaseURL?.appendingPathComponent("push/test") else {
+                await setExternalAlertStatus("Backend URL is not configured, so TenBelow cannot send a test alert yet.")
+                await MainActor.run { isEnablingExternalAlerts = false }
+                return
+            }
+
+            await MarketplaceAuthSession.syncAfterIdentityChange()
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            AppConstants.applyAppClientAuth(to: &request)
+            MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+
+            let (_, response) = try await URLSession.tenBelow.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                await setExternalAlertStatus("TenBelow could not send the test alert yet. Make sure you are signed in and the backend APNs variables are set.")
+                await MainActor.run { isEnablingExternalAlerts = false }
+                return
+            }
+
+            await setExternalAlertStatus("Test alert sent. If your phone is unlocked, it may appear as a banner; if locked, check the Lock Screen.")
+        } catch {
+            await setExternalAlertStatus("Test alert failed: \(error.localizedDescription)")
+        }
+        #else
+        await setExternalAlertStatus("Test alerts are available on iPhone.")
+        #endif
+
+        await MainActor.run {
+            isEnablingExternalAlerts = false
         }
     }
 }
