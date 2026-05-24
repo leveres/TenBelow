@@ -246,11 +246,6 @@ struct NotificationSettingsView: View {
         }
     }
 
-    @MainActor
-    private func setExternalAlertStatus(_ message: String) {
-        externalAlertStatus = message
-    }
-
     private func refreshExternalAlertStatus() async {
         #if os(iOS)
         let settings = await UNUserNotificationCenter.current().notificationSettings()
@@ -265,9 +260,13 @@ struct NotificationSettingsView: View {
         @unknown default:
             message = "Notification permission status is unknown."
         }
-        await setExternalAlertStatus(message)
+        await MainActor.run {
+            externalAlertStatus = message
+        }
         #else
-        await setExternalAlertStatus("iPhone alerts are available on iOS devices.")
+        await MainActor.run {
+            externalAlertStatus = "iPhone alerts are available on iOS devices."
+        }
         #endif
     }
 
@@ -282,7 +281,9 @@ struct NotificationSettingsView: View {
         await PushDeviceRegistration.syncAfterIdentityChange()
         await refreshExternalAlertStatus()
         #else
-        await setExternalAlertStatus("iPhone alerts are available on iOS devices.")
+        await MainActor.run {
+            externalAlertStatus = "iPhone alerts are available on iOS devices."
+        }
         #endif
 
         await MainActor.run {
@@ -302,8 +303,10 @@ struct NotificationSettingsView: View {
 
         do {
             guard let url = AppConstants.backendBaseURL?.appendingPathComponent("push/test") else {
-                await setExternalAlertStatus("Backend URL is not configured, so TenBelow cannot send a test alert yet.")
-                await MainActor.run { isEnablingExternalAlerts = false }
+                await MainActor.run {
+                    externalAlertStatus = "Backend URL is not configured, so TenBelow cannot send a test alert yet."
+                    isEnablingExternalAlerts = false
+                }
                 return
             }
 
@@ -316,17 +319,25 @@ struct NotificationSettingsView: View {
 
             let (_, response) = try await URLSession.tenBelow.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                await setExternalAlertStatus("TenBelow could not send the test alert yet. Make sure you are signed in and the backend APNs variables are set.")
-                await MainActor.run { isEnablingExternalAlerts = false }
+                await MainActor.run {
+                    externalAlertStatus = "TenBelow could not send the test alert yet. Make sure you are signed in and the backend APNs variables are set."
+                    isEnablingExternalAlerts = false
+                }
                 return
             }
 
-            await setExternalAlertStatus("Test alert sent. If your phone is unlocked, it may appear as a banner; if locked, check the Lock Screen.")
+            await MainActor.run {
+                externalAlertStatus = "Test alert sent. If your phone is unlocked, it may appear as a banner; if locked, check the Lock Screen."
+            }
         } catch {
-            await setExternalAlertStatus("Test alert failed: \(error.localizedDescription)")
+            await MainActor.run {
+                externalAlertStatus = "Test alert failed: \(error.localizedDescription)"
+            }
         }
         #else
-        await setExternalAlertStatus("Test alerts are available on iPhone.")
+        await MainActor.run {
+            externalAlertStatus = "Test alerts are available on iPhone."
+        }
         #endif
 
         await MainActor.run {
