@@ -3,8 +3,7 @@ import SwiftUI
 import UIKit
 #endif
 
-/// Lets a guest buyer finish account creation without returning to role selection (`RolePickerView`).
-struct BuyerAccountSetupView: View {
+struct BuyerSignInView: View {
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage("buyerFullName") private var buyerFullName = ""
@@ -12,37 +11,27 @@ struct BuyerAccountSetupView: View {
     @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
     @AppStorage("buyerCheckoutPreference") private var buyerCheckoutPreference = "guest"
 
-    @State private var nameInput = ""
     @State private var emailInput = ""
     @State private var passwordInput = ""
     @State private var errorMessage: String?
-    @State private var isCreatingAccount = false
+    @State private var isSigningIn = false
 
     var body: some View {
         ScrollView {
             GlassCard {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Create your buyer account")
+                    Text("Sign in to your buyer account")
                         .font(.tbSectionTitle)
                         .foregroundStyle(TBTheme.deepSky)
 
-                    Text("Save your name and email so checkout and orders stay with you.")
+                    Text("Use the email and password from when you created your TenBelow buyer account.")
                         .font(.tbBody)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    labeledField(title: "Full name") {
-                        TextField("Your name", text: $nameInput)
-                            .textContentType(.name)
-                            .textInputAutocapitalization(.words)
-                            .autocorrectionDisabled(false)
-                            .padding(12)
-                            .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-
                     labeledField(title: "Email") {
                         TextField("you@example.com", text: $emailInput)
-                            .textContentType(.emailAddress)
+                            .textContentType(.username)
                             .keyboardType(.emailAddress)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -51,8 +40,8 @@ struct BuyerAccountSetupView: View {
                     }
 
                     labeledField(title: "Password") {
-                        SecureField("At least 8 characters", text: $passwordInput)
-                            .textContentType(.newPassword)
+                        SecureField("Your password", text: $passwordInput)
+                            .textContentType(.password)
                             .padding(12)
                             .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
@@ -65,25 +54,25 @@ struct BuyerAccountSetupView: View {
                     }
 
                     Button {
-                        Task { await saveAccount() }
+                        Task { await signIn() }
                     } label: {
-                        if isCreatingAccount {
+                        if isSigningIn {
                             ProgressView()
                                 .frame(maxWidth: .infinity)
                         } else {
-                            Label("Create buyer account", systemImage: "person.crop.circle.badge.checkmark")
+                            Label("Sign in", systemImage: "arrow.right.circle.fill")
                                 .frame(maxWidth: .infinity)
                         }
                     }
                     .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
-                    .disabled(isCreatingAccount)
+                    .disabled(isSigningIn)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
         }
         .background(TBTheme.cloudWhite.ignoresSafeArea())
-        .navigationTitle("Buyer account")
+        .navigationTitle("Sign in")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -95,9 +84,6 @@ struct BuyerAccountSetupView: View {
             }
         }
         .onAppear {
-            if nameInput.isEmpty {
-                nameInput = buyerFullName
-            }
             if emailInput.isEmpty {
                 emailInput = buyerEmail
             }
@@ -113,23 +99,17 @@ struct BuyerAccountSetupView: View {
         }
     }
 
-    private func saveAccount() async {
-        let trimmedName = nameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func signIn() async {
         let trimmedEmail = emailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let trimmedPassword = passwordInput.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !trimmedName.isEmpty else {
-            errorMessage = "Please enter your name."
-            return
-        }
 
         guard isValidEmail(trimmedEmail) else {
             errorMessage = "Please enter a valid email address."
             return
         }
 
-        guard trimmedPassword.count >= 8 else {
-            errorMessage = "Use at least 8 characters for your password."
+        guard !trimmedPassword.isEmpty else {
+            errorMessage = "Please enter your password."
             return
         }
 
@@ -139,31 +119,29 @@ struct BuyerAccountSetupView: View {
         }
 
         errorMessage = nil
-        isCreatingAccount = true
+        isSigningIn = true
 
         do {
-            try await BuyerAccountAPI.createAccount(
-                fullName: trimmedName,
-                email: trimmedEmail,
-                password: trimmedPassword
-            )
+            let response = try await BuyerAccountAPI.login(email: trimmedEmail, password: trimmedPassword)
 
             #if os(iOS)
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             #endif
 
-            buyerFullName = trimmedName
-            buyerEmail = trimmedEmail
+            buyerEmail = response.buyerEmail
+            buyerFullName = response.fullName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? (response.fullName ?? "")
+                : buyerFullName
             buyerAccountCreated = true
             buyerCheckoutPreference = "account"
+            MarketplaceAuthSession.storeBuyerSessionToken(response.token)
 
-            await MarketplaceAuthSession.syncAfterIdentityChange()
             await PushDeviceRegistration.syncAfterIdentityChange()
 
-            isCreatingAccount = false
+            isSigningIn = false
             dismiss()
         } catch {
-            isCreatingAccount = false
+            isSigningIn = false
             errorMessage = error.localizedDescription
         }
     }

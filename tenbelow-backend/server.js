@@ -2348,6 +2348,57 @@ app.post("/auth/buyer-session", authLimiter, requireAppClient, (req, res) => {
   }
 });
 
+app.post("/auth/buyer-login", authLimiter, requireAppClient, (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
+    if (!isValidBuyerEmail(email)) {
+      return res.status(400).json({ error: "Enter a valid email address" });
+    }
+
+    const buyers = loadBuyersFile();
+    const buyer = buyers[email];
+    if (!buyer) {
+      return res.status(404).json({ error: "Buyer account not found" });
+    }
+
+    const passwordHash = hashBuyerPassword(password);
+    if (buyer.passwordHash && buyer.passwordHash !== passwordHash) {
+      return res.status(401).json({ error: "Incorrect password" });
+    }
+
+    if (!buyer.passwordHash) {
+      buyers[email] = normalizeBuyerRecord(
+        {
+          ...buyer,
+          passwordHash,
+          updatedAt: new Date().toISOString(),
+        },
+        email
+      );
+      saveBuyersFile(buyers);
+    }
+
+    const signedInBuyer = buyers[email];
+    const token = issueUserSessionToken({
+      role: "buyer",
+      buyerEmail: email,
+    });
+
+    res.json({
+      token,
+      role: "buyer",
+      buyerEmail: email,
+      fullName: signedInBuyer.fullName || "",
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post(
   "/auth/buyer-account-update",
   authLimiter,

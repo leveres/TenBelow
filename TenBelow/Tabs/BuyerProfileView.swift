@@ -12,6 +12,7 @@ struct BuyerProfileView: View {
     @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
 
     @State private var showBuyerAccountSetup = false
+    @State private var showBuyerSignIn = false
 
     private var isAccountHolder: Bool {
         buyerAccountCreated && !buyerFullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -41,7 +42,7 @@ struct BuyerProfileView: View {
     private var accountSubtitle: String {
         isAccountHolder
             ? "Your private space for favorites and orders — nothing here is a public storefront or profile."
-            : "Browse freely now, then create an account when you want saved details and a faster repeat checkout."
+            : "Browse freely now, then create an account or sign in when you want saved details and a faster repeat checkout."
     }
 
     private var checkoutModeTitle: String {
@@ -193,6 +194,11 @@ struct BuyerProfileView: View {
                 BuyerAccountSetupView()
             }
         }
+        .sheet(isPresented: $showBuyerSignIn) {
+            NavigationStack {
+                BuyerSignInView()
+            }
+        }
     }
 
     private var accountHeroCard: some View {
@@ -237,12 +243,21 @@ struct BuyerProfileView: View {
                         }
                     }
                 } else {
-                    Button {
-                        showBuyerAccountSetup = true
-                    } label: {
-                        Label("Create buyer account", systemImage: "person.crop.circle.badge.plus")
+                    VStack(spacing: 10) {
+                        Button {
+                            showBuyerAccountSetup = true
+                        } label: {
+                            Label("Create buyer account", systemImage: "person.crop.circle.badge.plus")
+                        }
+                        .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+
+                        Button {
+                            showBuyerSignIn = true
+                        } label: {
+                            Label("Sign in to existing account", systemImage: "arrow.right.circle")
+                        }
+                        .buttonStyle(SecondaryCTAButtonStyle())
                     }
-                    .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
                 }
             }
             .frame(maxWidth: .infinity)
