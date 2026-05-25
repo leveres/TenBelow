@@ -6002,6 +6002,88 @@ app.get("/drop/my-submissions/:sellerId", requireAppClient, requireAuthenticated
   });
 });
 
+app.get("/drop/history/:sellerId", requireAppClient, requireAuthenticatedSeller, async (req, res) => {
+  const { sellerId } = req.params;
+  const normalizedSellerId = String(sellerId || "").trim();
+  if (req.auth.sellerId !== normalizedSellerId) {
+    auditOwnershipMismatch(req, {
+      scope: "drop_history",
+      expectedSellerId: normalizedSellerId,
+      actualSellerId: req.auth.sellerId || null,
+    });
+    return res.status(403).json({ error: "Seller drop history access denied" });
+  }
+
+  try {
+    const limit = Math.max(1, Math.min(12, Number(req.query.limit) || 8));
+    const now = new Date();
+    const drops = loadDropsFile();
+    const catalog = await fetchCatalog();
+    const catalogProducts = Array.isArray(catalog.products)
+      ? catalog.products.map((product) => normalizeCatalogProduct(product))
+      : [];
+    const productsById = new Map(catalogProducts.map((product) => [String(product.id || ""), product]));
+    const orders = loadOrdersFile();
+
+    const weeks = Object.entries(drops || {})
+      .map(([weekId, weekData]) => {
+        const startsAt = weekData?.startsAt || null;
+        const endsAt = weekData?.endsAt || null;
+        const endedAt = endsAt ? new Date(endsAt) : null;
+        if (!startsAt || !endsAt || !endedAt || Number.isNaN(endedAt.getTime()) || endedAt > now) {
+          return null;
+        }
+
+        const sellerEntries = dropEntriesForWeek(weekData).filter((entry) => entry.sellerId === normalizedSellerId);
+        const products = sellerEntries
+          .map((entry, index) => {
+            const product = productsById.get(entry.productId);
+            if (!product || product.sellerId !== normalizedSellerId) return null;
+            return buildDropProduct(product, entry, index);
+          })
+          .filter(Boolean);
+
+        if (!products.length) return null;
+
+        const productIds = new Set(products.map((product) => product.id));
+        const soldCount = orders.reduce((count, order) => {
+          const createdAt = order?.createdAt ? new Date(order.createdAt) : null;
+          const isDuringWeek =
+            createdAt &&
+            !Number.isNaN(createdAt.getTime()) &&
+            createdAt >= new Date(startsAt) &&
+            createdAt <= endedAt;
+          if (!isDuringWeek) return count;
+
+          return count + (Array.isArray(order.shipments) ? order.shipments : []).reduce((shipmentCount, shipment) => {
+            if (String(shipment.sellerId || "").trim() !== normalizedSellerId) return shipmentCount;
+            return shipmentCount + (Array.isArray(shipment.items) ? shipment.items : []).reduce((itemCount, item) => {
+              if (!productIds.has(String(item.productId || "").trim())) return itemCount;
+              return itemCount + Math.max(1, asFiniteNumber(item.quantity, 1));
+            }, 0);
+          }, 0);
+        }, 0);
+
+        return {
+          weekId,
+          startsAt,
+          endsAt,
+          postedCount: products.length,
+          soldCount,
+          products,
+        };
+      })
+      .filter(Boolean)
+      .sort((lhs, rhs) => new Date(rhs.startsAt).getTime() - new Date(lhs.startsAt).getTime())
+      .slice(0, limit);
+
+    res.json({ sellerId: normalizedSellerId, weeks });
+  } catch (err) {
+    console.error("drop/history error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete("/drop/submission/:productId", requireAppClient, requireAuthenticatedSeller, (req, res) => {
   const { productId } = req.params;
   const window = getCurrentDropSubmissionWindow();

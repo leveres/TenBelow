@@ -60,6 +60,18 @@ enum DropAPI {
         return try JSONDecoder().decode(SellerSubmissionsResponse.self, from: data)
     }
 
+    // MARK: - Get seller's previous weekly drop history
+
+    static func history(sellerId: String) async throws -> SellerDropHistoryResponse {
+        let url = baseURL.appendingPathComponent("drop/history/\(sellerId)")
+        var req = URLRequest(url: url)
+        AppConstants.applyAppClientAuth(to: &req)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &req)
+        let (data, resp) = try await URLSession.tenBelow.data(for: req)
+        try validateResponse(data: data, resp: resp)
+        return try JSONDecoder().decode(SellerDropHistoryResponse.self, from: data)
+    }
+
     // MARK: - Delete a submission
 
     static func deleteSubmission(productId: String) async throws {

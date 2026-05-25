@@ -65,6 +65,8 @@ struct DropView: View {
     @State private var showCart = false
     @State private var dropResponse: CurrentDropResponse?
     @State private var sellerSubmissions: SellerSubmissionsResponse?
+    @State private var sellerDropHistory: SellerDropHistoryResponse?
+    @State private var selectedHistoryWeekId: String?
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showDropSubmit = false
@@ -157,6 +159,14 @@ struct DropView: View {
     }
     private var isSeller: Bool { userRole == "seller" && !sellerId.isEmpty }
     private var sellerSubmissionProducts: [DropProduct] { effectiveSellerSubmissions?.products ?? [] }
+    private var sellerHistoryWeeks: [SellerDropHistoryWeek] { sellerDropHistory?.weeks ?? [] }
+    private var selectedHistoryWeek: SellerDropHistoryWeek? {
+        if let selectedHistoryWeekId,
+           let match = sellerHistoryWeeks.first(where: { $0.weekId == selectedHistoryWeekId }) {
+            return match
+        }
+        return sellerHistoryWeeks.first
+    }
     private var slotsUsed: Int { effectiveSellerSubmissions?.slotsUsed ?? 0 }
     private var slotsMax: Int { effectiveSellerSubmissions?.slotsMax ?? DropConstants.maxSlotsPerSeller }
     private var slotsRemaining: Int { max(slotsMax - slotsUsed, 0) }
@@ -614,6 +624,8 @@ struct DropView: View {
                                 .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
                         )
                     }
+
+                    sellerHistorySection
                 }
                 .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
                 .padding(.top, 0)
@@ -784,6 +796,129 @@ struct DropView: View {
         }
     }
 
+    private var sellerHistorySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Text("History")
+                    .font(.tbSectionTitle)
+                    .foregroundStyle(TBTheme.frostTitleGradient)
+
+                Spacer(minLength: 8)
+
+                Text(sellerHistoryWeeks.isEmpty ? "No past drops" : "\(sellerHistoryWeeks.count) weekend\(sellerHistoryWeeks.count == 1 ? "" : "s")")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(.white.opacity(0.86), in: Capsule(style: .continuous))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(TBTheme.skyBlue.opacity(0.16), lineWidth: 0.8)
+                    )
+            }
+
+            Text("Past weekend lineups stay organized by date so sellers can review what was posted and what sold.")
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, -2)
+
+            if sellerHistoryWeeks.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("No completed Weekly Drops yet", systemImage: "clock.arrow.circlepath")
+                        .font(.tbBodyStrong)
+                        .foregroundStyle(TBTheme.deepSky)
+
+                    Text("After a weekend drop closes on Sunday night, that lineup will appear here as history.")
+                        .font(.tbCaption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
+                )
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(sellerHistoryWeeks) { week in
+                            Button {
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                    selectedHistoryWeekId = week.weekId
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(historyWeekendRangeText(for: week))
+                                        .font(.caption.weight(.semibold))
+                                    Text("\(week.postedCount) posted • \(week.soldCount) sold")
+                                        .font(.caption2.weight(.medium))
+                                        .opacity(0.82)
+                                }
+                                .foregroundStyle(selectedHistoryWeek?.weekId == week.weekId ? .white : TBTheme.deepSky)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Group {
+                                        if selectedHistoryWeek?.weekId == week.weekId {
+                                            Capsule(style: .continuous).fill(TBTheme.dropBannerGradient)
+                                        } else {
+                                            Capsule(style: .continuous).fill(.white.opacity(0.86))
+                                        }
+                                    }
+                                )
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .strokeBorder(TBTheme.skyBlue.opacity(0.16), lineWidth: 0.8)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                if let selectedHistoryWeek {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(historyWeekendRangeText(for: selectedHistoryWeek))
+                                .font(.tbBodyStrong)
+                                .foregroundStyle(TBTheme.deepSky)
+
+                            Spacer(minLength: 8)
+
+                            Text("\(selectedHistoryWeek.postedCount) posted • \(selectedHistoryWeek.soldCount) sold")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(TBTheme.icyBlue)
+                        }
+
+                        ForEach(selectedHistoryWeek.products) { product in
+                            Button {
+                                selectedDropProduct = resolvedProduct(for: product)
+                            } label: {
+                                DropProductRow(
+                                    product: product,
+                                    sellerDisplayName: displayName(forSellerId: product.sellerId),
+                                    isCompact: true
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(12)
+                    .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(TBTheme.skyBlue.opacity(0.10), lineWidth: 0.8)
+                    )
+                }
+            }
+        }
+        .padding(.top, TBTheme.spacingSM)
+    }
+
     private var sellerStatusTitle: String {
         if isActive {
             return "Weekly Drop Is Live"
@@ -873,6 +1008,17 @@ struct DropView: View {
             } catch {
                 errorMessage = "We couldn't load your weekly drop submissions."
             }
+
+            do {
+                sellerDropHistory = try await DropAPI.history(sellerId: sellerId)
+                if selectedHistoryWeekId == nil {
+                    selectedHistoryWeekId = sellerDropHistory?.weeks.first?.weekId
+                }
+            } catch {
+                if sellerDropHistory == nil {
+                    sellerDropHistory = SellerDropHistoryResponse(sellerId: sellerId, weeks: [])
+                }
+            }
         }
 
         isLoading = false
@@ -923,6 +1069,19 @@ struct DropView: View {
 
     private func displayName(forSellerId sellerId: String) -> String {
         sellerProfilesByID[sellerId]?.displayName ?? SellerProfile.fallbackDisplayName(forSellerId: sellerId)
+    }
+
+    private func historyWeekendRangeText(for week: SellerDropHistoryWeek) -> String {
+        guard
+            let start = previewDateFormatter.date(from: week.startsAt),
+            let end = previewDateFormatter.date(from: week.endsAt)
+        else {
+            return week.weekId
+        }
+
+        let startText = start.formatted(.dateTime.month(.abbreviated).day())
+        let endText = end.formatted(.dateTime.month(.abbreviated).day())
+        return "\(startText)-\(endText)"
     }
 
     private var weeklyDropPreviewMenu: some View {

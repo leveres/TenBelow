@@ -63,7 +63,7 @@ struct DropSubmitView: View {
     }
 
     private var canCreateDropProduct: Bool {
-        slotsRemaining > 0
+        isWindowOpen && slotsRemaining > 0
     }
 
     private var canEditExistingDropProducts: Bool {
@@ -250,7 +250,7 @@ struct DropSubmitView: View {
 
     @ViewBuilder
     private func lineupActionControl(compactLayout: Bool) -> some View {
-        if slotsRemaining > 0 {
+        if isWindowOpen && slotsRemaining > 0 {
             Button {
                 viewModel.presentNewEditor(sellerId: sellerId)
             } label: {
@@ -359,7 +359,7 @@ struct DropSubmitView: View {
             return "Submissions stay open through Thursday night"
         }
         if !viewModel.products.isEmpty {
-            return "Thursday uploads are closed. Existing drop products can still be edited here before the release goes live."
+            return "Thursday uploads are closed. Existing drop products stay visible here for review before the release goes live."
         }
         if let next = viewModel.submissions?.nextDropAt {
             return "Submission access opens \(DropCountdown.timeLeft(until: next))"
@@ -371,7 +371,7 @@ struct DropSubmitView: View {
         if !isWindowOpen {
             return viewModel.products.isEmpty
                 ? "No new drop uploads are available right now."
-                : "Edit text now. New photos & video on Thursday."
+                : "Uploads are locked. New photos, videos, and submissions reopen on Thursday."
         }
         if slotsRemaining == 0 {
             return "Your lineup is full for this week's release."
@@ -480,6 +480,9 @@ private final class WeeklyDropPrepViewModel: ObservableObject {
         }
         guard !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw WeeklyDropEditorError.missingName
+        }
+        guard isWindowOpen else {
+            throw WeeklyDropEditorError.windowClosed
         }
         guard draft.isReadyForSubmission else {
             throw WeeklyDropEditorError.incompleteDraft
@@ -693,7 +696,7 @@ private struct WeeklyDropEditorView: View {
     }
 
     private var mediaEditingAllowed: Bool {
-        isWindowOpen || context.mode == .create
+        isWindowOpen
     }
 
     var body: some View {
@@ -805,7 +808,7 @@ private struct WeeklyDropEditorView: View {
 
     private var editorHeaderSubtitle: String {
         if !isWindowOpen && context.mode != .create {
-            return "Fine-tune copy, pricing, and release details here while Thursday-only media uploads stay closed."
+            return "Review this release here. New uploads, media changes, and resubmissions reopen during the next Thursday window."
         }
         return context.mode == .create
             ? "Build a more editorial listing, lead with stronger media, and review the full release card before submitting."
@@ -1140,7 +1143,7 @@ private struct WeeklyDropEditorView: View {
                         }
                         .buttonStyle(WeeklyDropLaunchButtonStyle(compactLayout: true))
                         .frame(maxWidth: .infinity, alignment: .top)
-                        .disabled(!canAdvance || isSubmitting)
+                        .disabled(!isWindowOpen || !canAdvance || isSubmitting)
                     }
                 }
 
@@ -1168,6 +1171,9 @@ private struct WeeklyDropEditorView: View {
         case .media:
             return "Lead with polished media. Weekly Drop should feel like a featured Friday launch."
         case .review:
+            if !isWindowOpen {
+                return "Weekly Drop uploads are closed. You can review this release, but new submissions reopen Thursday evening."
+            }
             return "Review the full release card and submit when everything feels polished."
         }
     }

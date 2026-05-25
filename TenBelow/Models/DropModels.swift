@@ -106,6 +106,22 @@ struct SellerSubmissionsResponse: Codable {
     let products: [DropProduct]
 }
 
+struct SellerDropHistoryWeek: Codable, Identifiable, Hashable {
+    let weekId: String
+    let startsAt: String
+    let endsAt: String
+    let postedCount: Int
+    let soldCount: Int
+    let products: [DropProduct]
+
+    var id: String { weekId }
+}
+
+struct SellerDropHistoryResponse: Codable {
+    let sellerId: String
+    let weeks: [SellerDropHistoryWeek]
+}
+
 // MARK: - Delete Response
 
 struct DropDeleteResponse: Codable {
