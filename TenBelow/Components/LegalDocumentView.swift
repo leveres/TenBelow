@@ -104,13 +104,17 @@ As a seller or creator, you agree to:
 
 Sellers may not upload copied content, false shipping promises, inaccurate product claims, unsafe products, or unlawful goods, and may not use TenBelow in a fraudulent or abusive manner.
 
+No illegal products under United States law may be listed, promoted, requested, sold, traded, or arranged through TenBelow. This includes, without limitation, ghost guns, firearm parts, weapon components, unserialized weapons, explosives, ammunition, dangerous devices, controlled substances, stolen goods, counterfeit goods, recalled products, or any item that is unlawful, unsafe, or designed to cause harm. TenBelow may remove the listing, delete the account, ban the user permanently, preserve records, and report activity to appropriate authorities when prohibited or dangerous products are monitored, discovered, or reported.
+
 6. Listings, Availability, and Product Information
 
 Sellers are solely responsible for the content and accuracy of their listings. Each listing must accurately describe the product being offered, including material details, dimensions, compatibility information where relevant, intended use, important limitations, normal production characteristics, pricing, shipping expectations, and any other information a reasonable buyer would need before purchasing.
 
 Because many items on TenBelow may be creator-made, 3D printed, made to order, or produced in small batches, minor visual or process-based variation may occur. Sellers must disclose characteristics that a reasonable buyer would want to know before purchase.
 
-TenBelow does not guarantee listing availability, seller inventory levels, delivery dates, or the success of any listing, storefront, or promotional placement. TenBelow reserves the right to edit, remove, reject, reorder, hide, suspend, or limit listings at its discretion.
+Listings submitted by sellers may be held as pending, reviewed through TenBelow’s admin review tools, approved, rejected, archived, removed, reordered, or returned for more information before or after they appear in the marketplace. Admin review may consider listing quality, product safety, intellectual property concerns, seller identity, marketplace fit, product accuracy, user reports, past account activity, and operational risk.
+
+TenBelow does not guarantee listing availability, seller inventory levels, delivery dates, or the success of any listing, storefront, or promotional placement. TenBelow reserves the right to edit, remove, reject, archive, reorder, hide, suspend, or limit listings at its discretion.
 
 7. Higher-Risk Product Categories
 
@@ -174,7 +178,9 @@ You represent and warrant that you own or control the rights necessary to submit
 
 TenBelow may review, moderate, remove, hide, reorder, restrict, suspend, or refuse any content, listing, storefront, account, payout, or platform access where TenBelow believes such action is necessary to enforce its rules, comply with law, address safety or intellectual property concerns, protect users, or preserve marketplace integrity.
 
-TenBelow may also retain records, cooperate with law enforcement or regulatory authorities, and take any other action reasonably necessary to protect the platform, its users, or the public.
+TenBelow’s admin tools may allow authorized personnel to review seller directories, buyer and seller accounts, product queues, custom requests, exchange requests, audit logs, security events, account activity, and related marketplace records. TenBelow may delete or disable accounts where needed for moderation, mock-data cleanup, fraud prevention, legal compliance, or platform operations. If a seller account is deleted, related seller products may be removed from the active catalog; historical records such as orders, exchanges, audit logs, payment records, or support records may remain where needed for safety, accounting, dispute, legal, or operational reasons.
+
+TenBelow may also retain records, maintain audit logs, cooperate with law enforcement or regulatory authorities, and take any other action reasonably necessary to protect the platform, its users, or the public.
 
 15. Prohibited Conduct
 
@@ -182,6 +188,7 @@ You may not use TenBelow to:
 - violate any law or regulation;
 - infringe copyrights, trademarks, publicity rights, privacy rights, patents, or other rights;
 - upload or sell counterfeit, copied, unsafe, recalled, stolen, unlawful, or prohibited goods;
+- list, sell, request, promote, or arrange ghost guns, firearm parts, weapon components, explosives, ammunition, controlled substances, dangerous devices, or any product illegal under United States law;
 - submit deceptive or misleading listings or platform information;
 - bypass platform fees, order flows, or moderation tools;
 - interfere with the platform, its code, security, or normal operations;
@@ -213,6 +220,8 @@ You agree to indemnify, defend, and hold harmless Innovative Codeworks LLC, TenB
 20. Suspension and Termination
 
 TenBelow may suspend, restrict, remove, or terminate your account, listings, storefront, payouts, access, or platform privileges at any time, with or without prior notice, if TenBelow believes you have violated these Terms, created legal or operational risk, harmed users, engaged in fraud, infringed rights, or otherwise acted inconsistently with the integrity of the platform.
+
+Accounts involved in prohibited, illegal, dangerous, weapon-related, ghost-gun-related, controlled-substance-related, counterfeit, stolen, or intentionally harmful activity may be permanently banned from TenBelow. TenBelow may delete or disable the account, remove related listings, block future access, preserve relevant records, and cooperate with law enforcement or regulatory authorities where appropriate.
 
 21. Governing Law and Venue
 
@@ -297,6 +306,9 @@ We may also collect marketplace activity information such as:
 - seller responses;
 - support records;
 - moderation actions;
+- admin review actions;
+- account-management actions;
+- audit logs and security event records;
 - dispute-related activity;
 - custom request activity;
 - and review activity.
@@ -311,6 +323,7 @@ We may use collected information to:
 - support payouts and payment operations;
 - review listings and user content;
 - review exchanges, custom requests, and support claims;
+- operate admin review, account-management, audit, and security tools;
 - send transactional communications;
 - send administrative or service-related notices;
 - provide customer support;
@@ -374,6 +387,8 @@ We retain information for as long as reasonably necessary to operate the platfor
 
 Retention periods may vary depending on the nature of the information, the reason it was collected, operational needs, legal obligations, dispute status, and fraud-prevention needs.
 
+If an account is deleted or disabled, TenBelow may remove active account access and related active storefront or listing content while retaining certain records that are reasonably needed for order history, exchange history, payment records, audit logs, security review, legal compliance, fraud prevention, tax or accounting obligations, support history, and marketplace integrity. Seller account deletion may remove that seller’s active products from the marketplace catalog, while some historical activity may remain in internal records.
+
 7. Your Choices
 
 You may update certain account information through the app or by contacting us. You may request deletion of your account by contacting us, subject to legal, operational, compliance, fraud-prevention, financial-recordkeeping, dispute-resolution, and tax-related retention obligations that may require us to keep certain records.
@@ -415,7 +430,7 @@ If you have questions about this Privacy Policy or TenBelow’s privacy practice
             return """
 This document will be added in a future update.
 
-For now, DMCA policy content can be provided here in-app as soon as you are ready to add it.
+For now, DMCA policy content can be provided here in-app once TenBelow is ready to publish the finalized policy.
 """
         case .sellerAgreement:
             return """
@@ -463,7 +478,7 @@ All listings must accurately reflect what the buyer will receive. A seller may n
 
 If a product is 3D printed, custom made, made to order, modified, or subject to normal production variation, you must clearly disclose relevant characteristics that a reasonable buyer would want to know before purchasing.
 
-TenBelow may remove, edit, hide, suspend, or reject listings that are incomplete, inaccurate, misleading, low quality, duplicative, unsafe, infringing, or inconsistent with marketplace standards.
+Listings may be submitted for TenBelow review before becoming visible in the marketplace. TenBelow may approve, reject, archive, remove, edit, hide, suspend, or return listings for revision when they are incomplete, inaccurate, misleading, low quality, duplicative, unsafe, infringing, inconsistent with marketplace standards, or otherwise risky for buyers or the platform. Admin review decisions may include notes or reasons visible to the seller.
 
 5. Higher-Risk Product Categories
 
@@ -485,6 +500,8 @@ TenBelow may prohibit or restrict certain higher-risk categories at its discreti
 6. Prohibited Products and Conduct
 
 You may not list, advertise, or sell products that are unlawful, dangerous, counterfeit, copied without authorization, infringing, deceptive, recalled, stolen, or otherwise prohibited by TenBelow.
+
+No seller may list, promote, request, sell, trade, arrange, or attempt to route through TenBelow any product or activity that is illegal under United States law. This includes, without limitation, ghost guns, firearm parts, weapon components, unserialized weapons, explosives, ammunition, dangerous devices, controlled substances, stolen goods, counterfeit goods, recalled goods, or any item designed to cause harm or evade law enforcement, safety, or regulatory requirements.
 
 You may not:
 - misuse brand names, logos, entertainment properties, team marks, characters, or other protected material without authorization;
@@ -580,7 +597,9 @@ You are solely responsible for determining, reporting, and remitting taxes arisi
 
 TenBelow may suspend, restrict, remove, or terminate your seller account, listings, storefront, payouts, or access to seller features at any time, with or without prior notice, if TenBelow believes you have violated this Agreement, created legal or operational risk, harmed buyers, infringed rights, engaged in fraud, failed to cooperate with exchange review, or acted inconsistently with the integrity of the marketplace.
 
-TenBelow may also remove individual listings, reduce visibility, pause product sales, hold payouts, or impose other seller restrictions short of full termination.
+TenBelow may also remove individual listings, reduce visibility, pause product sales, hold payouts, archive products, delete or disable seller accounts, remove a deleted seller’s active products from the marketplace catalog, or impose other seller restrictions short of full termination. TenBelow may retain historical records related to orders, exchanges, reviews, payments, audit logs, support issues, and security events where needed for legal, accounting, dispute-resolution, or safety reasons.
+
+If TenBelow monitors, discovers, or receives a credible report that a seller account is involved with illegal products, ghost guns, gun parts, weapon components, dangerous devices, controlled substances, stolen goods, counterfeit goods, or other prohibited activity, TenBelow may permanently ban the seller from the app, delete or disable the account, remove all related listings, block future seller participation, preserve relevant records, and cooperate with law enforcement or regulatory authorities where appropriate.
 
 18. Disclaimers
 

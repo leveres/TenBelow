@@ -52,7 +52,7 @@ struct HomeView: View {
         /// Reserved block height so the screen does not jump when live seller profiles arrive.
         static let spotlightBlockMinHeight: CGFloat = 118
         /// Fixed row height for the favorites carousel (blended cards size to content otherwise).
-        static let freshFavoritesRowHeight: CGFloat = 198
+        static let freshFavoritesRowHeight: CGFloat = 228
         /// Space between the spotlight title pill and the card (pulled slightly up so the pill clears the hero).
         static let spotlightTitleToCard: CGFloat = 9
         static let dealTitleTopOffset: CGFloat = -4
@@ -69,6 +69,94 @@ struct HomeView: View {
 
         static func freshFavoriteCardWidth(for contentWidth: CGFloat) -> CGFloat {
             min(max(contentWidth * 0.417, 150), 166)
+        }
+    }
+
+    private struct HomeLayoutProfile {
+        let logoImageHeight: CGFloat
+        let logoTopOffset: CGFloat
+        let logoToDealSpacing: CGFloat
+        let dealToFavoritesSpacing: CGFloat
+        let favoritesTitleTopInset: CGFloat
+        let favoritesTitleVisualDrop: CGFloat
+        let favoritesRowHeight: CGFloat
+        let favoritesToSpotlightSpacing: CGFloat
+        let spotlightTitleToCard: CGFloat
+        let spotlightBottomSpacing: CGFloat
+        let spotlightToTabSpacing: CGFloat
+        let spotlightBlockMinHeight: CGFloat
+        let bottomClearanceExtra: CGFloat
+
+        static func resolved(for availableHeight: CGFloat) -> HomeLayoutProfile {
+            if availableHeight < 700 {
+                return HomeLayoutProfile(
+                    logoImageHeight: 122,
+                    logoTopOffset: -9,
+                    logoToDealSpacing: 1,
+                    dealToFavoritesSpacing: 5,
+                    favoritesTitleTopInset: 3,
+                    favoritesTitleVisualDrop: 3,
+                    favoritesRowHeight: 220,
+                    favoritesToSpotlightSpacing: 8,
+                    spotlightTitleToCard: 5,
+                    spotlightBottomSpacing: 0,
+                    spotlightToTabSpacing: 8,
+                    spotlightBlockMinHeight: 92,
+                    bottomClearanceExtra: 6
+                )
+            }
+
+            if availableHeight < 760 {
+                return HomeLayoutProfile(
+                    logoImageHeight: 138,
+                    logoTopOffset: -11,
+                    logoToDealSpacing: 2,
+                    dealToFavoritesSpacing: 7,
+                    favoritesTitleTopInset: 5,
+                    favoritesTitleVisualDrop: 4,
+                    favoritesRowHeight: 226,
+                    favoritesToSpotlightSpacing: 12,
+                    spotlightTitleToCard: 6,
+                    spotlightBottomSpacing: 0,
+                    spotlightToTabSpacing: 12,
+                    spotlightBlockMinHeight: 96,
+                    bottomClearanceExtra: 6
+                )
+            }
+
+            if availableHeight < 850 {
+                return HomeLayoutProfile(
+                    logoImageHeight: 158,
+                    logoTopOffset: -15,
+                    logoToDealSpacing: 3,
+                    dealToFavoritesSpacing: 11,
+                    favoritesTitleTopInset: 10,
+                    favoritesTitleVisualDrop: 5,
+                    favoritesRowHeight: 222,
+                    favoritesToSpotlightSpacing: 16,
+                    spotlightTitleToCard: 8,
+                    spotlightBottomSpacing: 4,
+                    spotlightToTabSpacing: 20,
+                    spotlightBlockMinHeight: 108,
+                    bottomClearanceExtra: 0
+                )
+            }
+
+            return HomeLayoutProfile(
+                logoImageHeight: HomeMetrics.logoImageHeight + 6,
+                logoTopOffset: HomeMetrics.logoTopOffset,
+                logoToDealSpacing: HomeMetrics.logoToDealSpacing,
+                dealToFavoritesSpacing: HomeMetrics.dealToFavoritesSpacing,
+                favoritesTitleTopInset: HomeMetrics.favoritesTitleTopInset,
+                favoritesTitleVisualDrop: HomeMetrics.favoritesTitleVisualDrop,
+                favoritesRowHeight: HomeMetrics.freshFavoritesRowHeight,
+                favoritesToSpotlightSpacing: HomeMetrics.favoritesToSpotlightSpacing,
+                spotlightTitleToCard: HomeMetrics.spotlightTitleToCard,
+                spotlightBottomSpacing: HomeMetrics.spotlightBottomSpacing,
+                spotlightToTabSpacing: 26,
+                spotlightBlockMinHeight: HomeMetrics.spotlightBlockMinHeight,
+                bottomClearanceExtra: 0
+            )
         }
     }
 
@@ -524,14 +612,10 @@ struct HomeView: View {
         }
     }
 
-    private func freshFavoritesSection(cardWidth: CGFloat, pageInset: CGFloat, isCompactHeight: Bool) -> some View {
-        let favoritesTitleTopInset = isCompactHeight ? 8.0 : HomeMetrics.favoritesTitleTopInset
-        let favoritesTitleVisualDrop = isCompactHeight ? 4.0 : HomeMetrics.favoritesTitleVisualDrop
-        let favoritesRowHeight = isCompactHeight ? 172.0 : HomeMetrics.freshFavoritesRowHeight
-
+    private func freshFavoritesSection(cardWidth: CGFloat, pageInset: CGFloat, layout: HomeLayoutProfile) -> some View {
         return VStack(alignment: .leading, spacing: HomeMetrics.favoritesTitleToCardsSpacing) {
             HomeSectionTitlePill(title: "Fresh favorites")
-                .padding(.top, favoritesTitleTopInset + favoritesTitleVisualDrop)
+                .padding(.top, layout.favoritesTitleTopInset + layout.favoritesTitleVisualDrop)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: TBTheme.spacingLG + 2) {
@@ -557,15 +641,12 @@ struct HomeView: View {
             // Horizontal scroll content must not widen the home column; otherwise sections below
             // (e.g. Maker spotlight) lay out at the inflated width and appear shifted on screen.
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: favoritesRowHeight, alignment: .top)
+            .frame(height: layout.favoritesRowHeight, alignment: .top)
         }
     }
 
-    private func makerSpotlightSection(_ creator: SellerProfile, isCompactHeight: Bool) -> some View {
-        let spotlightTitleToCard = isCompactHeight ? 6.0 : HomeMetrics.spotlightTitleToCard
-        let spotlightBottomSpacing = isCompactHeight ? 0.0 : HomeMetrics.spotlightBottomSpacing
-
-        return VStack(alignment: .leading, spacing: spotlightTitleToCard) {
+    private func makerSpotlightSection(_ creator: SellerProfile, layout: HomeLayoutProfile) -> some View {
+        return VStack(alignment: .leading, spacing: layout.spotlightTitleToCard) {
             HomeSectionTitlePill(title: "Maker spotlight")
 
             CreatorSpotlightCard(
@@ -576,20 +657,19 @@ struct HomeView: View {
             )
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        .padding(.bottom, spotlightBottomSpacing)
+        .padding(.bottom, layout.spotlightBottomSpacing)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
-    private func homeScrollContent(contentWidth: CGFloat, pageInset: CGFloat, isCompactHeight: Bool) -> some View {
+    private func homeScrollContent(
+        contentWidth: CGFloat,
+        pageInset: CGFloat,
+        availableHeight: CGFloat,
+        layout: HomeLayoutProfile
+    ) -> some View {
         let dealBannerHeight = HomeMetrics.dealBannerHeight(for: contentWidth)
         let favoriteCardWidth = HomeMetrics.freshFavoriteCardWidth(for: contentWidth)
-        let logoImageHeight = isCompactHeight ? 140.0 : HomeMetrics.logoImageHeight
-        let logoTopOffset = isCompactHeight ? -14.0 : HomeMetrics.logoTopOffset
-        let logoToDealSpacing = isCompactHeight ? 2.0 : HomeMetrics.logoToDealSpacing
-        let dealToFavoritesSpacing = isCompactHeight ? 10.0 : HomeMetrics.dealToFavoritesSpacing
-        let favoritesToSpotlightSpacing = isCompactHeight ? 10.0 : HomeMetrics.favoritesToSpotlightSpacing
-        let spotlightBlockMinHeight = isCompactHeight ? 96.0 : HomeMetrics.spotlightBlockMinHeight
 
         VStack(alignment: .leading, spacing: 0) {
             SnowfallTitleContainer(
@@ -601,14 +681,14 @@ struct HomeView: View {
                 Image("Logo")
                     .resizable()
                     .scaledToFit()
-                    .frame(height: logoImageHeight)
-                    .offset(y: logoTopOffset)
+                    .frame(height: layout.logoImageHeight)
+                    .offset(y: layout.logoTopOffset)
             }
             .frame(maxWidth: .infinity)
 
             if let dealOfDayProduct = featuredProduct {
                 Color.clear
-                    .frame(height: logoToDealSpacing)
+                    .frame(height: layout.logoToDealSpacing)
 
                 DealOfDayBanner(product: dealOfDayProduct) {
                     selectedFeaturedProduct = dealOfDayProduct
@@ -617,23 +697,28 @@ struct HomeView: View {
                 .frame(height: dealBannerHeight)
 
                 Color.clear
-                    .frame(height: dealToFavoritesSpacing)
+                    .frame(height: layout.dealToFavoritesSpacing)
             }
 
-            freshFavoritesSection(cardWidth: favoriteCardWidth, pageInset: pageInset, isCompactHeight: isCompactHeight)
+            freshFavoritesSection(cardWidth: favoriteCardWidth, pageInset: pageInset, layout: layout)
+
+            Color.clear
+                .frame(height: layout.favoritesToSpotlightSpacing)
 
             Group {
                 if let featuredCreator {
-                    makerSpotlightSection(featuredCreator, isCompactHeight: isCompactHeight)
+                    makerSpotlightSection(featuredCreator, layout: layout)
                 } else {
                     Color.clear
-                        .frame(height: spotlightBlockMinHeight)
+                        .frame(height: layout.spotlightBlockMinHeight)
                         .accessibilityHidden(true)
                 }
             }
-            .padding(.top, favoritesToSpotlightSpacing)
+
+            Color.clear
+                .frame(height: layout.spotlightToTabSpacing)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: availableHeight, alignment: .topLeading)
     }
 
     var body: some View {
@@ -641,14 +726,22 @@ struct HomeView: View {
             GeometryReader { geometry in
                 let pageInset = HomeMetrics.pageInset
                 let contentWidth = max(geometry.size.width - (pageInset * 2), 0)
-                // Home is intentionally fixed-height (no vertical scrolling). On shorter viewports,
-                // tighten hero/favorites/spotlight spacing so the spotlight card clears the floating tab bar.
-                let isCompactHeight = geometry.size.height < 760
+                let layout = HomeLayoutProfile.resolved(for: geometry.size.height)
+                let bottomClearance = TopLevelHeaderMetrics.homeFloatingTabBarClearance + layout.bottomClearanceExtra
+                let availableHeight = max(
+                    geometry.size.height - TopLevelHeaderMetrics.homeTopInset - bottomClearance,
+                    0
+                )
 
-                homeScrollContent(contentWidth: contentWidth, pageInset: pageInset, isCompactHeight: isCompactHeight)
+                homeScrollContent(
+                    contentWidth: contentWidth,
+                    pageInset: pageInset,
+                    availableHeight: availableHeight,
+                    layout: layout
+                )
                     .padding(.horizontal, pageInset)
                     .padding(.top, TopLevelHeaderMetrics.homeTopInset)
-                    .padding(.bottom, TopLevelHeaderMetrics.homeFloatingTabBarClearance + (isCompactHeight ? 6 : 0))
+                    .padding(.bottom, bottomClearance)
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
                 .clipped()
                 .background(TBTheme.cloudWhite)

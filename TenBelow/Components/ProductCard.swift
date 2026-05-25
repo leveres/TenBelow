@@ -439,7 +439,7 @@ struct ProductCard: View {
         case .standard:
             return 112
         case .blended:
-            return 96
+            return 84
         }
     }
 
@@ -448,8 +448,8 @@ struct ProductCard: View {
         case .compact:
             return EdgeInsets(top: 7, leading: 7, bottom: 7, trailing: 7)
         case .blended:
-            // Keep home carousel cards compact so the next section remains visible above the tab bar.
-            return EdgeInsets(top: 8, leading: 8, bottom: 4, trailing: 8)
+            // Home carousel cards need enough footer padding for seller names and favorite pills.
+            return EdgeInsets(top: 7, leading: 8, bottom: 8, trailing: 8)
         case .standard:
             return EdgeInsets(top: 9, leading: 9, bottom: 9, trailing: 9)
         }
