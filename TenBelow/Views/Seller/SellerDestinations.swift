@@ -1318,9 +1318,24 @@ struct SellerProductsView: View {
     }
 
     private func mergeRemoteInventory(_ remote: [RemoteProduct]) {
-        let visibleRemote = remote.filter { !locallyDeletedProductIDs.contains($0.id) }
+        let visibleRemote = remote.filter {
+            !locallyDeletedProductIDs.contains($0.id)
+                && SellerMarketplaceStatus.fromServerProduct($0) != .archived
+        }
         let remoteById = Dictionary(uniqueKeysWithValues: visibleRemote.map { ($0.id, $0) })
-        var result = productDrafts.filter { !locallyDeletedProductIDs.contains($0.id) }
+        let remoteProductIDs = Set(remoteById.keys)
+        var removedProductIDs = Set<String>()
+        var result = productDrafts.compactMap { draft -> SellerProductDraft? in
+            guard !locallyDeletedProductIDs.contains(draft.id) else { return nil }
+            if remoteProductIDs.contains(draft.id) {
+                return draft
+            }
+            if submittingProductIDs.contains(draft.id) || productIDsAwaitingServerConfirmation.contains(draft.id) {
+                return draft
+            }
+            removedProductIDs.insert(draft.id)
+            return nil
+        }
         for i in result.indices {
             if let r = remoteById[result[i].id] {
                 result[i].marketplaceStatus = SellerMarketplaceStatus.fromServerProduct(r)
@@ -1340,6 +1355,10 @@ struct SellerProductsView: View {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
         persistDrafts()
+        for productId in removedProductIDs {
+            localProducts.removeDraft(productId: productId)
+            catalog.removeRemoteProduct(productId: productId)
+        }
         for d in productDrafts {
             localProducts.saveDraft(d)
         }
@@ -1931,7 +1950,260 @@ struct SellerOrdersView: View {
 }
 
 struct SellerReviewsView: View {
-    var body: some View { Text("Reviews").navigationTitle("Reviews") }
+    @EnvironmentObject private var catalog: CatalogStore
+    @EnvironmentObject private var localProducts: LocalProductStore
+    @AppStorage("sellerSellerId") private var sellerId = ""
+    @AppStorage("sellerBusinessName") private var sellerBusinessName = ""
+
+    private var sellerProducts: [Product] {
+        resolvedStorefrontProducts(
+            remoteProducts: catalog.products,
+            fallbackProducts: localProducts.products
+        )
+        .filter { product in
+            sellerId.isEmpty || product.sellerId == sellerId
+        }
+    }
+
+    private var reviewedProducts: [Product] {
+        sellerProducts
+            .filter { $0.reviewCount > 0 }
+            .sorted {
+                if $0.averageRating == $1.averageRating {
+                    return $0.reviewCount > $1.reviewCount
+                }
+                return $0.averageRating > $1.averageRating
+            }
+    }
+
+    private var totalReviewCount: Int {
+        reviewedProducts.map(\.reviewCount).reduce(0, +)
+    }
+
+    private var weightedAverageRating: Double {
+        guard totalReviewCount > 0 else { return 0 }
+        let total = reviewedProducts.reduce(0.0) { partial, product in
+            partial + (product.averageRating * Double(product.reviewCount))
+        }
+        return total / Double(totalReviewCount)
+    }
+
+    private var positiveReviewEstimate: Int {
+        reviewedProducts
+            .filter { $0.averageRating >= 4.0 }
+            .map(\.reviewCount)
+            .reduce(0, +)
+    }
+
+    private var sellerDisplayName: String {
+        let trimmed = sellerBusinessName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        let id = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? "Your store" : SellerProfile.fallbackDisplayName(forSellerId: id)
+    }
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: TBTheme.spacingLG) {
+                SellerSettingsHeader(
+                    title: "Reviews & Ratings",
+                    subtitle: "Track buyer trust across \(sellerDisplayName)'s published product ratings."
+                )
+
+                summaryCard
+                distributionCard
+                reviewedProductsCard
+            }
+            .padding(.horizontal, TBTheme.spacingLG)
+            .padding(.top, TBTheme.spacingMD)
+            .padding(.bottom, TBTheme.spacingXL)
+        }
+        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .navigationTitle("Reviews")
+        #if os(iOS) || os(visionOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .task {
+            await catalog.load()
+        }
+        .refreshable {
+            await catalog.load()
+        }
+    }
+
+    private var summaryCard: some View {
+        SellerSettingsCard(title: "Rating Summary") {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    reviewMetricCard(title: "Average", value: averageRatingText, subtitle: totalReviewCount == 0 ? "No reviews yet" : "Across reviewed products")
+                    reviewMetricCard(title: "Reviews", value: "\(totalReviewCount)", subtitle: "Total buyer ratings")
+                    reviewMetricCard(title: "Positive", value: "\(positiveReviewEstimate)", subtitle: "4 stars and above")
+                }
+
+                VStack(spacing: 12) {
+                    reviewMetricCard(title: "Average", value: averageRatingText, subtitle: totalReviewCount == 0 ? "No reviews yet" : "Across reviewed products")
+                    reviewMetricCard(title: "Reviews", value: "\(totalReviewCount)", subtitle: "Total buyer ratings")
+                    reviewMetricCard(title: "Positive", value: "\(positiveReviewEstimate)", subtitle: "4 stars and above")
+                }
+            }
+
+            Text("Ratings come from delivered orders and update as buyers leave product reviews.")
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var distributionCard: some View {
+        SellerSettingsCard(title: "Rating Distribution") {
+            if totalReviewCount == 0 {
+                emptyReviewsMessage
+            } else {
+                VStack(spacing: 10) {
+                    ForEach((1...5).reversed(), id: \.self) { rating in
+                        ratingDistributionRow(rating: rating, count: estimatedReviewCount(forRoundedRating: rating))
+                    }
+                }
+            }
+        }
+    }
+
+    private var reviewedProductsCard: some View {
+        SellerSettingsCard(title: "Reviewed Products") {
+            if reviewedProducts.isEmpty {
+                emptyReviewsMessage
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(reviewedProducts) { product in
+                        reviewedProductRow(product)
+                    }
+                }
+            }
+        }
+    }
+
+    private var emptyReviewsMessage: some View {
+        Text("No buyer ratings yet. Once delivered orders receive reviews, they will appear here.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var averageRatingText: String {
+        totalReviewCount == 0 ? "--" : String(format: "%.1f", weightedAverageRating)
+    }
+
+    private func reviewMetricCard(title: String, value: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(value)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundStyle(TBTheme.deepSky)
+
+                if title == "Average", totalReviewCount > 0 {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(TBTheme.accent)
+                }
+            }
+
+            Text(subtitle)
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
+        )
+    }
+
+    private func ratingDistributionRow(rating: Int, count: Int) -> some View {
+        let progress = totalReviewCount == 0 ? 0 : Double(count) / Double(totalReviewCount)
+
+        return HStack(spacing: 10) {
+            HStack(spacing: 3) {
+                Text("\(rating)")
+                    .font(.tbCaption)
+                    .foregroundStyle(TBTheme.deepSky)
+                Image(systemName: "star.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(TBTheme.accent)
+            }
+            .frame(width: 34, alignment: .leading)
+
+            GeometryReader { proxy in
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(TBTheme.skyLight.opacity(0.45))
+                    .overlay(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(TBTheme.icyBlue.opacity(0.7))
+                            .frame(width: max(4, proxy.size.width * progress))
+                    }
+            }
+            .frame(height: 9)
+
+            Text("\(count)")
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .frame(width: 32, alignment: .trailing)
+        }
+    }
+
+    private func reviewedProductRow(_ product: Product) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            StorefrontImageView(reference: product.primaryImageReference) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(TBTheme.skyLight.opacity(0.36))
+                    .overlay {
+                        Image(systemName: product.category.icon)
+                            .foregroundStyle(TBTheme.icyBlue)
+                    }
+            }
+            .frame(width: 54, height: 54)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(product.name)
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
+                    .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    Label(String(format: "%.1f", product.averageRating), systemImage: "star.fill")
+                        .font(.tbCaption.weight(.semibold))
+                        .foregroundStyle(TBTheme.accent)
+
+                    Text("\(product.reviewCount) review\(product.reviewCount == 1 ? "" : "s")")
+                        .font(.tbCaption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.68), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.10), lineWidth: 0.8)
+        )
+    }
+
+    private func estimatedReviewCount(forRoundedRating rating: Int) -> Int {
+        reviewedProducts
+            .filter { Int($0.averageRating.rounded()) == rating }
+            .map(\.reviewCount)
+            .reduce(0, +)
+    }
 }
 
 struct ShippingSettingsView: View {

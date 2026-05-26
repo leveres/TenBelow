@@ -5,6 +5,11 @@ struct CreateSellerRequest: Codable {
     let email: String
     let businessName: String?
     let password: String?
+    let legalName: String
+    let shippingOriginCountry: String
+    let shippingOriginState: String
+    let sellerAgreementAccepted: Bool
+    let sellerPoliciesAcknowledged: Bool
 }
 
 struct CreateSellerResponse: Codable {

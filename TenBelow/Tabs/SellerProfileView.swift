@@ -28,7 +28,7 @@ struct SellerProfileView: View {
 
     private var isRegistered: Bool { accountCreated && !sellerId.isEmpty }
     private var isOnboarded: Bool { status?.onboardingComplete == true }
-    private var isShowingLoadingOverlay: Bool { isLoading || isCreating }
+    private var isShowingOperationOverlay: Bool { isCreating }
     private var storeTabIndex: Int { 1 }
     private var isTrustedTesterVerified: Bool {
         if let status {
@@ -122,15 +122,22 @@ struct SellerProfileView: View {
             }
             .background(TBTheme.cloudWhite)
 
-            if isShowingLoadingOverlay {
-                AppLoadingOverlay(
-                    title: isCreating ? "Creating Seller Account" : "Loading Seller Account",
-                    subtitle: isCreating
-                        ? "Setting up your seller account."
-                        : "Refreshing your seller status and drop details."
+            if isShowingOperationOverlay {
+                AppOperationOverlay(
+                    title: "Creating Seller Account",
+                    subtitle: "Setting up your seller account."
                 )
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 .zIndex(1)
+            }
+
+            if isLoading && !isCreating {
+                ProgressView()
+                    .controlSize(.regular)
+                    .tint(TBTheme.deepSky)
+                    .padding(12)
+                    .background(.regularMaterial, in: Capsule())
+                    .zIndex(1)
             }
         }
         .navigationTitle("Seller Profile")
@@ -175,14 +182,10 @@ struct SellerProfileView: View {
             Button {
                 Task { await createAccount() }
             } label: {
-                if isCreating {
-                    ProgressView().tint(.white).frame(maxWidth: .infinity).padding()
-                } else {
-                    Text("Create seller account")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                }
+                Text(isCreating ? "Creating account..." : "Create seller account")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding()
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(sellerId.isEmpty || sellerEmail.isEmpty || isCreating)

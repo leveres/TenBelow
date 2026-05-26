@@ -236,8 +236,6 @@ TenBelow may update these Terms from time to time. Updated Terms become effectiv
 Innovative Codeworks LLC
 Doing Business As: TenBelow
 Founder: Steven LeVere
-5811 Florence Avenue
-Philadelphia, PA 19143
 admin@innovativecodeworks.com
 
 By using TenBelow, you acknowledge that you have read, understood, and agreed to these Terms of Service.
@@ -420,8 +418,6 @@ We may update this Privacy Policy from time to time. Revised versions become eff
 Innovative Codeworks LLC
 Doing Business As: TenBelow
 Founder: Steven LeVere
-5811 Florence Avenue
-Philadelphia, PA 19143
 admin@innovativecodeworks.com
 
 If you have questions about this Privacy Policy or TenBelow’s privacy practices, contact us at admin@innovativecodeworks.com.
@@ -630,8 +626,6 @@ TenBelow may update this Seller Agreement from time to time. Revised versions be
 Innovative Codeworks LLC
 Doing Business As: TenBelow
 Founder: Steven LeVere
-5811 Florence Avenue
-Philadelphia, PA 19143
 admin@innovativecodeworks.com
 
 By selling on TenBelow, you acknowledge that you have read, understood, and agreed to this Seller Agreement.
@@ -741,8 +735,6 @@ TenBelow may review evidence, communicate with buyers and sellers, require docum
 Innovative Codeworks LLC
 Doing Business As: TenBelow
 Founder: Steven LeVere
-5811 Florence Avenue
-Philadelphia, PA 19143
 admin@innovativecodeworks.com
 """
         }

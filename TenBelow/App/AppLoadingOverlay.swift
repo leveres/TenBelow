@@ -1,8 +1,16 @@
+//
+//  AppLoadingOverlay.swift
+//  TenBelow
+//
+//  Full-screen splash-style loader for app bootstrap and initial catalog hydration only.
+//  For in-flow tasks (sign-in, submit, agreement), use AppOperationOverlay instead.
+//
+
 import SwiftUI
 
 struct AppLoadingOverlay: View {
-    var title: String = "Loading"
-    var subtitle: String? = nil
+    var title: String = "Loading TenBelow"
+    var subtitle: String? = "Pulling in the latest products and pricing."
     @State private var logoOpacity = 0.0
     @State private var logoScale = 0.9
     @State private var contentOffset: CGFloat = 18
@@ -24,13 +32,17 @@ struct AppLoadingOverlay: View {
                 Spacer()
 
                 VStack(spacing: 12) {
-                    Text("Everything $10 & under")
+                    Text(title)
                         .font(.system(size: 17, weight: .semibold, design: .rounded))
-                        .foregroundStyle(TBTheme.deepSky.opacity(0.86))
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.92))
+                        .multilineTextAlignment(.center)
 
-                    Text("Fresh 3D printed finds, ready to explore.")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color.primary.opacity(0.48))
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.primary.opacity(0.52))
+                            .multilineTextAlignment(.center)
+                    }
 
                     ProgressView()
                         .tint(TBTheme.deepSky)
@@ -38,6 +50,7 @@ struct AppLoadingOverlay: View {
                         .padding(.top, 4)
                 }
                 .opacity(logoOpacity)
+                .padding(.horizontal, 28)
                 .padding(.bottom, 64)
             }
             .padding(.horizontal, 28)
@@ -49,6 +62,7 @@ struct AppLoadingOverlay: View {
                 contentOffset = 0
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title). \(subtitle ?? "")")
     }
 }
-

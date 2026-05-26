@@ -769,6 +769,53 @@ textarea {
   white-space: nowrap;
 }
 
+.account-compliance {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(127, 178, 255, 0.18);
+}
+
+.account-compliance-title {
+  margin: 0;
+  color: #365a98;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.account-compliance-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.compliance-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.compliance-pill.is-ok {
+  background: rgba(48, 173, 111, 0.14);
+  border: 1px solid rgba(48, 173, 111, 0.28);
+  color: #1e8e58;
+}
+
+.compliance-pill.is-missing {
+  background: rgba(223, 90, 90, 0.12);
+  border: 1px solid rgba(223, 90, 90, 0.24);
+  color: #bf4d4d;
+}
+
 .account-status.is-inactive {
   background: rgba(48, 173, 111, 0.14);
   color: #1e8e58;

@@ -1560,6 +1560,17 @@ function normalizeSellerRecord(record = {}, sellerId = "") {
     email: record.email || "",
     passwordHash: String(record.passwordHash || "").trim(),
     businessName: record.businessName || "",
+    legalName: String(record.legalName || "").trim(),
+    shippingOrigin: {
+      country: String(record.shippingOrigin?.country || "").trim(),
+      state: String(record.shippingOrigin?.state || "").trim(),
+    },
+    sellerAgreement: {
+      accepted: record.sellerAgreement?.accepted === true,
+      acceptedAt: record.sellerAgreement?.acceptedAt || null,
+      version: record.sellerAgreement?.version || "seller-agreement-2026-04-24",
+    },
+    sellerPoliciesAcknowledged: record.sellerPoliciesAcknowledged === true,
     membership: normalizeMembership(record.membership),
     profile: normalizeSellerPublicProfile(record.profile, sellerId, record.businessName),
   };
@@ -3905,9 +3916,21 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
     const email = String(req.body.email || "").trim().toLowerCase();
     const password = String(req.body.password || "");
     const businessName = req.body.businessName;
+    const legalName = String(req.body.legalName || "").trim();
+    const shippingOriginCountry = String(req.body.shippingOriginCountry || "").trim();
+    const shippingOriginState = String(req.body.shippingOriginState || "").trim().toUpperCase();
+    const sellerAgreementAccepted = req.body.sellerAgreementAccepted === true;
+    const sellerPoliciesAcknowledged = req.body.sellerPoliciesAcknowledged === true;
 
     if (!sellerId || !email) return res.status(400).json({ error: "sellerId and email required" });
     if (password && password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+    if (!legalName) return res.status(400).json({ error: "Legal name is required" });
+    if (!shippingOriginCountry || !shippingOriginState) {
+      return res.status(400).json({ error: "Shipping origin country and state are required" });
+    }
+    if (!sellerAgreementAccepted || !sellerPoliciesAcknowledged) {
+      return res.status(400).json({ error: "Seller agreement and seller policy acknowledgement are required" });
+    }
     if (!isValidSellerId(sellerId)) {
       return res.status(400).json({ error: "Seller ID must be 3 to 24 characters using letters, numbers, hyphens, or underscores." });
     }
@@ -3926,6 +3949,17 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
       email,
       passwordHash: password ? hashSellerPassword(password) : "",
       businessName: businessName || "",
+      legalName,
+      shippingOrigin: {
+        country: shippingOriginCountry,
+        state: shippingOriginState,
+      },
+      sellerAgreement: {
+        accepted: true,
+        acceptedAt: new Date().toISOString(),
+        version: "seller-agreement-2026-04-24",
+      },
+      sellerPoliciesAcknowledged: true,
       membership: normalizeMembership(),
       profile: normalizeSellerPublicProfile({}, sellerId, businessName || sellerId),
     };
@@ -4454,7 +4488,8 @@ app.get(
       const list = Array.isArray(catalog.products) ? catalog.products : [];
       const products = list
         .filter((product) => product.sellerId === sellerId)
-        .map((product) => normalizeCatalogProduct(product));
+        .map((product) => normalizeCatalogProduct(product))
+        .filter((product) => String(product.approvalStatus || "").trim().toLowerCase() !== "archived");
 
       res.setHeader("Cache-Control", "no-store, max-age=0");
       res.json({ products });
@@ -4816,23 +4851,47 @@ app.get("/admin/accounts", adminMutationLimiter, requireAdmin, async (req, res) 
     } else {
       const sellers = await fetchSellers();
       const profiles = buildSellerProfiles(sellers, products, orders);
-      accounts = profiles.map((profile) => ({
-        kind: "seller",
-        id: profile.id,
-        email: sellers[profile.id]?.email || "",
-        displayName: profile.displayName,
-        handle: profile.handle,
-        createdAt: profile.joinedAt || null,
-        updatedAt: sellers[profile.id]?.membership?.lastSyncedAt || null,
-        activity: sellerAccountActivity(profile.id, products, orders, exchangeRequests, customOrderRequests, productReviews),
-      }));
+      accounts = profiles.map((profile) => {
+        const sellerRecord = sellers[profile.id] || {};
+        return {
+          kind: "seller",
+          id: profile.id,
+          email: sellerRecord.email || "",
+          displayName: profile.displayName,
+          handle: profile.handle,
+          legalName: sellerRecord.legalName || "",
+          shippingOrigin: sellerRecord.shippingOrigin || { country: "", state: "" },
+          sellerAgreement: sellerRecord.sellerAgreement || {
+            accepted: false,
+            acceptedAt: null,
+            version: null,
+          },
+          sellerPoliciesAcknowledged: sellerRecord.sellerPoliciesAcknowledged === true,
+          createdAt: profile.joinedAt || null,
+          updatedAt: sellerRecord.membership?.lastSyncedAt || null,
+          activity: sellerAccountActivity(
+            profile.id,
+            products,
+            orders,
+            exchangeRequests,
+            customOrderRequests,
+            productReviews
+          ),
+        };
+      });
     }
 
     if (q) {
       accounts = accounts.filter((account) =>
-        [account.id, account.displayName, account.email, account.handle].some((value) =>
-          String(value || "").toLowerCase().includes(q)
-        )
+        [
+          account.id,
+          account.displayName,
+          account.email,
+          account.handle,
+          account.legalName,
+          account.shippingOrigin?.country,
+          account.shippingOrigin?.state,
+        ].some((value) => String(value || "").toLowerCase().includes(q))
       );
     }
 

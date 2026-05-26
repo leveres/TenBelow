@@ -25,6 +25,10 @@ extension URLSession {
     ) async throws -> T {
         var request = URLRequest(url: url)
         request.cachePolicy = cachePolicy
+        if cachePolicy == .reloadIgnoringLocalCacheData {
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+        }
         AppConstants.applyAppClientAuth(to: &request)
         MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
         let (data, response) = try await data(for: request)

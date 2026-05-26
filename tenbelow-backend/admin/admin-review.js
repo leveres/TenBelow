@@ -377,6 +377,63 @@ function activityTotal(activity = {}) {
     .reduce((sum, [, value]) => sum + value, 0);
 }
 
+function formatAgreementTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function sellerShippingOriginLabel(shippingOrigin = {}) {
+  const country = String(shippingOrigin.country || "").trim();
+  const state = String(shippingOrigin.state || "").trim();
+  if (country && state) return `${country}, ${state}`;
+  return country || state || "";
+}
+
+function buildSellerComplianceSection(account) {
+  const section = document.createElement("div");
+  section.className = "account-compliance";
+
+  const title = document.createElement("p");
+  title.className = "account-compliance-title";
+  title.textContent = "Seller onboarding compliance";
+
+  const pills = document.createElement("div");
+  pills.className = "account-compliance-pills";
+
+  const agreementAccepted = account.sellerAgreement?.accepted === true;
+  const agreementPill = document.createElement("span");
+  agreementPill.className = agreementAccepted ? "compliance-pill is-ok" : "compliance-pill is-missing";
+  const agreementWhen = formatAgreementTimestamp(account.sellerAgreement?.acceptedAt);
+  agreementPill.textContent = agreementAccepted
+    ? `Seller agreement agreed${agreementWhen ? ` · ${agreementWhen}` : ""}`
+    : "Seller agreement not accepted";
+
+  const policiesAcknowledged = account.sellerPoliciesAcknowledged === true;
+  const policiesPill = document.createElement("span");
+  policiesPill.className = policiesAcknowledged ? "compliance-pill is-ok" : "compliance-pill is-missing";
+  policiesPill.textContent = policiesAcknowledged
+    ? "Seller policies acknowledged"
+    : "Seller policies not acknowledged";
+
+  pills.append(agreementPill, policiesPill);
+
+  const details = document.createElement("p");
+  details.className = "account-card-meta";
+  const detailParts = [];
+  if (account.legalName) detailParts.push(`Legal name: ${account.legalName}`);
+  const origin = sellerShippingOriginLabel(account.shippingOrigin);
+  if (origin) detailParts.push(`Shipping origin: ${origin}`);
+  if (account.sellerAgreement?.version) {
+    detailParts.push(`Agreement version: ${account.sellerAgreement.version}`);
+  }
+  details.textContent = detailParts.length ? detailParts.join(" · ") : "No onboarding compliance details recorded yet.";
+
+  section.append(title, pills, details);
+  return section;
+}
+
 function renderAccounts(payload) {
   if (!accountList || !accountTotalCount || !accountPageInfo || !accountPrevPage || !accountNextPage) return;
 
@@ -465,7 +522,11 @@ function renderAccounts(payload) {
     deleteButton.addEventListener("click", () => deleteAccount(account));
     footer.append(note, deleteButton);
 
-    card.append(header, stats, footer);
+    if (account.kind === "seller") {
+      card.append(header, buildSellerComplianceSection(account), stats, footer);
+    } else {
+      card.append(header, stats, footer);
+    }
     accountList.appendChild(card);
   }
 }

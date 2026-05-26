@@ -17,8 +17,7 @@ enum CatalogService {
         if AppConstants.isBackendConfigured {
             if let response = try? await urlSession.decode(
                 CatalogResponse.self,
-                from: catalogURL,
-                cachePolicy: .useProtocolCachePolicy
+                from: catalogURL
             ) {
                 CacheStore.save(response, to: AppConstants.catalogCacheFile)
                 return CatalogLoadResult(products: response.products, isFromRemote: true)

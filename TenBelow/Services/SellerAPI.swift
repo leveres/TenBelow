@@ -46,14 +46,34 @@ enum SellerAPI {
     }
 
     @discardableResult
-    static func createAccount(sellerId: String, email: String, businessName: String?, password: String? = nil) async throws -> CreateSellerResponse {
+    static func createAccount(
+        sellerId: String,
+        email: String,
+        businessName: String?,
+        password: String? = nil,
+        legalName: String = "",
+        shippingOriginCountry: String = "",
+        shippingOriginState: String = "",
+        sellerAgreementAccepted: Bool = false,
+        sellerPoliciesAcknowledged: Bool = false
+    ) async throws -> CreateSellerResponse {
         let url = baseURL.appendingPathComponent("create-seller-account")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         AppConstants.applyAppClientAuth(to: &request)
         request.httpBody = try JSONEncoder().encode(
-            CreateSellerRequest(sellerId: sellerId, email: email, businessName: businessName, password: password)
+            CreateSellerRequest(
+                sellerId: sellerId,
+                email: email,
+                businessName: businessName,
+                password: password,
+                legalName: legalName,
+                shippingOriginCountry: shippingOriginCountry,
+                shippingOriginState: shippingOriginState,
+                sellerAgreementAccepted: sellerAgreementAccepted,
+                sellerPoliciesAcknowledged: sellerPoliciesAcknowledged
+            )
         )
 
         let (data, resp) = try await URLSession.tenBelow.data(for: request)

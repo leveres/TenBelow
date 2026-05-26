@@ -88,6 +88,7 @@ struct DropSubmitView: View {
                     context: context,
                     isWindowOpen: isWindowOpen,
                     slotsRemaining: slotsRemaining,
+                    isSubmitting: viewModel.isSubmitting,
                     onSubmit: { draft in
                         try await viewModel.submitDraft(
                             draft,
@@ -101,6 +102,20 @@ struct DropSubmitView: View {
                     }
                 )
             }
+            .overlay {
+                if viewModel.isSubmitting {
+                    ZStack {
+                        Color.black.opacity(0.12)
+                            .ignoresSafeArea()
+                        AppOperationOverlay(
+                            title: viewModel.submittingTitle,
+                            subtitle: viewModel.submittingSubtitle
+                        )
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.28), value: viewModel.isSubmitting)
         }
         .task {
             await reloadWorkspace()
@@ -173,12 +188,12 @@ struct DropSubmitView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(TBTheme.cloudWhite.ignoresSafeArea())
 
-            if viewModel.isSubmitting {
-                AppLoadingOverlay(
+            if viewModel.isSubmitting && viewModel.editorContext == nil {
+                AppOperationOverlay(
                     title: viewModel.submittingTitle,
                     subtitle: viewModel.submittingSubtitle
                 )
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 .zIndex(1)
             }
         }
@@ -635,6 +650,7 @@ private struct WeeklyDropEditorView: View {
     let context: WeeklyDropEditorContext
     let isWindowOpen: Bool
     let slotsRemaining: Int
+    let isSubmitting: Bool
     let onSubmit: (WeeklyDropDraft) async throws -> Void
 
     @State private var draft: WeeklyDropDraft
@@ -648,7 +664,6 @@ private struct WeeklyDropEditorView: View {
     @State private var selectedProductionPreviewDurationSeconds: Double?
     @State private var mediaErrorMessage: String?
     @State private var submissionErrorMessage: String?
-    @State private var isSubmitting = false
     @State private var draggedImageURLString: String?
 
     /// Public creator clip (gallery): keep short for the featured drop.
@@ -660,11 +675,13 @@ private struct WeeklyDropEditorView: View {
         context: WeeklyDropEditorContext,
         isWindowOpen: Bool,
         slotsRemaining: Int,
+        isSubmitting: Bool,
         onSubmit: @escaping (WeeklyDropDraft) async throws -> Void
     ) {
         self.context = context
         self.isWindowOpen = isWindowOpen
         self.slotsRemaining = slotsRemaining
+        self.isSubmitting = isSubmitting
         self.onSubmit = onSubmit
         _draft = State(initialValue: context.draft)
         _stage = State(initialValue: context.stage)
@@ -766,14 +783,7 @@ private struct WeeklyDropEditorView: View {
                 urlString: newValue
             )
         }
-        .overlay {
-            if isSubmitting {
-                AppLoadingOverlay(
-                    title: "Submitting Weekly Drop",
-                    subtitle: "Saving your Friday release."
-                )
-            }
-        }
+        .allowsHitTesting(!isSubmitting)
     }
 
     private var editorHeader: some View {
@@ -1181,8 +1191,6 @@ private struct WeeklyDropEditorView: View {
     private func submit() async {
         submissionErrorMessage = nil
         mediaErrorMessage = nil
-        isSubmitting = true
-        defer { isSubmitting = false }
 
         do {
             try await onSubmit(draft)

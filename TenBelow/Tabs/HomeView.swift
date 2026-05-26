@@ -40,11 +40,12 @@ struct HomeView: View {
         static let titleToContent = TBTheme.spacingSM + 4
         /// Slightly larger mark; paired with tighter snowfall padding so layout below doesn’t shift.
         static let logoImageHeight: CGFloat = 166
+        static let logoVisualScale: CGFloat = 1.045
         static let logoTopOffset: CGFloat = -18
         static let logoSnowfallVerticalPadding: CGFloat = 2
         static let logoToDealSpacing: CGFloat = 4
         /// Clear separation so the favorites strip (and its pill title) never visually collides with the deal hero.
-        static let dealToFavoritesSpacing: CGFloat = 14
+        static let dealToFavoritesSpacing: CGFloat = 24
         /// Gap between Fresh favorites and Maker spotlight (fixed — not device-dependent).
         static let favoritesToSpotlightSpacing: CGFloat = 16
         /// Keeps the spotlight card off the tab bar when the catalog finishes loading.
@@ -93,14 +94,14 @@ struct HomeView: View {
                     logoImageHeight: 122,
                     logoTopOffset: -9,
                     logoToDealSpacing: 1,
-                    dealToFavoritesSpacing: 5,
-                    favoritesTitleTopInset: 3,
+                    dealToFavoritesSpacing: 18,
+                    favoritesTitleTopInset: 5,
                     favoritesTitleVisualDrop: 3,
-                    favoritesRowHeight: 220,
+                    favoritesRowHeight: 214,
                     favoritesToSpotlightSpacing: 8,
                     spotlightTitleToCard: 5,
                     spotlightBottomSpacing: 0,
-                    spotlightToTabSpacing: 8,
+                    spotlightToTabSpacing: 6,
                     spotlightBlockMinHeight: 92,
                     bottomClearanceExtra: 6
                 )
@@ -111,14 +112,14 @@ struct HomeView: View {
                     logoImageHeight: 138,
                     logoTopOffset: -11,
                     logoToDealSpacing: 2,
-                    dealToFavoritesSpacing: 7,
-                    favoritesTitleTopInset: 5,
+                    dealToFavoritesSpacing: 20,
+                    favoritesTitleTopInset: 6,
                     favoritesTitleVisualDrop: 4,
-                    favoritesRowHeight: 226,
-                    favoritesToSpotlightSpacing: 12,
+                    favoritesRowHeight: 218,
+                    favoritesToSpotlightSpacing: 13,
                     spotlightTitleToCard: 6,
                     spotlightBottomSpacing: 0,
-                    spotlightToTabSpacing: 12,
+                    spotlightToTabSpacing: 9,
                     spotlightBlockMinHeight: 96,
                     bottomClearanceExtra: 6
                 )
@@ -129,14 +130,14 @@ struct HomeView: View {
                     logoImageHeight: 158,
                     logoTopOffset: -15,
                     logoToDealSpacing: 3,
-                    dealToFavoritesSpacing: 11,
+                    dealToFavoritesSpacing: 24,
                     favoritesTitleTopInset: 10,
                     favoritesTitleVisualDrop: 5,
-                    favoritesRowHeight: 222,
-                    favoritesToSpotlightSpacing: 16,
+                    favoritesRowHeight: 218,
+                    favoritesToSpotlightSpacing: 18,
                     spotlightTitleToCard: 8,
                     spotlightBottomSpacing: 4,
-                    spotlightToTabSpacing: 20,
+                    spotlightToTabSpacing: 16,
                     spotlightBlockMinHeight: 108,
                     bottomClearanceExtra: 0
                 )
@@ -150,10 +151,10 @@ struct HomeView: View {
                 favoritesTitleTopInset: HomeMetrics.favoritesTitleTopInset,
                 favoritesTitleVisualDrop: HomeMetrics.favoritesTitleVisualDrop,
                 favoritesRowHeight: HomeMetrics.freshFavoritesRowHeight,
-                favoritesToSpotlightSpacing: HomeMetrics.favoritesToSpotlightSpacing,
+                favoritesToSpotlightSpacing: HomeMetrics.favoritesToSpotlightSpacing + 6,
                 spotlightTitleToCard: HomeMetrics.spotlightTitleToCard,
                 spotlightBottomSpacing: HomeMetrics.spotlightBottomSpacing,
-                spotlightToTabSpacing: 26,
+                spotlightToTabSpacing: 20,
                 spotlightBlockMinHeight: HomeMetrics.spotlightBlockMinHeight,
                 bottomClearanceExtra: 0
             )
@@ -243,10 +244,8 @@ struct HomeView: View {
         )
     }
 
-    /// Fresh favorites only: `resolvedStorefrontProducts` drops local/mock seed data whenever the API returns *any* listing,
-    /// so a thin approved catalog (e.g. one product) would otherwise show a single card. When below the strip cap, merge in
-    /// unique extras from local storage then bundled mocks so the carousel matches the designed multi-card layout while the
-    /// backend still drives real storefront data everywhere else (Deal of the Day, spotlight, shop).
+    /// Fresh favorites only: keep mock filler for thin live catalogs, but do not re-add local seller drafts after
+    /// the backend catalog has loaded. Deleted/archived server products must disappear everywhere.
     private var freshFavoritesCatalog: [Product] {
         let base = products
         if base.count >= HomeMetrics.freshFavoritesMaxStripCards { return base }
@@ -263,7 +262,9 @@ struct HomeView: View {
             }
         }
 
-        appendUnique(localProducts.products)
+        if catalog.isUsingCachedData {
+            appendUnique(localProducts.products)
+        }
         if merged.count < HomeMetrics.freshFavoritesMaxStripCards {
             appendUnique(MockData.products)
         }
@@ -682,6 +683,7 @@ struct HomeView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(height: layout.logoImageHeight)
+                    .scaleEffect(HomeMetrics.logoVisualScale)
                     .offset(y: layout.logoTopOffset)
             }
             .frame(maxWidth: .infinity)

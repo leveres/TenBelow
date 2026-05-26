@@ -32,6 +32,12 @@ struct RolePickerView: View {
     @State private var sellerBusinessNameInput = ""
     @State private var sellerIdentifierInput = ""
     @State private var sellerPasswordInput = ""
+    @State private var sellerLegalNameInput = ""
+    @State private var sellerShippingCountryInput = "United States"
+    @State private var sellerShippingStateInput = ""
+    @State private var showSellerAgreementReview = false
+    @State private var sellerAgreementCreationSucceeded = false
+    @State private var isSellerPasswordVisible = false
     @State private var buyerErrorMessage: String?
     @State private var sellerErrorMessage: String?
     @State private var isCreatingBuyerAccount = false
@@ -79,16 +85,17 @@ struct RolePickerView: View {
             }
             .allowsHitTesting(!(isCreatingBuyerAccount || isCreatingSellerAccount))
 
-            if isCreatingBuyerAccount || isCreatingSellerAccount {
-                AppLoadingOverlay(
+            if isCreatingSellerAccount && !showSellerAgreementReview {
+                AppOperationOverlay(
                     title: loadingOverlayTitle,
                     subtitle: loadingOverlaySubtitle
                 )
-                .transition(.opacity.combined(with: .scale(scale: 1.02)))
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 .zIndex(1)
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.86), value: step)
+        .animation(.easeInOut(duration: 0.45), value: showSellerAgreementReview)
     }
 
     private var loadingOverlayTitle: String {
@@ -204,14 +211,9 @@ struct RolePickerView: View {
             Button {
                 createBuyerAccount()
             } label: {
-                if isCreatingBuyerAccount {
-                    ProgressView()
-                        .tint(.white)
-                } else {
-                    HStack(spacing: 8) {
-                        Image(systemName: "person.crop.circle.badge.checkmark")
-                        Text("Create buyer account")
-                    }
+                HStack(spacing: 8) {
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                    Text(isCreatingBuyerAccount ? "Creating account..." : "Create buyer account")
                 }
             }
             .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
@@ -243,18 +245,17 @@ struct RolePickerView: View {
                         if sellerEntryMode == .signIn {
                             await signInSellerAccount()
                         } else {
-                            await createSellerAccount()
+                            prepareSellerAgreementReview()
                         }
                     }
                 } label: {
-                    if isCreatingSellerAccount {
-                        ProgressView()
-                            .tint(.white)
-                    } else {
-                        HStack(spacing: 8) {
-                            Image(systemName: "storefront")
-                            Text(sellerEntryMode == .signIn ? "Sign in as seller" : "Create seller account")
-                        }
+                    HStack(spacing: 8) {
+                        Image(systemName: "storefront")
+                        Text(
+                            isCreatingSellerAccount
+                                ? (sellerEntryMode == .signIn ? "Signing in..." : "Preparing agreement...")
+                                : (sellerEntryMode == .signIn ? "Sign in as seller" : "Create seller account")
+                        )
                     }
                 }
                 .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
@@ -273,22 +274,42 @@ struct RolePickerView: View {
                 sellerBusinessNameInput = sellerBusinessName
             }
         }
+        .fullScreenCover(isPresented: $showSellerAgreementReview) {
+            SellerAgreementAcceptanceView(
+                legalName: sellerLegalNameInput.trimmingCharacters(in: .whitespacesAndNewlines),
+                email: sellerEmailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+                shippingOrigin: sellerShippingOriginSummary,
+                isCreatingAccount: isCreatingSellerAccount,
+                accountCreationSucceeded: sellerAgreementCreationSucceeded,
+                onCancel: {
+                    withAnimation(.easeInOut(duration: 0.32)) {
+                        showSellerAgreementReview = false
+                    }
+                },
+                onAccept: {
+                    Task { await createSellerAccount() }
+                }
+            )
+        }
     }
 
     private var sellerAccountScreen: some View {
-        VStack(spacing: 0) {
-            Spacer().frame(height: 18)
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 0) {
+                Spacer().frame(height: 18)
 
-            sellerAccountHeader
+                sellerAccountHeader
 
-            VStack(spacing: 10) {
-                sellerAccountContent
+                VStack(spacing: 10) {
+                    sellerAccountContent
+                }
+                .padding(.top, 14)
+
+                Spacer(minLength: 28)
             }
-            .padding(.top, 14)
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -395,6 +416,36 @@ struct RolePickerView: View {
                         submitLabel: .next,
                         isSecure: true
                     )
+                    Divider().overlay(TBTheme.skyBlue.opacity(0.10))
+                    sellerAccountField(
+                        title: "Legal Name",
+                        text: $sellerLegalNameInput,
+                        prompt: "Your legal first and last name",
+                        keyboard: .default,
+                        focus: .legalName,
+                        submitLabel: .next
+                    )
+                    Divider().overlay(TBTheme.skyBlue.opacity(0.10))
+                    HStack(spacing: 0) {
+                        sellerAccountField(
+                            title: "Origin Country",
+                            text: $sellerShippingCountryInput,
+                            prompt: "United States",
+                            keyboard: .default,
+                            focus: .shippingCountry,
+                            submitLabel: .next
+                        )
+                        Divider().overlay(TBTheme.skyBlue.opacity(0.10))
+                        sellerAccountField(
+                            title: "State",
+                            text: $sellerShippingStateInput,
+                            prompt: "PA",
+                            keyboard: .default,
+                            autocapitalize: false,
+                            focus: .shippingState,
+                            submitLabel: .next
+                        )
+                    }
                     Divider().overlay(TBTheme.skyBlue.opacity(0.10))
                     sellerAccountField(
                         title: "Business Name",
@@ -567,34 +618,73 @@ struct RolePickerView: View {
         }
     }
 
+    private func validateSellerAccountInputs() -> (sellerId: String, email: String, businessName: String, legalName: String, shippingCountry: String, shippingState: String)? {
+        let trimmedSellerId = normalizedSellerID(sellerIdInput)
+        let trimmedEmail = sellerEmailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmedBusinessName = sellerBusinessNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedLegalName = sellerLegalNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedShippingCountry = sellerShippingCountryInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedShippingState = sellerShippingStateInput.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+        guard !trimmedSellerId.isEmpty else {
+            sellerErrorMessage = "Please choose a seller ID."
+            return nil
+        }
+
+        guard isValidSellerID(trimmedSellerId) else {
+            sellerErrorMessage = "Seller ID must be 3 to 24 characters using letters, numbers, hyphens, or underscores."
+            return nil
+        }
+
+        guard isValidEmail(trimmedEmail) else {
+            sellerErrorMessage = "Please enter a valid email address."
+            return nil
+        }
+
+        guard sellerPasswordInput.count >= 8 else {
+            sellerErrorMessage = "Password must be at least 8 characters."
+            return nil
+        }
+
+        guard !trimmedLegalName.isEmpty else {
+            sellerErrorMessage = "Please enter your legal name."
+            return nil
+        }
+
+        guard !trimmedShippingCountry.isEmpty else {
+            sellerErrorMessage = "Please enter your shipping origin country."
+            return nil
+        }
+
+        guard !trimmedShippingState.isEmpty else {
+            sellerErrorMessage = "Please enter your shipping origin state."
+            return nil
+        }
+
+        sellerErrorMessage = nil
+        return (trimmedSellerId, trimmedEmail, trimmedBusinessName, trimmedLegalName, trimmedShippingCountry, trimmedShippingState)
+    }
+
+    private func prepareSellerAgreementReview() {
+        dismissSellerKeyboard()
+        guard validateSellerAccountInputs() != nil else { return }
+        showSellerAgreementReview = true
+    }
+
+    private var sellerShippingOriginSummary: String {
+        let country = sellerShippingCountryInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let state = sellerShippingStateInput.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if country.isEmpty { return state }
+        if state.isEmpty { return country }
+        return "\(country), \(state)"
+    }
+
     private func createSellerAccount() async {
         await MainActor.run {
             dismissSellerKeyboard()
         }
 
-        let trimmedSellerId = normalizedSellerID(sellerIdInput)
-        let trimmedEmail = sellerEmailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let trimmedBusinessName = sellerBusinessNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !trimmedSellerId.isEmpty else {
-            sellerErrorMessage = "Please choose a seller ID."
-            return
-        }
-
-        guard isValidSellerID(trimmedSellerId) else {
-            sellerErrorMessage = "Seller ID must be 3 to 24 characters using letters, numbers, hyphens, or underscores."
-            return
-        }
-
-        guard isValidEmail(trimmedEmail) else {
-            sellerErrorMessage = "Please enter a valid email address."
-            return
-        }
-
-        guard sellerPasswordInput.count >= 8 else {
-            sellerErrorMessage = "Password must be at least 8 characters."
-            return
-        }
+        guard let validated = await MainActor.run(body: { validateSellerAccountInputs() }) else { return }
 
         await MainActor.run {
             sellerErrorMessage = nil
@@ -607,18 +697,25 @@ struct RolePickerView: View {
         do {
             // Membership is purchased in-app via StoreKit (`SellerSubscriptionStore`). We do not open Stripe Connect onboarding here—that flow remains available from the seller dashboard for payouts when needed.
             try await SellerAPI.createAccount(
-                sellerId: trimmedSellerId,
-                email: trimmedEmail,
-                businessName: trimmedBusinessName.isEmpty ? nil : trimmedBusinessName,
-                password: sellerPasswordInput
+                sellerId: validated.sellerId,
+                email: validated.email,
+                businessName: validated.businessName.isEmpty ? nil : validated.businessName,
+                password: sellerPasswordInput,
+                legalName: validated.legalName,
+                shippingOriginCountry: validated.shippingCountry,
+                shippingOriginState: validated.shippingState,
+                sellerAgreementAccepted: true,
+                sellerPoliciesAcknowledged: true
             )
 
             await applyCreatedSellerRegistration(
-                trimmedSellerId: trimmedSellerId,
-                trimmedEmail: trimmedEmail,
-                trimmedBusinessName: trimmedBusinessName,
-                useOfflinePreview: false
+                trimmedSellerId: validated.sellerId,
+                trimmedEmail: validated.email,
+                trimmedBusinessName: validated.businessName,
+                useOfflinePreview: false,
+                releaseCreatingState: false
             )
+            await completeSellerAgreementTransition()
         } catch {
             if SellerAPI.isSellerAlreadyExistsError(error) {
                 await MainActor.run {
@@ -698,11 +795,34 @@ struct RolePickerView: View {
         }
     }
 
+    @MainActor
+    private func completeSellerAgreementTransition() async {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) {
+            sellerAgreementCreationSucceeded = true
+        }
+
+        try? await Task.sleep(for: .milliseconds(900))
+
+        isCreatingSellerAccount = false
+
+        try? await Task.sleep(for: .milliseconds(180))
+
+        withAnimation(.easeInOut(duration: 0.48)) {
+            showSellerAgreementReview = false
+        }
+
+        try? await Task.sleep(for: .milliseconds(520))
+
+        sellerAgreementCreationSucceeded = false
+        transitionToOnboarding(as: "seller")
+    }
+
     private func applyCreatedSellerRegistration(
         trimmedSellerId: String,
         trimmedEmail: String,
         trimmedBusinessName: String,
-        useOfflinePreview: Bool
+        useOfflinePreview: Bool,
+        releaseCreatingState: Bool = true
     ) async {
         let starterProfile = SellerProfile.starterProfile(
             sellerId: trimmedSellerId,
@@ -718,7 +838,9 @@ struct RolePickerView: View {
             sellerErrorMessage = nil
             starterProfile.storeLocally()
             catalog.upsertSellerProfile(starterProfile)
-            isCreatingSellerAccount = false
+            if releaseCreatingState {
+                isCreatingSellerAccount = false
+            }
             userRole = "seller"
             pendingLaunchTab = 1
             hasSeenOnboarding = false
@@ -747,8 +869,10 @@ struct RolePickerView: View {
     }
 
     private func transitionToOnboarding(as role: String) {
-        userRole = role
-        hasSeenOnboarding = false
+        withAnimation(.easeInOut(duration: 0.45)) {
+            userRole = role
+            hasSeenOnboarding = false
+        }
     }
 
     private func roleCard(icon: String, title: String, description: String, action: @escaping () -> Void) -> some View {
@@ -1055,23 +1179,38 @@ struct RolePickerView: View {
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(TBTheme.deepSky.opacity(0.92))
 
-            Group {
+            HStack(spacing: 10) {
+                Group {
+                    if isSecure && !isSellerPasswordVisible {
+                        SecureField(prompt, text: text)
+                    } else {
+                        TextField(prompt, text: text)
+                    }
+                }
+                .textInputAutocapitalization(autocapitalize ? .words : .never)
+                .autocorrectionDisabled()
+                .keyboardType(keyboard)
+                .focused($focusedSellerField, equals: focus)
+                .submitLabel(submitLabel)
+                .onSubmit {
+                    advanceSellerField(from: focus)
+                }
+                .font(.system(size: 17, weight: .medium, design: .rounded))
+                .foregroundStyle(.primary.opacity(0.78))
+
                 if isSecure {
-                    SecureField(prompt, text: text)
-                } else {
-                    TextField(prompt, text: text)
+                    Button {
+                        isSellerPasswordVisible.toggle()
+                    } label: {
+                        Image(systemName: isSellerPasswordVisible ? "eye.slash.fill" : "eye.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(TBTheme.deepSky.opacity(0.62))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isSellerPasswordVisible ? "Hide password" : "Show password")
                 }
             }
-            .textInputAutocapitalization(autocapitalize ? .words : .never)
-            .autocorrectionDisabled()
-            .keyboardType(keyboard)
-            .focused($focusedSellerField, equals: focus)
-            .submitLabel(submitLabel)
-            .onSubmit {
-                advanceSellerField(from: focus)
-            }
-            .font(.system(size: 17, weight: .medium, design: .rounded))
-            .foregroundStyle(.primary.opacity(0.78))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -1086,7 +1225,13 @@ struct RolePickerView: View {
         case .email:
             focusedSellerField = sellerEntryMode == .signIn ? .password : .password
         case .password:
-            focusedSellerField = sellerEntryMode == .signIn ? nil : .businessName
+            focusedSellerField = sellerEntryMode == .signIn ? nil : .legalName
+        case .legalName:
+            focusedSellerField = .shippingCountry
+        case .shippingCountry:
+            focusedSellerField = .shippingState
+        case .shippingState:
+            focusedSellerField = .businessName
         case .businessName:
             dismissSellerKeyboard()
         case .none:
@@ -1175,6 +1320,278 @@ struct RolePickerView: View {
     }
 }
 
+private struct SellerAgreementAcceptanceView: View {
+    let legalName: String
+    let email: String
+    let shippingOrigin: String
+    let isCreatingAccount: Bool
+    let accountCreationSucceeded: Bool
+    let onCancel: () -> Void
+    let onAccept: () -> Void
+
+    @State private var hasReachedAgreementEnd = false
+    @State private var hasAcceptedAgreement = false
+
+    private var isTransitioning: Bool {
+        isCreatingAccount || accountCreationSucceeded
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                WinterSceneBackground()
+                    .ignoresSafeArea()
+
+                VStack(spacing: 8) {
+                    header
+
+                    requirementSummary
+
+                    agreementCard
+                        .layoutPriority(1)
+
+                    actionBar
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, max(geometry.safeAreaInsets.top - 10, 8))
+                .padding(.bottom, geometry.safeAreaInsets.bottom + 6)
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+                .blur(radius: isTransitioning ? 2 : 0)
+                .opacity(isTransitioning ? 0.28 : 1)
+                .allowsHitTesting(!isTransitioning)
+
+                if isCreatingAccount && !accountCreationSucceeded {
+                    AppOperationOverlay(
+                        title: "Creating seller account",
+                        subtitle: "Saving your shop profile and agreement acceptance."
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
+
+                if accountCreationSucceeded {
+                    AppOperationOverlay(
+                        title: "Account ready",
+                        subtitle: "Taking you to seller onboarding...",
+                        systemImage: "checkmark.circle.fill",
+                        showsProgress: false
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.35), value: isCreatingAccount)
+        .animation(.spring(response: 0.45, dampingFraction: 0.86), value: accountCreationSucceeded)
+        .interactiveDismissDisabled(isTransitioning)
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                onCancel()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .frame(width: 34, height: 34)
+                    .background(.white.opacity(0.72), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isCreatingAccount)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Seller onboarding")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .tracking(0.8)
+                    .textCase(.uppercase)
+                    .foregroundStyle(TBTheme.icyBlue)
+                Text("Seller Agreement")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .tracking(-0.5)
+                    .foregroundStyle(TBTheme.deepSky)
+                Text("Review and accept before seller onboarding continues.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(TBTheme.deepSky.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+        }
+    }
+
+    private var requirementSummary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(TBTheme.skyLight.opacity(0.62))
+                        .frame(width: 26, height: 26)
+                    Image(systemName: "checkmark.shield.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(TBTheme.icyBlue)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Required before selling")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky)
+                    Text("Account details ready for review.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            VStack(spacing: 3) {
+                compactRequirementRow("Legal name · Email", "\(legalName) · \(email)")
+                compactRequirementRow("Shipping origin", shippingOrigin)
+                compactRequirementRow("Payout · Policies", "Stripe setup · Included in agreement")
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay(
+                    LinearGradient(
+                        colors: [.white.opacity(0.66), TBTheme.skyLight.opacity(0.18), .clear],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.82), lineWidth: 1)
+        )
+    }
+
+    private func compactRequirementRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .center, spacing: 7) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(TBTheme.icyBlue)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(TBTheme.deepSky)
+                Text(value.isEmpty ? "Required" : value)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var agreementCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Agreement document", systemImage: "doc.text.fill")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(TBTheme.deepSky)
+
+                Spacer(minLength: 8)
+
+                Text(hasReachedAgreementEnd ? "Reviewed" : "Scroll")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(hasReachedAgreementEnd ? .green : TBTheme.icyBlue)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background((hasReachedAgreementEnd ? Color.green : TBTheme.skyBlue).opacity(0.12), in: Capsule())
+            }
+
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(LegalDocument.sellerAgreement.bodyText)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(Color.primary.opacity(0.84))
+                        .lineSpacing(5)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text("End of Seller Agreement")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
+                        .onAppear {
+                            hasReachedAgreementEnd = true
+                        }
+                }
+                .padding(.bottom, 4)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(12)
+            .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
+            )
+
+            agreementAcceptanceToggle
+        }
+        .padding(10)
+        .frame(maxHeight: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.82), lineWidth: 1)
+        )
+    }
+
+    private var agreementAcceptanceToggle: some View {
+        Button {
+            guard hasReachedAgreementEnd else { return }
+            hasAcceptedAgreement.toggle()
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: hasAcceptedAgreement ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(hasAcceptedAgreement ? TBTheme.icyBlue : TBTheme.deepSky.opacity(0.5))
+                Text("I have read and agree to the TenBelow Seller Agreement, Seller Policies, and payout setup requirements.")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(10)
+            .background(.white.opacity(0.56), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!hasReachedAgreementEnd)
+        .opacity(hasReachedAgreementEnd ? 1 : 0.55)
+    }
+
+    private var actionBar: some View {
+        VStack(spacing: 6) {
+            Button {
+                onAccept()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.right.circle.fill")
+                    Text(isCreatingAccount ? "Creating account..." : "Agree and create seller account")
+                }
+            }
+            .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+            .disabled(!hasReachedAgreementEnd || !hasAcceptedAgreement || isCreatingAccount)
+            .opacity(hasReachedAgreementEnd && hasAcceptedAgreement ? 1 : 0.55)
+
+            Text(hasReachedAgreementEnd ? "Check the agreement box to continue." : "Scroll the agreement box to the end.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+    }
+}
+
 private enum RolePickerStep {
     case roleSelection
     case buyerChoice
@@ -1231,6 +1648,9 @@ private enum SellerAccountFieldFocus: Hashable {
     case sellerId
     case email
     case password
+    case legalName
+    case shippingCountry
+    case shippingState
     case businessName
 }
 

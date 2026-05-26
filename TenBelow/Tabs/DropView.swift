@@ -160,12 +160,35 @@ struct DropView: View {
     private var isSeller: Bool { userRole == "seller" && !sellerId.isEmpty }
     private var sellerSubmissionProducts: [DropProduct] { effectiveSellerSubmissions?.products ?? [] }
     private var sellerHistoryWeeks: [SellerDropHistoryWeek] { sellerDropHistory?.weeks ?? [] }
+    private var sellerDisplayHistoryWeeks: [SellerDropHistoryWeek] {
+        var weeks = sellerHistoryWeeks
+        guard !submissionWindowOpen, !sellerSubmissionProducts.isEmpty else {
+            return weeks
+        }
+
+        let currentWeekId = effectiveSellerSubmissions?.weekId ?? effectiveDropResponse?.weekId ?? "current-weekly-drop"
+        if weeks.contains(where: { $0.weekId == currentWeekId }) {
+            return weeks
+        }
+
+        let fallbackDate = previewDateFormatter.string(from: countdownNow)
+        let currentWeek = SellerDropHistoryWeek(
+            weekId: currentWeekId,
+            startsAt: effectiveDropResponse?.startsAt ?? sellerSubmissionProducts.first?.submittedAt ?? fallbackDate,
+            endsAt: effectiveDropResponse?.endsAt ?? fallbackDate,
+            postedCount: sellerSubmissionProducts.count,
+            soldCount: 0,
+            products: sellerSubmissionProducts
+        )
+        weeks.insert(currentWeek, at: 0)
+        return weeks
+    }
     private var selectedHistoryWeek: SellerDropHistoryWeek? {
         if let selectedHistoryWeekId,
-           let match = sellerHistoryWeeks.first(where: { $0.weekId == selectedHistoryWeekId }) {
+           let match = sellerDisplayHistoryWeeks.first(where: { $0.weekId == selectedHistoryWeekId }) {
             return match
         }
-        return sellerHistoryWeeks.first
+        return sellerDisplayHistoryWeeks.first
     }
     private var slotsUsed: Int { effectiveSellerSubmissions?.slotsUsed ?? 0 }
     private var slotsMax: Int { effectiveSellerSubmissions?.slotsMax ?? DropConstants.maxSlotsPerSeller }
@@ -562,7 +585,7 @@ struct DropView: View {
 
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: TBTheme.spacingSM) {
-                    if !sellerSubmissionProducts.isEmpty {
+                    if submissionWindowOpen && !sellerSubmissionProducts.isEmpty {
                         sellerSubmissionSection
                     }
 
@@ -598,7 +621,7 @@ struct DropView: View {
                         }
                     }
 
-                    if sellerSubmissionProducts.isEmpty && (!isActive || weeklyDropProducts.isEmpty) {
+                    if sellerSubmissionProducts.isEmpty && sellerDisplayHistoryWeeks.isEmpty && (!isActive || weeklyDropProducts.isEmpty) {
                         VStack(spacing: 12) {
                             Image("Logo")
                                 .resizable()
@@ -805,7 +828,7 @@ struct DropView: View {
 
                 Spacer(minLength: 8)
 
-                Text(sellerHistoryWeeks.isEmpty ? "No past drops" : "\(sellerHistoryWeeks.count) weekend\(sellerHistoryWeeks.count == 1 ? "" : "s")")
+                Text(sellerDisplayHistoryWeeks.isEmpty ? "No past drops" : "\(sellerDisplayHistoryWeeks.count) weekend\(sellerDisplayHistoryWeeks.count == 1 ? "" : "s")")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(TBTheme.deepSky)
                     .padding(.horizontal, 9)
@@ -823,7 +846,7 @@ struct DropView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, -2)
 
-            if sellerHistoryWeeks.isEmpty {
+            if sellerDisplayHistoryWeeks.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("No completed Weekly Drops yet", systemImage: "clock.arrow.circlepath")
                         .font(.tbBodyStrong)
@@ -844,7 +867,7 @@ struct DropView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(sellerHistoryWeeks) { week in
+                        ForEach(sellerDisplayHistoryWeeks) { week in
                             Button {
                                 withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                                     selectedHistoryWeekId = week.weekId
@@ -940,7 +963,7 @@ struct DropView: View {
             return "Submit products over $10 on Thursday evening so they go live automatically at Friday 12:00 AM ET."
         }
         if !sellerSubmissionProducts.isEmpty {
-            return "Thursday uploads are closed. You can still review and edit your current drop lineup here before it goes live."
+            return "Thursday uploads are closed. Your drop lineup now appears in History for date-based review."
         }
         if let next = effectiveSellerSubmissions?.nextDropAt {
             return "The next submission window opens \(DropCountdown.timeLeft(until: next)). New uploads reopen Thursday at 5:00 PM ET."
