@@ -46,7 +46,7 @@ enum LegalDocument: Identifiable {
         }
     }
 
-    var bodyText: String {
+    nonisolated var bodyText: String {
         switch self {
         case .termsOfService:
             return """
@@ -739,6 +739,23 @@ admin@innovativecodeworks.com
 """
         }
     }
+
+    nonisolated var displayBodyText: String {
+        bodyText
+            .components(separatedBy: .newlines)
+            .map(Self.formattedLegalLine)
+            .joined(separator: "\n")
+    }
+
+    private nonisolated static func formattedLegalLine(_ line: String) -> String {
+        guard line.hasPrefix("- ") else { return line }
+
+        let bulletText = String(line.dropFirst(2))
+        guard let firstCharacter = bulletText.first else { return "•" }
+
+        let capitalizedBullet = firstCharacter.uppercased() + bulletText.dropFirst()
+        return "• \(capitalizedBullet)"
+    }
 }
 
 /// Full-screen in-app legal text (matches `LegalDocumentView` bodies, not remote web pages).
@@ -779,7 +796,7 @@ struct LegalDocumentView: View {
                 }
 
                 GlassCard(cornerRadius: 24) {
-                    Text(document.bodyText)
+                    Text(document.displayBodyText)
                         .font(.body)
                         .foregroundStyle(.primary)
                         .lineSpacing(4)

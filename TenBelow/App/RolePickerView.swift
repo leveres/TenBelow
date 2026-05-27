@@ -1331,6 +1331,7 @@ private struct SellerAgreementAcceptanceView: View {
 
     @State private var hasReachedAgreementEnd = false
     @State private var hasAcceptedAgreement = false
+    @State private var agreementViewportHeight: CGFloat = 0
 
     private var isTransitioning: Bool {
         isCreatingAccount || accountCreationSucceeded
@@ -1504,11 +1505,18 @@ private struct SellerAgreementAcceptanceView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background((hasReachedAgreementEnd ? Color.green : TBTheme.skyBlue).opacity(0.12), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(hasReachedAgreementEnd ? Color.green.opacity(0.22) : Color.clear, lineWidth: 1)
+                    )
+                    .shadow(color: hasReachedAgreementEnd ? Color.green.opacity(0.22) : .clear, radius: 8, y: 2)
+                    .scaleEffect(hasReachedAgreementEnd ? 1.04 : 1)
+                    .animation(.spring(response: 0.34, dampingFraction: 0.76), value: hasReachedAgreementEnd)
             }
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(LegalDocument.sellerAgreement.bodyText)
+                    Text(LegalDocument.sellerAgreement.displayBodyText)
                         .font(.system(size: 15, weight: .regular))
                         .foregroundStyle(Color.primary.opacity(0.84))
                         .lineSpacing(5)
@@ -1520,12 +1528,21 @@ private struct SellerAgreementAcceptanceView: View {
                         .foregroundStyle(TBTheme.deepSky)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 8)
-                        .onAppear {
-                            hasReachedAgreementEnd = true
-                        }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: SellerAgreementEndPositionKey.self,
+                                    value: proxy.frame(in: .named("sellerAgreementScroll")).minY
+                                )
+                            }
+                        )
                 }
                 .padding(.bottom, 4)
             }
+            .coordinateSpace(name: "sellerAgreementScroll")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(12)
             .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -1533,6 +1550,22 @@ private struct SellerAgreementAcceptanceView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
             )
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: SellerAgreementViewportHeightKey.self, value: proxy.size.height)
+                }
+            )
+            .onPreferenceChange(SellerAgreementViewportHeightKey.self) { newHeight in
+                agreementViewportHeight = newHeight
+            }
+            .onPreferenceChange(SellerAgreementEndPositionKey.self) { endMinY in
+                guard !hasReachedAgreementEnd, agreementViewportHeight > 0 else { return }
+                if endMinY <= agreementViewportHeight - 8 {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) {
+                        hasReachedAgreementEnd = true
+                    }
+                }
+            }
 
             agreementAcceptanceToggle
         }
@@ -1589,6 +1622,22 @@ private struct SellerAgreementAcceptanceView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
         }
+    }
+}
+
+private struct SellerAgreementViewportHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct SellerAgreementEndPositionKey: PreferenceKey {
+    static var defaultValue: CGFloat = .infinity
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = min(value, nextValue())
     }
 }
 

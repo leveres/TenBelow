@@ -621,7 +621,7 @@ struct DropView: View {
                         }
                     }
 
-                    if sellerSubmissionProducts.isEmpty && sellerDisplayHistoryWeeks.isEmpty && (!isActive || weeklyDropProducts.isEmpty) {
+                    if submissionWindowOpen && sellerSubmissionProducts.isEmpty {
                         VStack(spacing: 12) {
                             Image("Logo")
                                 .resizable()
@@ -648,7 +648,9 @@ struct DropView: View {
                         )
                     }
 
-                    sellerHistorySection
+                    if !submissionWindowOpen {
+                        sellerHistorySection
+                    }
                 }
                 .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
                 .padding(.top, 0)
@@ -695,66 +697,68 @@ struct DropView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Button {
-                Task {
-                    if sellerHasWeeklyDropAccess {
-                        await MainActor.run { showDropSubmit = true }
-                    } else {
-                        await sellerSubscription.refresh()
-                        await sellerSubscription.purchaseMembership()
-                        if sellerSubscription.hasActiveSubscription {
+            if shouldShowSellerHeroAction {
+                Button {
+                    Task {
+                        if sellerHasWeeklyDropAccess {
                             await MainActor.run { showDropSubmit = true }
+                        } else {
+                            await sellerSubscription.refresh()
+                            await sellerSubscription.purchaseMembership()
+                            if sellerSubscription.hasActiveSubscription {
+                                await MainActor.run { showDropSubmit = true }
+                            }
                         }
                     }
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    Text(primarySellerCTA)
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
-                        .foregroundStyle(TBTheme.bannerCTAForeground)
-                        .multilineTextAlignment(.leading)
+                } label: {
+                    HStack(spacing: 10) {
+                        Text(primarySellerCTA)
+                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                            .foregroundStyle(TBTheme.bannerCTAForeground)
+                            .multilineTextAlignment(.leading)
 
-                    Spacer(minLength: 8)
+                        Spacer(minLength: 8)
 
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(TBTheme.bannerCTAForeground.opacity(0.86))
-                }
-                .padding(.horizontal, 15)
-                .padding(.vertical, 13)
-                .background {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            LinearGradient(
-                                colors: [
-                                    .white.opacity(0.34),
-                                    TBTheme.skyLight.opacity(0.18),
-                                    TBTheme.icyBlue.opacity(0.12)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(TBTheme.bannerCTAForeground.opacity(0.86))
+                    }
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 13)
+                    .background {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.34),
+                                        TBTheme.skyLight.opacity(0.18),
+                                        TBTheme.icyBlue.opacity(0.12)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                             )
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        )
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.78),
+                                        TBTheme.skyBlue.opacity(0.28),
+                                        TBTheme.deepSky.opacity(0.18)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
                 }
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    .white.opacity(0.78),
-                                    TBTheme.skyBlue.opacity(0.28),
-                                    TBTheme.deepSky.opacity(0.18)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                )
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
@@ -976,6 +980,10 @@ struct DropView: View {
             return sellerSubmissionProducts.isEmpty ? "Add Your First Drop Item" : "Edit Your Drop Lineup"
         }
         return sellerSubmissionProducts.isEmpty ? "View Drop Workspace" : "Review This Week's Drop"
+    }
+
+    private var shouldShowSellerHeroAction: Bool {
+        submissionWindowOpen || isActive || !sellerSubmissionProducts.isEmpty
     }
 
     private var sellerActionSubtitle: String {
