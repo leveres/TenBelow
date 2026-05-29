@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TenBelow Admin Review</title>
-    <link rel="stylesheet" href="/admin/assets/admin-review.css?v=11" />
+    <link rel="stylesheet" href="/admin/assets/admin-review.css?v=12" />
   </head>
   <body>
     <main class="app-shell">
@@ -56,6 +56,7 @@
       <nav class="admin-section-nav" aria-label="Jump to section">
         <button type="button" class="admin-section-link is-active" data-panel-id="products">Products</button>
         <button type="button" class="admin-section-link" data-panel-id="accounts">Accounts</button>
+        <button type="button" class="admin-section-link" data-panel-id="custom-requests">Custom Requests</button>
         <button type="button" class="admin-section-link" data-panel-id="exchanges">Exchanges</button>
         <button type="button" class="admin-section-link" data-panel-id="audit">Audit</button>
         <button type="button" class="admin-section-link" data-panel-id="incidents">Incidents</button>
@@ -138,6 +139,47 @@
               <span id="accountPageInfo" class="page-info"></span>
               <button type="button" id="accountNextPage" class="secondary-button">Next</button>
             </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="admin-panel-custom-requests" class="admin-panel" data-panel-id="custom-requests">
+        <button type="button" class="admin-panel-toggle" aria-expanded="false" aria-controls="admin-panel-custom-requests-body">
+          <span class="admin-panel-toggle-text">Custom Product Requests</span>
+          <span class="admin-panel-chevron" aria-hidden="true">▾</span>
+        </button>
+        <div id="admin-panel-custom-requests-body" class="admin-panel-body" hidden>
+          <p class="audit-subcopy">
+            Review buyer custom-product requests, seller routing, reference images, and request language for policy and safety issues.
+          </p>
+          <section class="custom-request-section">
+            <div class="custom-request-toolbar">
+              <label class="field field-small">
+                <span>Status</span>
+                <select id="customRequestStatusFilter">
+                  <option value="">All</option>
+                  <option value="pending">Pending</option>
+                  <option value="accepted">Accepted</option>
+                  <option value="declined">Declined</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Search requests</span>
+                <input id="customRequestSearchInput" type="search" placeholder="Buyer, seller, email, or request details" autocomplete="off" />
+              </label>
+              <button id="refreshCustomRequestsButton" class="secondary-button" type="button">Refresh requests</button>
+            </div>
+            <section class="queue-summary queue-summary-tight">
+              <div class="summary-card">
+                <span class="summary-label">Custom requests</span>
+                <strong id="customRequestCount">0</strong>
+              </div>
+            </section>
+            <div id="customRequestEmpty" class="empty-state hidden">
+              <h2>No custom requests</h2>
+              <p>Buyer custom-product requests will appear here for admin review.</p>
+            </div>
+            <div id="customRequestList" class="custom-request-list"></div>
           </section>
         </div>
       </section>
@@ -429,6 +471,6 @@
       </article>
     </template>
 
-    <script type="module" src="/admin/assets/admin-review.js?v=11"></script>
+    <script type="module" src="/admin/assets/admin-review.js?v=12"></script>
   </body>
 </html>

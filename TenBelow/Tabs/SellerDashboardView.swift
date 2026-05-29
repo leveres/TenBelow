@@ -567,8 +567,12 @@ private struct SellerStoresDirectoryView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
 
+    @State private var currentStorePage = 0
+
     let currentSellerID: String
     let products: [Product]
+
+    private let profilesPerPage = 5
 
     private var storefrontProducts: [Product] {
         resolvedStorefrontProducts(
@@ -603,23 +607,37 @@ private struct SellerStoresDirectoryView: View {
         }
     }
 
-    var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: TBTheme.spacingLG) {
-                directoryHeader
+    private var totalStorePages: Int {
+        max(1, Int(ceil(Double(sellerProfiles.count) / Double(profilesPerPage))))
+    }
 
-                if sellerProfiles.isEmpty {
-                    emptyState
-                } else {
+    private var visibleSellerProfiles: [SellerProfile] {
+        let safePage = min(max(currentStorePage, 0), totalStorePages - 1)
+        let startIndex = safePage * profilesPerPage
+        let endIndex = min(startIndex + profilesPerPage, sellerProfiles.count)
+        guard startIndex < endIndex else { return [] }
+        return Array(sellerProfiles[startIndex..<endIndex])
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
+            directoryHeader
+                .padding(.horizontal, 20)
+
+            if sellerProfiles.isEmpty {
+                emptyState
+                    .padding(.horizontal, 20)
+                Spacer(minLength: 0)
+            } else {
+                VStack(spacing: 14) {
                     LazyVGrid(
                         columns: [
-                            GridItem(.flexible(minimum: 138, maximum: 172), spacing: 18),
-                            GridItem(.flexible(minimum: 138, maximum: 172), spacing: 18)
+                            GridItem(.flexible(), spacing: 0)
                         ],
                         alignment: .center,
-                        spacing: 16
+                        spacing: 12
                     ) {
-                        ForEach(sellerProfiles) { profile in
+                        ForEach(visibleSellerProfiles) { profile in
                             NavigationLink {
                                 PublicSellerProfileView(
                                     seller: profile,
@@ -631,12 +649,18 @@ private struct SellerStoresDirectoryView: View {
                             .buttonStyle(.plain)
                         }
                     }
+                    .padding(.horizontal, 20)
+
+                    if totalStorePages > 1 {
+                        storePaginationControls
+                            .padding(.horizontal, 20)
+                    }
+
+                    Spacer(minLength: 0)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 0)
-            .padding(.bottom, TBTheme.spacingXL)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(TBTheme.cloudWhite.ignoresSafeArea())
         .navigationTitle("")
         #if os(iOS) || os(visionOS)
@@ -650,8 +674,8 @@ private struct SellerStoresDirectoryView: View {
         .task {
             await catalog.load()
         }
-        .refreshable {
-            await catalog.load()
+        .onChange(of: sellerProfiles.count) { _, _ in
+            currentStorePage = min(currentStorePage, totalStorePages - 1)
         }
     }
 
@@ -661,11 +685,12 @@ private struct SellerStoresDirectoryView: View {
                 Image("StoresTitle")
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 328, height: 118, alignment: .center)
+                    .frame(width: 248, height: 82, alignment: .center)
                     .clipped()
             }
-            .frame(maxWidth: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, -6)
+            .padding(.leading, -8)
 
             Text("Browse other TenBelow makers, study their storefronts, and see how sellers are presenting their products.")
                 .font(.tbBody)
@@ -676,78 +701,102 @@ private struct SellerStoresDirectoryView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func sellerStoreTile(_ profile: SellerProfile) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 8) {
-                StorefrontImageView(reference: profile.avatarURL?.absoluteString, contentMode: .fill) {
-                    Circle()
-                        .fill(TBTheme.skyLight.opacity(0.58))
-                        .overlay {
-                            Text(avatarInitials(for: profile))
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
-                                .foregroundStyle(TBTheme.deepSky)
-                        }
+    private var storePaginationControls: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<totalStorePages, id: \.self) { page in
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                        currentStorePage = page
+                    }
+                } label: {
+                    Text("\(page + 1)")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(page == currentStorePage ? .white : TBTheme.deepSky)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(page == currentStorePage ? TBTheme.accent : Color.white.opacity(0.86))
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(TBTheme.skyBlue.opacity(0.22), lineWidth: 0.8)
+                        )
                 }
-                .frame(width: 44, height: 44)
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .strokeBorder(.white.opacity(0.9), lineWidth: 2)
-                )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(profile.displayName)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(TBTheme.deepSky)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.84)
-
-                    Text(storeStatusText(for: profile))
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(TBTheme.icyBlue)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-
-                    Text(storeMetricText(for: profile))
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(TBTheme.icyBlue.opacity(0.86))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            HStack {
-                Text(profile.handle)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-
-                Spacer(minLength: 4)
-
-                viewStoreCapsule
+                .buttonStyle(.plain)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 124, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func sellerStoreTile(_ profile: SellerProfile) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            StorefrontImageView(reference: profile.avatarURL?.absoluteString, contentMode: .fill) {
+                Circle()
+                    .fill(TBTheme.skyLight.opacity(0.58))
+                    .overlay {
+                        Text(avatarInitials(for: profile))
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(TBTheme.deepSky)
+                    }
+            }
+            .frame(width: 36, height: 36)
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .strokeBorder(.white.opacity(0.9), lineWidth: 2)
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(profile.displayName)
+                    .font(.system(size: 12.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.74)
+
+                Text(storeStatusText(for: profile))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(TBTheme.icyBlue)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+
+                Text(storeMetricText(for: profile))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(TBTheme.icyBlue.opacity(0.86))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+
+                HStack(spacing: 4) {
+                    Text(profile.handle)
+                        .font(.system(size: 7.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
+
+                    Spacer(minLength: 2)
+
+                    viewStoreCapsule
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, minHeight: 78, maxHeight: 78, alignment: .center)
         .padding(.horizontal, 10)
-        .padding(.vertical, 12)
         .background(
             LinearGradient(
                 colors: [
-                    TBTheme.skyLight.opacity(0.62),
-                    Color.white.opacity(0.92)
+                    Color.white.opacity(0.96),
+                    TBTheme.skyLight.opacity(0.26)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ),
-            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .strokeBorder(TBTheme.skyBlue.opacity(0.25), lineWidth: 0.9)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.16), lineWidth: 0.8)
         )
-        .shadow(color: TBTheme.deepSky.opacity(0.045), radius: 8, y: 3)
+        .shadow(color: TBTheme.deepSky.opacity(0.035), radius: 8, y: 3)
     }
 
     private func sellerStoreRow(_ profile: SellerProfile) -> some View {
@@ -858,13 +907,14 @@ private struct SellerStoresDirectoryView: View {
         HStack(spacing: 4) {
             Text("View")
             Image(systemName: "chevron.right")
-                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .font(.system(size: 7, weight: .bold, design: .rounded))
         }
-        .font(.system(size: 10, weight: .bold, design: .rounded))
+        .font(.system(size: 8, weight: .bold, design: .rounded))
         .foregroundStyle(TBTheme.deepSky)
         .lineLimit(1)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 5)
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
         .background(
             Capsule(style: .continuous)
                 .fill(

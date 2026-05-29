@@ -158,6 +158,10 @@ Refunds are generally not offered for delivered items except where required by l
 
 TenBelow may allow buyers to submit custom requests or quote requests to sellers who opt into that feature. Sellers are not required to accept custom requests. TenBelow may review, route, moderate, or remove custom request activity where necessary.
 
+Custom requests, reference images, descriptions, messages, and seller responses must follow the same product, safety, intellectual property, and prohibited-item rules that apply to regular marketplace listings. Buyers may not request illegal, unsafe, counterfeit, infringing, stolen, dangerous, weapon-related, controlled, or prohibited items, and sellers may not accept, quote, design, produce, ship, or arrange those items through TenBelow.
+
+TenBelow may make custom request information visible to authorized admin personnel for moderation, safety review, audit, dispute handling, account enforcement, and legal compliance. TenBelow may decline, remove, preserve, or report custom request activity where necessary to protect the platform, users, or the public.
+
 Any custom request feature is provided for marketplace convenience and communication. Unless TenBelow expressly states otherwise, TenBelow does not guarantee that a custom request will be accepted, completed, or fulfilled, and TenBelow is not the designer or manufacturer of custom products offered by third-party sellers.
 
 12. Drops, Special Releases, and Promotional Features
@@ -556,6 +560,10 @@ TenBelow may process or direct refunds, reversals, or payout offsets where neces
 12. Custom Requests
 
 TenBelow may allow sellers to opt into custom request functionality. If you enable that feature, you are responsible for reviewing, responding to, and managing custom-request opportunities in a lawful and professional manner.
+
+Custom requests are subject to the same rules as normal product listings. You may not accept, quote, design, make, ship, or arrange any custom product that is illegal, unsafe, counterfeit, infringing, stolen, weapon-related, controlled, dangerous, or otherwise prohibited by TenBelow’s policies or United States law.
+
+Buyer descriptions, reference images, seller responses, request status changes, and related request information may be reviewed by TenBelow admin personnel for moderation, safety, audit, dispute, and legal compliance purposes. If a buyer requests a prohibited or suspicious item, you should decline the request and may report it to TenBelow.
 
 TenBelow does not guarantee that any custom request will result in a sale, paid project, or completed order. TenBelow may moderate, pause, remove, or route custom request activity where necessary.
 

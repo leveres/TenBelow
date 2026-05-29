@@ -1354,7 +1354,7 @@ private struct SellerAgreementAcceptanceView: View {
                     actionBar
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, max(geometry.safeAreaInsets.top - 10, 8))
+                .padding(.top, max(geometry.safeAreaInsets.top - 24, 0))
                 .padding(.bottom, geometry.safeAreaInsets.bottom + 6)
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
                 .blur(radius: isTransitioning ? 2 : 0)
@@ -1386,7 +1386,32 @@ private struct SellerAgreementAcceptanceView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 10) {
+        ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Seller onboarding")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .tracking(0.8)
+                        .textCase(.uppercase)
+                        .foregroundStyle(TBTheme.icyBlue)
+                    Text("Seller Agreement")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .tracking(-0.5)
+                        .foregroundStyle(TBTheme.deepSky)
+                }
+                .padding(.leading, 46)
+
+                Text("Review and accept before seller onboarding continues.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(TBTheme.deepSky.opacity(0.72))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+
             Button {
                 onCancel()
             } label: {
@@ -1398,27 +1423,9 @@ private struct SellerAgreementAcceptanceView: View {
             }
             .buttonStyle(.plain)
             .disabled(isCreatingAccount)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Seller onboarding")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .tracking(0.8)
-                    .textCase(.uppercase)
-                    .foregroundStyle(TBTheme.icyBlue)
-                Text("Seller Agreement")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .tracking(-0.5)
-                    .foregroundStyle(TBTheme.deepSky)
-                Text("Review and accept before seller onboarding continues.")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(TBTheme.deepSky.opacity(0.72))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
-                    .lineSpacing(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
+            .padding(.top, 2)
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var requirementSummary: some View {

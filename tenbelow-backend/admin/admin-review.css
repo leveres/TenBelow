@@ -710,9 +710,26 @@ textarea {
   box-shadow: 0 10px 28px rgba(71, 121, 206, 0.08);
 }
 
+.custom-request-section {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(127, 178, 255, 0.2);
+  box-shadow: 0 10px 28px rgba(71, 121, 206, 0.08);
+}
+
 .account-toolbar {
   display: grid;
   grid-template-columns: minmax(140px, 180px) minmax(0, 1fr) minmax(120px, 150px) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.custom-request-toolbar {
+  display: grid;
+  grid-template-columns: minmax(140px, 180px) minmax(0, 1fr) auto;
   gap: 12px;
   align-items: end;
 }
@@ -735,6 +752,20 @@ textarea {
   border: 1px solid rgba(127, 178, 255, 0.2);
 }
 
+.custom-request-list {
+  display: grid;
+  gap: 12px;
+}
+
+.custom-request-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(245, 250, 255, 0.95);
+  border: 1px solid rgba(127, 178, 255, 0.2);
+}
+
 .account-card-header,
 .account-card-footer {
   display: flex;
@@ -743,7 +774,20 @@ textarea {
   gap: 12px;
 }
 
+.custom-request-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .account-card-title {
+  margin: 0;
+  color: #2e5fb9;
+  font-size: 17px;
+}
+
+.custom-request-title {
   margin: 0;
   color: #2e5fb9;
   font-size: 17px;
@@ -755,6 +799,74 @@ textarea {
   font-size: 12px;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.custom-request-meta {
+  margin: 0;
+  color: #667892;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.custom-request-description {
+  margin: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #263b5d;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.custom-request-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  background: rgba(76, 133, 229, 0.12);
+  border: 1px solid rgba(76, 133, 229, 0.22);
+  color: #2e5fb9;
+}
+
+.custom-request-status.status-accepted {
+  background: rgba(48, 173, 111, 0.14);
+  border-color: rgba(48, 173, 111, 0.28);
+  color: #1e8e58;
+}
+
+.custom-request-status.status-declined {
+  background: rgba(223, 90, 90, 0.12);
+  border-color: rgba(223, 90, 90, 0.24);
+  color: #bf4d4d;
+}
+
+.custom-request-references {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.custom-request-thumb {
+  display: block;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(127, 178, 255, 0.22);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.custom-request-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .account-status {
@@ -1405,12 +1517,14 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .account-toolbar {
+  .account-toolbar,
+  .custom-request-toolbar {
     grid-template-columns: 1fr;
   }
 
   .account-card-header,
-  .account-card-footer {
+  .account-card-footer,
+  .custom-request-header {
     align-items: stretch;
     flex-direction: column;
   }

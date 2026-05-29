@@ -4972,6 +4972,66 @@ app.delete("/admin/accounts/:kind/:accountId", adminMutationLimiter, requireAdmi
   }
 });
 
+app.get("/admin/custom-order-requests", adminMutationLimiter, requireAdmin, async (req, res) => {
+  try {
+    const requestedStatus = String(req.query.status || "").trim().toLowerCase();
+    const q = String(req.query.q || "").trim().toLowerCase();
+    const sellers = await fetchSellers();
+    let requests = loadCustomOrderRequestsFile()
+      .filter((request) => !requestedStatus || request.status === requestedStatus)
+      .map((request) => {
+        const sellerRecord = sellers[request.sellerId] || {};
+        const profile = normalizeSellerPublicProfile(
+          sellerRecord.profile,
+          request.sellerId,
+          sellerRecord.businessName
+        );
+        return {
+          ...request,
+          sellerDisplayName: profile.displayName || sellerRecord.businessName || request.sellerId,
+          sellerEmail: sellerRecord.email || "",
+          sellerHandle: profile.handle || "",
+        };
+      });
+
+    if (q) {
+      requests = requests.filter((request) =>
+        [
+          request.id,
+          request.sellerId,
+          request.sellerDisplayName,
+          request.sellerEmail,
+          request.sellerHandle,
+          request.buyerName,
+          request.buyerEmail,
+          request.description,
+          request.status,
+        ].some((value) => String(value || "").toLowerCase().includes(q))
+      );
+    }
+
+    requests.sort((lhs, rhs) => {
+      const lhsTime = new Date(lhs.createdAt || 0).getTime();
+      const rhsTime = new Date(rhs.createdAt || 0).getTime();
+      return rhsTime - lhsTime;
+    });
+
+    auditLog(
+      auditContext(req, {
+        action: "admin_custom_order_queue_view",
+        status: requestedStatus || "all",
+        resultCount: requests.length,
+      })
+    );
+
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.json({ requests });
+  } catch (err) {
+    console.error("admin custom order requests error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/admin/exchange-requests", adminMutationLimiter, requireAdmin, (req, res) => {
   try {
     const requestedStatus = String(req.query.status || "").trim().toLowerCase();

@@ -22,6 +22,12 @@ const accountList = document.querySelector("#accountList");
 const accountPrevPage = document.querySelector("#accountPrevPage");
 const accountNextPage = document.querySelector("#accountNextPage");
 const accountPageInfo = document.querySelector("#accountPageInfo");
+const customRequestStatusFilter = document.querySelector("#customRequestStatusFilter");
+const customRequestSearchInput = document.querySelector("#customRequestSearchInput");
+const refreshCustomRequestsButton = document.querySelector("#refreshCustomRequestsButton");
+const customRequestCount = document.querySelector("#customRequestCount");
+const customRequestEmpty = document.querySelector("#customRequestEmpty");
+const customRequestList = document.querySelector("#customRequestList");
 const exchangeStatusFilter = document.querySelector("#exchangeStatusFilter");
 const exchangeQueueList = document.querySelector("#exchangeQueueList");
 const exchangeQueueEmpty = document.querySelector("#exchangeQueueEmpty");
@@ -551,6 +557,140 @@ async function loadAccounts() {
   } catch (error) {
     renderAccounts({ accounts: [], total: 0, page: 1, pages: 1 });
     setFeedback("Failed to load accounts");
+    console.error(error);
+  }
+}
+
+function customRequestQueryString() {
+  const params = new URLSearchParams();
+  const status = customRequestStatusFilter?.value || "";
+  const q = customRequestSearchInput?.value?.trim() || "";
+  if (status) params.set("status", status);
+  if (q) params.set("q", q);
+  return params.toString();
+}
+
+function customRequestStatusLabel(status) {
+  const normalized = String(status || "pending").trim().toLowerCase();
+  if (normalized === "accepted") return "Accepted";
+  if (normalized === "declined") return "Declined";
+  return "Pending";
+}
+
+function absoluteMediaURL(url) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  return `${window.location.origin}${value.startsWith("/") ? value : `/${value}`}`;
+}
+
+function renderCustomRequests(requests) {
+  if (!customRequestList || !customRequestCount || !customRequestEmpty) return;
+
+  customRequestList.replaceChildren();
+  customRequestCount.textContent = String(requests.length);
+
+  if (!requests.length) {
+    customRequestEmpty.classList.remove("hidden");
+    return;
+  }
+
+  customRequestEmpty.classList.add("hidden");
+
+  for (const request of requests) {
+    const card = document.createElement("article");
+    card.className = "custom-request-card";
+
+    const header = document.createElement("div");
+    header.className = "custom-request-header";
+
+    const titleWrap = document.createElement("div");
+    const title = document.createElement("h3");
+    title.className = "custom-request-title";
+    title.textContent = request.buyerName || request.buyerEmail || "Buyer request";
+    const meta = document.createElement("p");
+    meta.className = "custom-request-meta";
+    meta.textContent = [
+      request.buyerEmail ? `Buyer: ${request.buyerEmail}` : "",
+      request.sellerDisplayName ? `Seller: ${request.sellerDisplayName}` : `Seller ID: ${request.sellerId || "—"}`,
+      request.createdAt ? `Sent ${formatDateTime(request.createdAt)}` : "",
+    ].filter(Boolean).join(" · ");
+    titleWrap.append(title, meta);
+
+    const status = document.createElement("span");
+    const normalizedStatus = String(request.status || "pending").trim().toLowerCase();
+    status.className = `custom-request-status status-${normalizedStatus}`;
+    status.textContent = customRequestStatusLabel(normalizedStatus);
+    header.append(titleWrap, status);
+
+    const sellerMeta = document.createElement("p");
+    sellerMeta.className = "custom-request-meta";
+    const sellerParts = [];
+    if (request.sellerId) sellerParts.push(`Seller ID: ${request.sellerId}`);
+    if (request.sellerHandle) sellerParts.push(`Handle: ${request.sellerHandle}`);
+    if (request.sellerEmail) sellerParts.push(`Seller email: ${request.sellerEmail}`);
+    if (request.statusUpdatedAt) sellerParts.push(`Updated ${formatDateTime(request.statusUpdatedAt)}`);
+    sellerMeta.textContent = sellerParts.join(" · ") || "No seller details recorded.";
+
+    const description = document.createElement("p");
+    description.className = "custom-request-description";
+    description.textContent = request.description || "No request description submitted.";
+
+    card.append(header, sellerMeta, description);
+
+    const references = Array.isArray(request.referenceImageURLs) ? request.referenceImageURLs : [];
+    if (references.length) {
+      const referenceWrap = document.createElement("div");
+      referenceWrap.className = "custom-request-references";
+      for (const referenceURL of references) {
+        const absoluteURL = absoluteMediaURL(referenceURL);
+        const link = document.createElement("a");
+        link.className = "custom-request-thumb";
+        link.href = absoluteURL;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        const img = document.createElement("img");
+        img.src = absoluteURL;
+        img.alt = "Custom request reference";
+        link.appendChild(img);
+        referenceWrap.appendChild(link);
+      }
+      card.appendChild(referenceWrap);
+    }
+
+    const auditMeta = document.createElement("p");
+    auditMeta.className = "custom-request-meta";
+    auditMeta.textContent = [
+      request.id ? `Request ID: ${request.id}` : "",
+      request.clientIp ? `IP: ${request.clientIp}` : "",
+    ].filter(Boolean).join(" · ");
+    card.appendChild(auditMeta);
+
+    customRequestList.appendChild(card);
+  }
+}
+
+async function loadCustomRequests() {
+  if (!isAdminAuthenticated) {
+    renderCustomRequests([]);
+    return;
+  }
+
+  try {
+    setFeedback("Loading custom requests...");
+    const query = customRequestQueryString();
+    const response = await fetch(`/admin/custom-order-requests${query ? `?${query}` : ""}`, {
+      headers: adminHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const payload = await response.json();
+    renderCustomRequests(Array.isArray(payload.requests) ? payload.requests : []);
+    setFeedback("Custom requests ready");
+  } catch (error) {
+    renderCustomRequests([]);
+    setFeedback("Failed to load custom requests");
     console.error(error);
   }
 }
@@ -1674,6 +1814,7 @@ async function refreshAdminSessionState(options = {}) {
         loadQueue(false),
         loadSellerDirectory(),
         loadAccounts(),
+        loadCustomRequests(),
         loadExchangeQueue(),
         loadAuditLog(),
         loadSecurityMetrics(),
@@ -1690,6 +1831,7 @@ async function refreshAdminSessionState(options = {}) {
       renderQueue([]);
       renderSellerDirectory([]);
       renderAccounts({ accounts: [], total: 0, page: 1, pages: 1 });
+      renderCustomRequests([]);
       renderExchangeQueue([]);
       renderExchangeDetail(null);
       renderAuditEntries([]);
@@ -1712,6 +1854,7 @@ async function refreshAdminSessionState(options = {}) {
     renderQueue([]);
     renderSellerDirectory([]);
     renderAccounts({ accounts: [], total: 0, page: 1, pages: 1 });
+    renderCustomRequests([]);
     renderExchangeQueue([]);
     renderExchangeDetail(null);
     renderAuditEntries([]);
@@ -1765,6 +1908,7 @@ async function logoutAdminSession() {
     renderQueue([]);
     renderSellerDirectory([]);
     renderAccounts({ accounts: [], total: 0, page: 1, pages: 1 });
+    renderCustomRequests([]);
     renderExchangeQueue([]);
     renderExchangeDetail(null);
     renderAuditEntries([]);
@@ -1876,6 +2020,15 @@ if (accountNextPage) {
     loadAccounts();
   });
 }
+if (refreshCustomRequestsButton) {
+  refreshCustomRequestsButton.addEventListener("click", loadCustomRequests);
+}
+if (customRequestStatusFilter) {
+  customRequestStatusFilter.addEventListener("change", loadCustomRequests);
+}
+if (customRequestSearchInput) {
+  customRequestSearchInput.addEventListener("input", debounce(loadCustomRequests, 300));
+}
 if (refreshExchangeButton) {
   refreshExchangeButton.addEventListener("click", loadExchangeQueue);
 }
@@ -1973,7 +2126,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-const ADMIN_PANEL_IDS = ["products", "accounts", "exchanges", "audit", "incidents", "snapshots"];
+const ADMIN_PANEL_IDS = ["products", "accounts", "custom-requests", "exchanges", "audit", "incidents", "snapshots"];
 const OPEN_PANEL_STORAGE_KEY = "tenbelow.admin.openPanel";
 
 function getAdminPanelElements() {
