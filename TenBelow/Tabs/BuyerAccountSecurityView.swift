@@ -135,13 +135,21 @@ struct BuyerAccountSecurityView: View {
                 newPassword: nextPassword
             )
             buyerEmail = response.email
-            MarketplaceAuthSession.storeBuyerSessionToken(response.token)
+            if let token = response.token, !token.isEmpty {
+                MarketplaceAuthSession.storeBuyerSessionToken(token)
+            } else if response.verification != nil {
+                MarketplaceAuthSession.clearBuyerSession()
+            }
             await PushDeviceRegistration.syncAfterIdentityChange()
 
             let destinations = response.confirmationTargets.joined(separator: ", ")
-            statusMessage = destinations.isEmpty
-                ? "Changes saved."
-                : "Changes saved. Confirmation sent to \(destinations)."
+            if let verification = response.verification {
+                statusMessage = "Email changed. Enter the verification code sent to \(verification.deliveryTarget) the next time you sign in."
+            } else {
+                statusMessage = destinations.isEmpty
+                    ? "Changes saved."
+                    : "Changes saved. Confirmation sent to \(destinations)."
+            }
             newPassword = ""
             confirmPassword = ""
             emailInput = response.email

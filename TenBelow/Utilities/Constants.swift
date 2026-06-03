@@ -250,7 +250,7 @@ enum TopLevelHeaderMetrics {
         homeBottomInset + homeFloatingTabBarClearance + max(safeAreaBottom, 0)
     }
     static let shopOuterHorizontalInset: CGFloat = 4
-    static let shopTopInset: CGFloat = -8
+    static let shopTopInset: CGFloat = -14
     static let shopBottomInset: CGFloat = 0
     static let shopFilterTopInset: CGFloat = -2
     static let shopFilterBottomInset: CGFloat = 4

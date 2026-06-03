@@ -2,7 +2,8 @@ import SwiftUI
 
 struct BuyerProfileView: View {
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
-    @EnvironmentObject private var buyerSellerThreads: BuyerSellerThreadStore
+    @EnvironmentObject private var orderStore: OrderStore
+    @EnvironmentObject private var inquiryStore: SellerInquiryStore
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
@@ -76,18 +77,21 @@ struct BuyerProfileView: View {
         return "\(count) seller\(count == 1 ? "" : "s") you follow."
     }
 
-    private var messageSellerProfiles: [SellerProfile] {
-        buyerSellerThreads
-            .sellerIdsOrderedByRecentMessage()
-            .compactMap { sellerProfile(for: $0) }
+    private var messageThreadCount: Int {
+        MessagingInbox.buyerEntries(
+            orders: orderStore.orders,
+            inquiryThreads: inquiryStore.buyerThreads,
+            sellerProfiles: catalog.sellerProfiles,
+            storefrontProducts: storefrontProducts
+        ).count
     }
 
     private var messageThreadCountDescription: String {
-        let count = messageSellerProfiles.count
+        let count = messageThreadCount
         if count == 0 {
-            return "Open recent buyer-seller conversations."
+            return "Shop chats and order threads with sellers."
         }
-        return "\(count) active conversation\(count == 1 ? "" : "s")."
+        return "\(count) conversation\(count == 1 ? "" : "s")."
     }
 
     var body: some View {
@@ -198,6 +202,12 @@ struct BuyerProfileView: View {
             NavigationStack {
                 BuyerSignInView()
             }
+        }
+        .task(id: buyerEmail) {
+            guard buyerAccountCreated else { return }
+            async let orders: Void = orderStore.refreshBuyerOrders(email: buyerEmail)
+            async let inquiries: Void = inquiryStore.refreshBuyerThreads()
+            _ = await (orders, inquiries)
         }
     }
 

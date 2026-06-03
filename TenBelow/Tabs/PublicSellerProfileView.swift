@@ -12,11 +12,14 @@ struct PublicSellerProfileView: View {
     @EnvironmentObject private var cart: CartStore
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
-    @EnvironmentObject private var buyerSellerThreads: BuyerSellerThreadStore
+    @EnvironmentObject private var orderStore: OrderStore
+    @EnvironmentObject private var inquiryStore: SellerInquiryStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @Environment(\.openURL) private var openURL
+    @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
     @State private var currentProductPage = 0
-    @State private var messageThreadSeller: SellerProfile?
+    @State private var showMessagingGate = false
+    @State private var activeShopChat: ShopChatSheetItem?
     @State private var pendingExternalWebsiteURL: URL?
     #if os(iOS)
     @State private var showShareSheet = false
@@ -30,6 +33,10 @@ struct PublicSellerProfileView: View {
             remoteProducts: catalog.products,
             fallbackProducts: localProducts.products
         )
+    }
+
+    private var brandTheme: StorefrontBrandTheme {
+        StorefrontBrandTheme.theme(for: resolvedSeller.id)
     }
 
     private var sellerProducts: [Product] {
@@ -49,8 +56,15 @@ struct PublicSellerProfileView: View {
             if lhsIsPreview != rhsIsPreview {
                 return lhsIsPreview && !rhsIsPreview
             }
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt > rhs.createdAt
+            }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
+    }
+
+    private var featuredProducts: [Product] {
+        Array(sellerProducts.prefix(3))
     }
 
     private var resolvedSeller: SellerProfile {
@@ -89,8 +103,17 @@ struct PublicSellerProfileView: View {
         .toolbar(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .navigationDestination(item: $messageThreadSeller) { profile in
-            SellerMessagesView(seller: profile)
+        .sheet(isPresented: $showMessagingGate) {
+            OrderMessagingGateSheet(sellerName: resolvedSeller.displayName)
+        }
+        .sheet(item: $activeShopChat) { chat in
+            OrderSupportThreadView(
+                sellerId: chat.sellerId,
+                sellerName: chat.sellerName,
+                viewerRole: .buyer
+            )
+            .environmentObject(orderStore)
+            .environmentObject(inquiryStore)
         }
         #if os(iOS)
         .sheet(isPresented: $showShareSheet) {
@@ -133,8 +156,11 @@ struct PublicSellerProfileView: View {
     private var bannerHeader: some View {
         ZStack(alignment: .bottom) {
             bannerBackground
-                .frame(height: 84)
+                .frame(height: 118)
                 .clipped()
+
+            brandStripe
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             HStack(alignment: .bottom, spacing: TBTheme.spacingLG) {
                 profileAvatar
@@ -182,15 +208,21 @@ struct PublicSellerProfileView: View {
         .accessibilityLabel("\(resolvedSeller.displayName), \(resolvedSeller.handle), \(sellerProducts.count) products, \(formattedLikes) likes")
     }
 
+    private var brandStripe: some View {
+        LinearGradient(
+            colors: brandTheme.stripeGradient,
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(height: 5)
+        .shadow(color: brandTheme.accent.opacity(0.25), radius: 6, y: 2)
+    }
+
     private var bannerBackground: some View {
         ZStack {
             StorefrontImageView(reference: resolvedSeller.bannerURL?.absoluteString, contentMode: .fill) {
                 LinearGradient(
-                    colors: [
-                        Color(red: 0.30, green: 0.58, blue: 0.96),
-                        Color(red: 0.48, green: 0.72, blue: 0.98),
-                        Color(red: 0.83, green: 0.91, blue: 1.0)
-                    ],
+                    colors: brandTheme.bannerGradient,
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -198,13 +230,85 @@ struct PublicSellerProfileView: View {
 
             LinearGradient(
                 colors: [
-                    .white.opacity(0.10),
+                    brandTheme.accent.opacity(0.22),
                     .clear,
-                    Color.black.opacity(0.04)
+                    Color.black.opacity(0.18)
                 ],
-                startPoint: .top,
-                endPoint: .bottom
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
+        }
+    }
+
+    private var storefrontTrustRow: some View {
+        HStack(spacing: 0) {
+            trustMetric(title: "Rating", value: String(format: "%.1f", resolvedSeller.rating), icon: "star.fill")
+            trustMetricDivider
+            trustMetric(title: "Orders", value: "\(resolvedSeller.orderCount)", icon: "bag.fill")
+            trustMetricDivider
+            trustMetric(title: "Products", value: "\(sellerProducts.count)", icon: "cube.fill")
+            trustMetricDivider
+            trustMetric(title: "Likes", value: formattedLikes, icon: "heart.fill")
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 10)
+        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(brandTheme.accent.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: brandTheme.accent.opacity(0.08), radius: 10, y: 4)
+    }
+
+    private var trustMetricDivider: some View {
+        Rectangle()
+            .fill(Color.black.opacity(0.06))
+            .frame(width: 1, height: 34)
+    }
+
+    private func trustMetric(title: String, value: String, icon: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(brandTheme.accent)
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(TBTheme.deepSky)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var featuredProductsSection: some View {
+        Group {
+            if featuredProducts.count >= 2 {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Featured")
+                            .font(.tbHeadline)
+                            .foregroundStyle(TBTheme.deepSky)
+                        Spacer()
+                        Text("Newest picks")
+                            .font(.tbMeta)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(featuredProducts) { product in
+                                NavigationLink {
+                                    ProductDetailView(product: product)
+                                } label: {
+                                    SellerFeaturedProductCard(product: product, theme: brandTheme)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -223,7 +327,18 @@ struct PublicSellerProfileView: View {
             Circle()
                 .fill(.white)
                 .frame(width: 50, height: 50)
-                .shadow(color: Color.black.opacity(0.08), radius: 10, y: 4)
+                .overlay(
+                    Circle()
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [brandTheme.accent, brandTheme.accentSecondary],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 2
+                        )
+                )
+                .shadow(color: brandTheme.accent.opacity(0.2), radius: 10, y: 4)
 
             StorefrontImageView(reference: resolvedSeller.avatarURL?.absoluteString, contentMode: .fill) {
                 Circle()
@@ -493,7 +608,7 @@ struct PublicSellerProfileView: View {
             .buttonStyle(.plain)
 
             Button {
-                messageThreadSeller = resolvedSeller
+                openSellerMessaging()
             } label: {
                 actionPillLabel(
                     title: "Message",
@@ -619,6 +734,21 @@ struct PublicSellerProfileView: View {
         return "\(resolvedSeller.displayName) on TenBelow\n\(resolvedSeller.handle)"
     }
 
+    private func openSellerMessaging() {
+        guard buyerAccountCreated else {
+            showMessagingGate = true
+            return
+        }
+
+        activeShopChat = ShopChatSheetItem(
+            sellerId: resolvedSeller.id,
+            sellerName: resolvedSeller.displayName
+        )
+        Task {
+            await inquiryStore.refreshBuyerThreads()
+        }
+    }
+
     private var formattedLikes: String {
         let count = resolvedSeller.likeCount
         if count >= 1000 {
@@ -635,13 +765,17 @@ struct PublicSellerProfileView: View {
                 bannerHeader
                     .padding(.top, -16)
 
-                VStack(spacing: 5) {
+                VStack(spacing: 8) {
+                    storefrontTrustRow
+
                     badgeRow
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     aboutCard
 
                     actionSection
+
+                    featuredProductsSection
 
                     productsSection
                         .padding(.top, 4)
@@ -971,6 +1105,36 @@ private struct SellerProfileProductTile: View {
     }
 }
 
+private struct SellerFeaturedProductCard: View {
+    let product: Product
+    let theme: StorefrontBrandTheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            StorefrontImageView(reference: product.primaryImageReference) {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(theme.accentSecondary.opacity(0.35))
+            }
+            .frame(width: 148, height: 112)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(theme.accent.opacity(0.2), lineWidth: 1)
+            )
+
+            Text(product.name)
+                .font(.tbCaption.weight(.semibold))
+                .foregroundStyle(TBTheme.deepSky)
+                .lineLimit(2)
+                .frame(width: 148, alignment: .leading)
+
+            Text(Money.format(cents: product.priceCents))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(theme.accent)
+        }
+    }
+}
+
 // MARK: - Seller All Products (full grid via See All)
 
 private struct SellerAllProductsView: View {
@@ -1044,6 +1208,13 @@ private struct FlowLayout: Layout {
         let totalHeight = currentY + lineHeight
         return (CGSize(width: maxWidth, height: totalHeight), origins)
     }
+}
+
+private struct ShopChatSheetItem: Identifiable, Hashable {
+    let sellerId: String
+    let sellerName: String
+
+    var id: String { sellerId }
 }
 
 // MARK: - Preview

@@ -130,9 +130,20 @@ enum WeekendDropManager {
         currentDrop: CurrentDropResponse? = nil,
         calendar: Calendar = .current
     ) -> Bool {
-        let schedule = resolvedSchedule(now: now, currentDrop: currentDrop, calendar: calendar)
-        let phase = resolvedPhase(now: now, schedule: schedule)
-        return phase == .thursdayPreview || phase == .liveSubmissionsOpen
+        let easternCalendar = calendarWithEasternTimeZone(from: calendar)
+        let schedule = resolvedSubmissionSchedule(now: now, calendar: easternCalendar)
+        return now >= schedule.startsAt && now <= schedule.endsAt
+    }
+
+    /// Thursday 5:00 PM through 11:59 PM ET for the upcoming Friday drop.
+    private static func resolvedSubmissionSchedule(now: Date, calendar: Calendar) -> (startsAt: Date, endsAt: Date) {
+        let fridayStart = resolvedCycleStart(now: now, calendar: calendar)
+        let startsAt = calendar.date(byAdding: DateComponents(day: -1, hour: 17), to: fridayStart) ?? fridayStart
+        let endsAt = calendar.date(
+            byAdding: DateComponents(day: -1, hour: 23, minute: 59, second: 59),
+            to: fridayStart
+        ) ?? fridayStart
+        return (startsAt, endsAt)
     }
 
     /// Next weekly drop start used when the API omits `nextDropAt` (Friday 12:00 AM for the upcoming cycle).

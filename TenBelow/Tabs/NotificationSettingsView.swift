@@ -122,6 +122,12 @@ struct NotificationSettingsView: View {
                     )
                     Divider().padding(.leading, 4)
                     NotificationTypeToggle(
+                        type: .orderSupportUpdate,
+                        title: "Buyer requests & messages",
+                        subtitle: "Cancel/refund requests and order support thread messages."
+                    )
+                    Divider().padding(.leading, 4)
+                    NotificationTypeToggle(
                         type: .itemFavorited,
                         title: "Listing favorites",
                         subtitle: "When someone saves one of your products."
@@ -149,6 +155,12 @@ struct NotificationSettingsView: View {
                         type: .orderStatusUpdate,
                         title: "Order & shipping updates",
                         subtitle: "Production, shipped, and delivered updates for your purchases."
+                    )
+                    Divider().padding(.leading, 4)
+                    NotificationTypeToggle(
+                        type: .orderSupportUpdate,
+                        title: "Request & seller updates",
+                        subtitle: "Cancel/refund decisions and messages from sellers on your orders."
                     )
                 }
             }
@@ -228,9 +240,9 @@ struct NotificationSettingsView: View {
 
     private var roleNotificationTypes: [NotificationType] {
         if userRole == "seller" {
-            return [.orderReceived, .itemFavorited, .system]
+            return [.orderReceived, .orderSupportUpdate, .itemFavorited, .system]
         } else {
-            return [.priceDrop, .newProduct, .orderStatusUpdate]
+            return [.priceDrop, .newProduct, .orderStatusUpdate, .orderSupportUpdate]
         }
     }
 

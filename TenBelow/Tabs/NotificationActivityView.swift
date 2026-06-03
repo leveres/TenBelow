@@ -98,9 +98,21 @@ struct NotificationActivityView: View {
 
     private var favoritesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Favorites")
-                .font(.tbHeadline)
-                .foregroundStyle(TBTheme.icyBlue)
+            HStack {
+                Text("Wishlist")
+                    .font(.tbHeadline)
+                    .foregroundStyle(TBTheme.icyBlue)
+                Spacer()
+                if !favoriteProducts.isEmpty {
+                    NavigationLink {
+                        WishlistView()
+                    } label: {
+                        Text("See all")
+                            .font(.tbCaption.weight(.semibold))
+                            .foregroundStyle(TBTheme.icyBlue)
+                    }
+                }
+            }
 
             Text("Saved items stay here for quick access.")
                 .font(.tbCaption)
@@ -299,6 +311,8 @@ struct NotificationActivityView: View {
             return "cart.fill.badge.plus"
         case .orderStatusUpdate:
             return "truck.box.fill"
+        case .orderSupportUpdate:
+            return "bubble.left.and.bubble.right.fill"
         case .exchangeUpdate:
             return "arrow.triangle.2.circlepath.circle.fill"
         case .itemFavorited:

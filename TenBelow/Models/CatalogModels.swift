@@ -29,6 +29,12 @@ struct UpsertSellerProductRequest: Codable {
     let isDrop: Bool
     let isActive: Bool
     let isApproved: Bool
+    let rightsOwnershipType: String?
+    let rightsReferenceFlags: [String]
+    let rightsCertificationAccepted: Bool
+    let rightsCertificationAcceptedAt: Date?
+    let requiresManualReview: Bool
+    let reviewReason: String?
 }
 
 struct RemoveSellerProductRequest: Codable {
@@ -177,6 +183,12 @@ struct RemoteProduct: Codable, Identifiable, Hashable {
     let reviewNotes: String?
     let submittedAt: String?
     let previousPriceCents: Int?
+    let rightsOwnershipType: String?
+    let rightsReferenceFlags: [String]?
+    let rightsCertificationAccepted: Bool?
+    let rightsCertificationAcceptedAt: String?
+    let requiresManualReview: Bool?
+    let reviewReason: String?
 }
 
 extension RemoteProduct {
@@ -191,6 +203,7 @@ extension RemoteProduct {
             submittedAt.flatMap { formatter.date(from: $0) } ??
             fallbackProduct?.createdAt ??
             .now
+        let rightsAcceptedAtDate = rightsCertificationAcceptedAt.flatMap { formatter.date(from: $0) }
         return Product(
             id: id,
             sellerId: sellerId,
@@ -210,7 +223,13 @@ extension RemoteProduct {
             careWarnings: careWarnings,
             shipsInDays: min(shipsInMinDays, shipsInMaxDays)...max(shipsInMinDays, shipsInMaxDays),
             createdAt: createdAtDate,
-            previousPriceCents: previousPriceCents ?? fallbackProduct?.previousPriceCents
+            previousPriceCents: previousPriceCents ?? fallbackProduct?.previousPriceCents,
+            rightsOwnershipType: rightsOwnershipType ?? fallbackProduct?.rightsOwnershipType,
+            rightsReferenceFlags: rightsReferenceFlags ?? fallbackProduct?.rightsReferenceFlags ?? [],
+            rightsCertificationAccepted: rightsCertificationAccepted ?? fallbackProduct?.rightsCertificationAccepted ?? false,
+            rightsCertificationAcceptedAt: rightsAcceptedAtDate ?? fallbackProduct?.rightsCertificationAcceptedAt,
+            requiresManualReview: requiresManualReview ?? fallbackProduct?.requiresManualReview ?? false,
+            reviewReason: reviewReason ?? fallbackProduct?.reviewReason
         )
     }
 

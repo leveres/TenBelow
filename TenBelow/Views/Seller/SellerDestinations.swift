@@ -26,6 +26,7 @@ struct AddProductView: View {
     @State private var loadingPhotoPlaceholderCount = 0
     @State private var isLoadingCreatorClip = false
     @State private var isLoadingProductionPreview = false
+    @State private var showRightsValidationMessage = false
 
     init(
         title: String = "Add Product",
@@ -74,7 +75,8 @@ struct AddProductView: View {
         !draft.durabilityNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !draft.warningLines.isEmpty &&
         draft.shipsInMaxDays >= draft.shipsInMinDays &&
-        !premiumListingBlocked
+        !premiumListingBlocked &&
+        draft.isRightsConfirmationComplete
     }
 
     private var remainingPhotoSlots: Int {
@@ -88,6 +90,7 @@ struct AddProductView: View {
                 basicInfoSection
                 detailsSection
                 mediaSection
+                productRightsOwnershipSection
                 saveSection
             }
             .padding(TBTheme.spacingLG)
@@ -355,12 +358,26 @@ struct AddProductView: View {
         }
     }
 
+    private var productRightsOwnershipSection: some View {
+        ProductRightsOwnershipSection(
+            ownershipType: $draft.rightsOwnershipType,
+            referenceFlags: $draft.rightsReferenceFlags,
+            certificationAccepted: $draft.rightsCertificationAccepted,
+            certificationAcceptedAt: $draft.rightsCertificationAcceptedAt,
+            showIncompleteMessage: !draft.isRightsConfirmationComplete
+        )
+    }
+
     private var saveSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
                 var updatedDraft = draft
                 updatedDraft.demoVideoURLString = selectedVideoURL?.absoluteString ?? draft.demoVideoURLString
                 updatedDraft.productionPreviewURLString = selectedProductionPreviewURL?.absoluteString ?? draft.productionPreviewURLString
+                if updatedDraft.rightsCertificationAcceptedAt == nil {
+                    updatedDraft.rightsCertificationAcceptedAt = Date()
+                }
+                updatedDraft.refreshRightsReviewFlag()
                 draft = updatedDraft
                 onSave(
                     updatedDraft,
@@ -379,6 +396,12 @@ struct AddProductView: View {
             .buttonStyle(PrimaryCTAButtonStyle())
             .disabled(!canSave)
             .opacity(canSave ? 1 : 0.6)
+
+            if showRightsValidationMessage || !draft.isRightsConfirmationComplete {
+                Text("Complete this section before submitting your product.")
+                    .font(.tbCaption)
+                    .foregroundStyle(.orange)
+            }
 
             Text(
                 premiumListingBlocked
@@ -1512,6 +1535,11 @@ struct SellerProductsView: View {
         syncedDraft.imageURLStrings = uploadedImageURLStrings
         syncedDraft.demoVideoURLString = uploadedDemoVideoURLString
         syncedDraft.productionPreviewURLString = uploadedProductionPreviewURLString
+        if syncedDraft.rightsCertificationAccepted,
+           syncedDraft.rightsCertificationAcceptedAt == nil {
+            syncedDraft.rightsCertificationAcceptedAt = Date()
+        }
+        syncedDraft.refreshRightsReviewFlag()
         let request = UpsertSellerProductRequest(
             name: syncedDraft.name.isEmpty ? "Untitled Product" : syncedDraft.name,
             priceCents: max(syncedDraft.priceCents, 0),
@@ -1526,7 +1554,13 @@ struct SellerProductsView: View {
             shipsInMaxDays: max(syncedDraft.shipsInMinDays, syncedDraft.shipsInMaxDays),
             isDrop: false,
             isActive: false,
-            isApproved: false
+            isApproved: false,
+            rightsOwnershipType: syncedDraft.rightsOwnershipType,
+            rightsReferenceFlags: syncedDraft.rightsReferenceFlags,
+            rightsCertificationAccepted: syncedDraft.rightsCertificationAccepted,
+            rightsCertificationAcceptedAt: syncedDraft.rightsCertificationAcceptedAt,
+            requiresManualReview: syncedDraft.requiresManualReview,
+            reviewReason: syncedDraft.reviewReason
         )
 
         do {
@@ -1771,6 +1805,20 @@ struct SellerProductDraft: Identifiable, Codable {
     var marketplaceStatusRaw: String? = nil
     /// Admin rejection rationale from the server (shown when `marketplaceStatus` is `.rejected`).
     var serverReviewNotes: String? = nil
+    var rightsOwnershipType: String?
+    var rightsReferenceFlags: [String] = []
+    var rightsCertificationAccepted: Bool = false
+    var rightsCertificationAcceptedAt: Date?
+    var requiresManualReview: Bool = false
+    var reviewReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, sellerId, name, priceText, category, imageURLStrings, demoVideoURLString
+        case material, productionNote, durabilityNote, careWarningsText, shipsInMinDays, shipsInMaxDays
+        case productionPreviewURLString, marketplaceStatusRaw, serverReviewNotes
+        case rightsOwnershipType, rightsReferenceFlags, rightsCertificationAccepted
+        case rightsCertificationAcceptedAt, requiresManualReview, reviewReason
+    }
 
     init(product: Product) {
         id = product.id
@@ -1789,6 +1837,38 @@ struct SellerProductDraft: Identifiable, Codable {
         productionPreviewURLString = product.productionPreviewURL?.absoluteString ?? ""
         marketplaceStatusRaw = SellerMarketplaceStatus.live.rawValue
         serverReviewNotes = nil
+        rightsOwnershipType = product.rightsOwnershipType
+        rightsReferenceFlags = product.rightsReferenceFlags
+        rightsCertificationAccepted = product.rightsCertificationAccepted
+        rightsCertificationAcceptedAt = product.rightsCertificationAcceptedAt
+        requiresManualReview = product.requiresManualReview
+        reviewReason = product.reviewReason
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        sellerId = try container.decode(String.self, forKey: .sellerId)
+        name = try container.decode(String.self, forKey: .name)
+        priceText = try container.decode(String.self, forKey: .priceText)
+        category = try container.decode(Category.self, forKey: .category)
+        imageURLStrings = try container.decode([String].self, forKey: .imageURLStrings)
+        demoVideoURLString = try container.decode(String.self, forKey: .demoVideoURLString)
+        material = try container.decode(String.self, forKey: .material)
+        productionNote = try container.decode(String.self, forKey: .productionNote)
+        durabilityNote = try container.decode(String.self, forKey: .durabilityNote)
+        careWarningsText = try container.decode(String.self, forKey: .careWarningsText)
+        shipsInMinDays = try container.decode(Int.self, forKey: .shipsInMinDays)
+        shipsInMaxDays = try container.decode(Int.self, forKey: .shipsInMaxDays)
+        productionPreviewURLString = try container.decodeIfPresent(String.self, forKey: .productionPreviewURLString) ?? ""
+        marketplaceStatusRaw = try container.decodeIfPresent(String.self, forKey: .marketplaceStatusRaw)
+        serverReviewNotes = try container.decodeIfPresent(String.self, forKey: .serverReviewNotes)
+        rightsOwnershipType = try container.decodeIfPresent(String.self, forKey: .rightsOwnershipType)
+        rightsReferenceFlags = try container.decodeIfPresent([String].self, forKey: .rightsReferenceFlags) ?? []
+        rightsCertificationAccepted = try container.decodeIfPresent(Bool.self, forKey: .rightsCertificationAccepted) ?? false
+        rightsCertificationAcceptedAt = try container.decodeIfPresent(Date.self, forKey: .rightsCertificationAcceptedAt)
+        requiresManualReview = try container.decodeIfPresent(Bool.self, forKey: .requiresManualReview) ?? false
+        reviewReason = try container.decodeIfPresent(String.self, forKey: .reviewReason)
     }
 
     static func new(sellerId: String = SellerProfile.sample.id) -> SellerProductDraft {
@@ -1808,7 +1888,13 @@ struct SellerProductDraft: Identifiable, Codable {
             shipsInMaxDays: 4,
             productionPreviewURLString: "",
             marketplaceStatusRaw: SellerMarketplaceStatus.draft.rawValue,
-            serverReviewNotes: nil
+            serverReviewNotes: nil,
+            rightsOwnershipType: nil,
+            rightsReferenceFlags: [],
+            rightsCertificationAccepted: false,
+            rightsCertificationAcceptedAt: nil,
+            requiresManualReview: false,
+            reviewReason: nil
         )
     }
 
@@ -1828,7 +1914,13 @@ struct SellerProductDraft: Identifiable, Codable {
         shipsInMaxDays: Int,
         productionPreviewURLString: String,
         marketplaceStatusRaw: String? = nil,
-        serverReviewNotes: String? = nil
+        serverReviewNotes: String? = nil,
+        rightsOwnershipType: String? = nil,
+        rightsReferenceFlags: [String] = [],
+        rightsCertificationAccepted: Bool = false,
+        rightsCertificationAcceptedAt: Date? = nil,
+        requiresManualReview: Bool = false,
+        reviewReason: String? = nil
     ) {
         self.id = id
         self.sellerId = sellerId
@@ -1846,11 +1938,18 @@ struct SellerProductDraft: Identifiable, Codable {
         self.productionPreviewURLString = productionPreviewURLString
         self.marketplaceStatusRaw = marketplaceStatusRaw
         self.serverReviewNotes = serverReviewNotes
+        self.rightsOwnershipType = rightsOwnershipType
+        self.rightsReferenceFlags = rightsReferenceFlags
+        self.rightsCertificationAccepted = rightsCertificationAccepted
+        self.rightsCertificationAcceptedAt = rightsCertificationAcceptedAt
+        self.requiresManualReview = requiresManualReview
+        self.reviewReason = reviewReason
     }
 
     static func fromRemoteProduct(_ p: RemoteProduct) -> SellerProductDraft {
         let storefront = p.asStorefrontProduct()
         let notes = p.reviewNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let formatter = ISO8601DateFormatter()
         return SellerProductDraft(
             id: p.id,
             sellerId: p.sellerId,
@@ -1867,7 +1966,13 @@ struct SellerProductDraft: Identifiable, Codable {
             shipsInMaxDays: p.shipsInMaxDays,
             productionPreviewURLString: p.productionPreviewURL ?? "",
             marketplaceStatusRaw: SellerMarketplaceStatus.fromServerProduct(p).rawValue,
-            serverReviewNotes: notes.isEmpty ? nil : notes
+            serverReviewNotes: notes.isEmpty ? nil : notes,
+            rightsOwnershipType: p.rightsOwnershipType,
+            rightsReferenceFlags: p.rightsReferenceFlags ?? [],
+            rightsCertificationAccepted: p.rightsCertificationAccepted ?? false,
+            rightsCertificationAcceptedAt: p.rightsCertificationAcceptedAt.flatMap { formatter.date(from: $0) },
+            requiresManualReview: p.requiresManualReview ?? false,
+            reviewReason: p.reviewReason
         )
     }
 
@@ -1889,6 +1994,20 @@ struct SellerProductDraft: Identifiable, Codable {
     var marketplaceStatus: SellerMarketplaceStatus {
         get { SellerMarketplaceStatus(rawValue: marketplaceStatusRaw ?? "") ?? .draft }
         set { marketplaceStatusRaw = newValue.rawValue }
+    }
+
+    var isRightsConfirmationComplete: Bool {
+        rightsOwnershipType?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && !rightsReferenceFlags.isEmpty
+            && rightsCertificationAccepted
+    }
+
+    mutating func refreshRightsReviewFlag() {
+        requiresManualReview = ProductRightsReview.requiresManualReview(
+            ownershipType: rightsOwnershipType,
+            referenceFlags: rightsReferenceFlags
+        )
+        reviewReason = ProductRightsReview.reviewReason(referenceFlags: rightsReferenceFlags)
     }
 }
 
@@ -2542,7 +2661,7 @@ struct PayoutSettingsView: View {
             VStack(alignment: .leading, spacing: TBTheme.spacingLG) {
                 SellerSettingsHeader(
                     title: "Payout Settings",
-                    subtitle: "Manage seller payouts securely through Stripe Connect."
+                    subtitle: "Check payout readiness and finish Stripe Connect when it is available."
                 )
 
                 if sellerPreviewMode {
@@ -2568,6 +2687,10 @@ struct PayoutSettingsView: View {
                         value: maskedStripeAccountId
                     )
                     stripeStatusRow(
+                        title: "Setup availability",
+                        value: status?.payoutSetupPending == true ? "Waiting on TenBelow" : "Available"
+                    )
+                    stripeStatusRow(
                         title: "Details submitted",
                         value: status?.detailsSubmitted == true ? "Complete" : "Pending"
                     )
@@ -2587,7 +2710,7 @@ struct PayoutSettingsView: View {
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(TBTheme.icyBlue)
 
-                        Text("Bank account collection, identity verification, and payout dashboard access are handled in Stripe. TenBelow does not manage full banking details directly in this screen.")
+                        Text(howItWorksMessage)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineSpacing(2)
@@ -2596,9 +2719,7 @@ struct PayoutSettingsView: View {
 
                 if let status {
                     SellerSettingsCard(title: "Payout Readiness") {
-                        Text(status.onboardingComplete
-                             ? "Your Stripe payout setup is complete. You can review transfers and payout timing in Stripe Express."
-                             : "Your Stripe payout setup is not finished yet. Continue onboarding in Stripe to enable transfers from orders.")
+                        Text(payoutReadinessMessage(for: status))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineSpacing(2)
@@ -2701,6 +2822,9 @@ struct PayoutSettingsView: View {
         if isOpeningStripe {
             return "Opening Stripe..."
         }
+        if status?.payoutSetupPending == true {
+            return "Stripe Setup Pending"
+        }
         if status?.onboardingComplete == true {
             return "Open Stripe Dashboard"
         }
@@ -2708,7 +2832,29 @@ struct PayoutSettingsView: View {
     }
 
     private var isPrimaryActionEnabled: Bool {
-        !sellerPreviewMode && !sellerId.isEmpty && !isOpeningStripe
+        !sellerPreviewMode
+            && !sellerId.isEmpty
+            && !isOpeningStripe
+            && status != nil
+            && status?.payoutSetupPending != true
+    }
+
+    private var howItWorksMessage: String {
+        if status?.payoutSetupPending == true {
+            return "Stripe Connect is not turned on for TenBelow yet. Your seller account can be created now, and this screen will unlock onboarding after the Stripe keys are added."
+        }
+        return "Bank account collection, identity verification, and payout dashboard access are handled in Stripe. TenBelow does not manage full banking details directly in this screen."
+    }
+
+    private func payoutReadinessMessage(for status: SellerStatusResponse) -> String {
+        if status.payoutSetupPending {
+            return status.payoutSetupMessage
+                ?? "Stripe Connect is not configured yet. You can keep setting up your shop and return here when payouts are enabled."
+        }
+        if status.onboardingComplete {
+            return "Your Stripe payout setup is complete. You can review transfers and payout timing in Stripe Express."
+        }
+        return "Your Stripe payout setup is not finished yet. Continue onboarding in Stripe to enable transfers from orders."
     }
 
     private func stripeStatusRow(title: String, value: String) -> some View {
@@ -3848,6 +3994,142 @@ private enum SellerDeletedProductStorage {
     }
 }
 
+struct ProductRightsOwnershipSection: View {
+    @Binding var ownershipType: String?
+    @Binding var referenceFlags: [String]
+    @Binding var certificationAccepted: Bool
+    @Binding var certificationAcceptedAt: Date?
+    var showIncompleteMessage = false
+
+    var body: some View {
+        GlassCard(cornerRadius: 22) {
+            VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Product Rights & Ownership")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky)
+
+                    Text("Before submitting, confirm that you have the legal right to sell this product on TenBelow.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("How do you have the right to sell this product?")
+                        .font(.tbBodyStrong)
+                        .foregroundStyle(TBTheme.deepSky)
+
+                    ForEach(ProductRightsOwnershipOption.allCases) { option in
+                        rightsChoiceRow(
+                            title: option.rawValue,
+                            isSelected: ownershipType == option.rawValue,
+                            systemImage: ownershipType == option.rawValue ? "largecircle.fill.circle" : "circle"
+                        ) {
+                            ownershipType = option.rawValue
+                        }
+                    }
+                }
+
+                Divider()
+                    .overlay(TBTheme.skyBlue.opacity(0.10))
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Does this product contain or reference any of the following?")
+                        .font(.tbBodyStrong)
+                        .foregroundStyle(TBTheme.deepSky)
+
+                    ForEach(ProductRightsReferenceFlag.allCases) { flag in
+                        rightsChoiceRow(
+                            title: flag.rawValue,
+                            isSelected: referenceFlags.contains(flag.rawValue),
+                            systemImage: referenceFlags.contains(flag.rawValue) ? "checkmark.circle.fill" : "circle"
+                        ) {
+                            toggleReferenceFlag(flag)
+                        }
+                    }
+                }
+
+                Button {
+                    certificationAccepted.toggle()
+                    certificationAcceptedAt = certificationAccepted ? (certificationAcceptedAt ?? Date()) : nil
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: certificationAccepted ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(certificationAccepted ? TBTheme.deepSky : Color.secondary)
+                            .padding(.top, 1)
+
+                        Text("I certify that the information above is true and accurate. I understand that uploading copyrighted, trademarked, counterfeit, unsafe, or unauthorized products may result in listing removal, account suspension, payout holds, account termination, and potential legal action by third-party rights holders.")
+                            .font(.tbCaption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if showIncompleteMessage {
+                    Text("Complete this section before submitting your product.")
+                        .font(.tbCaption)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private func rightsChoiceRow(
+        title: String,
+        isSelected: Bool,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(isSelected ? TBTheme.deepSky : Color.secondary)
+
+                Text(title)
+                    .font(.tbBody)
+                    .foregroundStyle(.primary.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(Color.white.opacity(isSelected ? 0.82 : 0.56), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(isSelected ? TBTheme.skyBlue.opacity(0.30) : TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func toggleReferenceFlag(_ flag: ProductRightsReferenceFlag) {
+        if flag == .noneOfTheAbove {
+            referenceFlags = referenceFlags.contains(flag.rawValue) ? [] : [flag.rawValue]
+            return
+        }
+
+        var updated = referenceFlags.filter { $0 != ProductRightsReferenceFlag.noneOfTheAbove.rawValue }
+        if updated.contains(flag.rawValue) {
+            updated.removeAll { $0 == flag.rawValue }
+        } else {
+            updated.append(flag.rawValue)
+        }
+        referenceFlags = updated
+    }
+}
+
 private extension SellerProductDraft {
     static func load(for sellerId: String, fallbackProducts: [Product]) -> [SellerProductDraft] {
         if let data = UserDefaults.standard.data(forKey: SellerProductDraftStorage.key(for: sellerId)),
@@ -3902,7 +4184,13 @@ private extension Product {
             productionNote: draft.productionNote,
             durabilityNote: draft.durabilityNote.isEmpty ? "Built for everyday use." : draft.durabilityNote,
             careWarnings: draft.warningLines.isEmpty ? ["Handle with care."] : draft.warningLines,
-            shipsInDays: draft.shipsInMinDays...draft.shipsInMaxDays
+            shipsInDays: draft.shipsInMinDays...draft.shipsInMaxDays,
+            rightsOwnershipType: draft.rightsOwnershipType,
+            rightsReferenceFlags: draft.rightsReferenceFlags,
+            rightsCertificationAccepted: draft.rightsCertificationAccepted,
+            rightsCertificationAcceptedAt: draft.rightsCertificationAcceptedAt,
+            requiresManualReview: draft.requiresManualReview,
+            reviewReason: draft.reviewReason
         )
     }
 }

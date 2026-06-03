@@ -1256,6 +1256,90 @@ textarea {
   line-height: 1.25;
 }
 
+.media-pill.is-weekly-drop {
+  background: rgba(255, 244, 214, 0.96);
+  color: #9a6b16;
+  box-shadow: 0 8px 18px rgba(154, 107, 22, 0.12);
+}
+
+.card-detail-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.product-detail-block {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(109, 147, 204, 0.16);
+}
+
+.product-detail-block.hidden {
+  display: none;
+}
+
+.detail-block-label {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6883a9;
+}
+
+.drop-headline,
+.drop-story,
+.drop-best-use-case,
+.rights-review-reason,
+.rights-ownership-type {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #4f627d;
+}
+
+.drop-headline {
+  font-weight: 700;
+  color: #31435f;
+}
+
+.drop-story + .drop-best-use-case,
+.drop-headline + .drop-story,
+.drop-headline + .drop-best-use-case {
+  margin-top: 6px;
+}
+
+.rights-manual-review-flag {
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 226, 176, 0.72);
+  color: #8a5a00;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.rights-manual-review-flag.hidden,
+.rights-review-reason.hidden,
+.rights-ownership-type.hidden,
+.rights-reference-flags.hidden {
+  display: none;
+}
+
+.rights-reference-flags {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: #56657c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.rights-reference-flags li + li {
+  margin-top: 4px;
+}
+
 .product-note {
   margin: 0;
   font-size: 12px;

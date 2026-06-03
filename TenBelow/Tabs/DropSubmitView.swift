@@ -44,8 +44,11 @@ struct DropSubmitView: View {
     }
 
     private var isWindowOpen: Bool {
-        WeekendDropManager.isSubmissionWindowOpen(
-            now: referenceDate,
+        if viewModel.submissions?.isActive == true {
+            return true
+        }
+        return WeekendDropManager.isSubmissionWindowOpen(
+            now: .now,
             currentDrop: currentDrop
         )
     }
@@ -383,18 +386,22 @@ struct DropSubmitView: View {
     }
 
     private var statusSupportText: String {
-        if !isWindowOpen {
-            return viewModel.products.isEmpty
-                ? "No new drop uploads are available right now."
-                : "Uploads are locked. New photos, videos, and submissions reopen on Thursday."
+        if isWindowOpen {
+            if slotsRemaining == 0 {
+                return "Your lineup is full. You can still edit products before the window closes tonight."
+            }
+            if !viewModel.products.isEmpty {
+                return "Add or update before Thursday 11:59 PM ET."
+            }
+            if slotsRemaining == 1 {
+                return "1 release slot is open for this week's lineup."
+            }
+            return "\(slotsRemaining) release slots are open for this week's lineup."
         }
-        if slotsRemaining == 0 {
-            return "Your lineup is full for this week's release."
+        if viewModel.products.isEmpty {
+            return "No new drop uploads are available right now."
         }
-        if slotsRemaining == 1 {
-            return "1 release slot is open for this week's lineup."
-        }
-        return "\(slotsRemaining) release slots are open for this week's lineup."
+        return "Uploads are locked. New photos, videos, and submissions reopen on Thursday."
     }
 
     private var statusMicroLabel: String {
@@ -410,7 +417,7 @@ struct DropSubmitView: View {
 
     private func reloadWorkspace() async {
         await sellerSubscription.refresh()
-        if usesPreviewData || viewModel.submissions != nil {
+        if usesPreviewData {
             return
         }
         await viewModel.loadSubmissions(sellerId: sellerId)
@@ -1106,6 +1113,13 @@ private struct WeeklyDropEditorView: View {
                 )
             }
 
+            ProductRightsOwnershipSection(
+                ownershipType: $draft.rightsOwnershipType,
+                referenceFlags: $draft.rightsReferenceFlags,
+                certificationAccepted: $draft.rightsCertificationAccepted,
+                certificationAcceptedAt: $draft.rightsCertificationAcceptedAt,
+                showIncompleteMessage: !draft.isRightsConfirmationComplete
+            )
         }
     }
 
@@ -1193,6 +1207,11 @@ private struct WeeklyDropEditorView: View {
         mediaErrorMessage = nil
 
         do {
+            if draft.rightsCertificationAccepted,
+               draft.rightsCertificationAcceptedAt == nil {
+                draft.rightsCertificationAcceptedAt = Date()
+            }
+            draft.refreshRightsReviewFlag()
             try await onSubmit(draft)
             dismiss()
         } catch {
@@ -1456,6 +1475,7 @@ private struct WeeklyDropHeroCard: View {
                             .font(.system(size: compactLayout ? 19 : 22, weight: .bold, design: .rounded))
                             .tracking(-0.4)
                             .foregroundStyle(TBTheme.deepSky.opacity(0.94))
+                            .fixedSize(horizontal: false, vertical: true)
 
                         Text(subtitle)
                             .font(.system(size: compactLayout ? 14 : 15, weight: .medium, design: .rounded))
@@ -1463,8 +1483,8 @@ private struct WeeklyDropHeroCard: View {
                             .lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-
-                    Spacer(minLength: compactLayout ? 8 : 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
 
                     VStack(alignment: .trailing, spacing: compactLayout ? 8 : 10) {
                         if let countdownText {
@@ -1477,19 +1497,25 @@ private struct WeeklyDropHeroCard: View {
                                     Capsule(style: .continuous)
                                         .fill(TBTheme.skyLight.opacity(0.38))
                                 )
+                                .fixedSize(horizontal: true, vertical: false)
                         }
 
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text("Slots filled")
+                            Text(compactLayout ? "Slots" : "Slots filled")
                                 .font(.system(size: compactLayout ? 10 : 11, weight: .semibold, design: .rounded))
                                 .foregroundStyle(Color.primary.opacity(0.38))
+                                .fixedSize(horizontal: true, vertical: false)
 
                             Text("\(slotsUsed) of \(slotsMax)")
                                 .font(.system(size: compactLayout ? 22 : 26, weight: .bold, design: .rounded))
                                 .monospacedDigit()
                                 .foregroundStyle(TBTheme.icyBlue)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                     }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(2)
                 }
 
                 VStack(alignment: .leading, spacing: compactLayout ? 10 : 14) {
@@ -1518,7 +1544,11 @@ private struct WeeklyDropHeroCard: View {
                         .font(.system(size: compactLayout ? 14 : 15, weight: .medium, design: .rounded))
                         .foregroundStyle(Color.primary.opacity(0.52))
                         .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let actionTitle, let actionSubtitle, let buttonTitle, let action {
                     Divider()
@@ -1537,7 +1567,9 @@ private struct WeeklyDropHeroCard: View {
                                 .foregroundStyle(Color.primary.opacity(0.52))
                                 .lineSpacing(2)
                                 .lineLimit(compactLayout ? 2 : 3)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     Button(action: action) {
@@ -1551,7 +1583,9 @@ private struct WeeklyDropHeroCard: View {
                     .buttonStyle(WeeklyDropLaunchButtonStyle(compactLayout: compactLayout))
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(

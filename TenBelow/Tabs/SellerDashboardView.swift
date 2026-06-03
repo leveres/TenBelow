@@ -9,8 +9,10 @@ struct SellerDashboardView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
-    @EnvironmentObject private var buyerSellerThreads: BuyerSellerThreadStore
+    @EnvironmentObject private var orderStore: OrderStore
+    @EnvironmentObject private var inquiryStore: SellerInquiryStore
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
+    @AppStorage("sellerSellerId") private var sellerSellerId = ""
     let products: [Product]
     @State private var seller: SellerProfile
     @State private var showAddProductFlow = false
@@ -46,7 +48,11 @@ struct SellerDashboardView: View {
     }
 
     private var messageThreadCount: Int {
-        buyerSellerThreads.threadsForSellerOrderedByRecentMessage(sellerId: seller.id).count
+        MessagingInbox.sellerEntries(
+            orders: orderStore.orders,
+            inquiryThreads: inquiryStore.sellerThreads,
+            sellerId: seller.id
+        ).count
     }
 
     private var storedSellerProfile: SellerProfile? {
@@ -147,6 +153,12 @@ struct SellerDashboardView: View {
         lastDashboardRefresh = now
         await sellerSubscription.refresh()
         await refreshCustomOrderPendingCount()
+        let sid = sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sid.isEmpty {
+            async let orders: Void = orderStore.refreshSellerOrders(sellerId: sid)
+            async let inquiries: Void = inquiryStore.refreshSellerThreads()
+            _ = await (orders, inquiries)
+        }
     }
 
     // MARK: - Header
@@ -561,6 +573,374 @@ struct SellerDashboardView: View {
     }
 }
 
+private struct PayoutSettingsViewDraft: View {
+    @Environment(\.openURL) private var openURL
+    @AppStorage("sellerSellerId") private var sellerId = ""
+
+    @State private var status: SellerStatusResponse?
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+    @State private var isOpeningLink = false
+
+    private var normalizedSellerId: String {
+        sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var statusTitle: String {
+        guard let status else { return "Checking payout setup" }
+        if status.payoutSetupPending { return "Payout setup pending" }
+        if status.onboardingComplete { return "Payouts are ready" }
+        return "Finish Stripe onboarding"
+    }
+
+    private var statusMessage: String {
+        guard let status else {
+            return "We are checking your Stripe Connect status and seller account requirements."
+        }
+        if let message = status.payoutSetupMessage, !message.isEmpty {
+            return message
+        }
+        if status.onboardingComplete {
+            return "Your seller account can accept charges and receive payouts through Stripe Connect."
+        }
+        return "Finish Stripe Connect onboarding before selling live products and receiving payouts."
+    }
+
+    private var canOpenOnboarding: Bool {
+        guard let status else { return false }
+        return !status.payoutSetupPending && !status.onboardingComplete
+    }
+
+    private var canOpenDashboard: Bool {
+        guard let status else { return false }
+        return !status.payoutSetupPending && !status.stripeAccountId.isEmpty
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                headerCard
+                payoutChecklist
+                actionCard
+
+                if let errorMessage {
+                    errorCard(errorMessage)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 28)
+        }
+        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .navigationTitle("Payouts")
+        #if os(iOS) || os(visionOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .task {
+            await loadStatus()
+        }
+        .refreshable {
+            await loadStatus()
+        }
+    }
+
+    private var headerCard: some View {
+        GlassCard(cornerRadius: 24, snowfallFlakeCount: 72) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(TBTheme.skyLight.opacity(0.58))
+                            .frame(width: 48, height: 48)
+                        Image(systemName: statusIconName)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(statusIconColor)
+                    }
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(statusTitle)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .tracking(-0.4)
+                            .foregroundStyle(TBTheme.deepSky)
+
+                        Text(statusMessage)
+                            .font(.tbBody)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if isLoading {
+                    ProgressView("Refreshing payout status...")
+                        .font(.tbCaption)
+                        .tint(TBTheme.icyBlue)
+                }
+            }
+        }
+    }
+
+    private var payoutChecklist: some View {
+        GlassCard(cornerRadius: 24, snowfallFlakeCount: 48) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Setup checklist")
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
+
+                VStack(spacing: 10) {
+                    checklistRow(
+                        title: "TenBelow seller account",
+                        detail: normalizedSellerId.isEmpty ? "Sign in as a seller first." : normalizedSellerId,
+                        isComplete: !normalizedSellerId.isEmpty
+                    )
+                    checklistRow(
+                        title: "Stripe Connect available",
+                        detail: status?.payoutSetupPending == true ? "Waiting for TenBelow Stripe setup." : "Stripe setup is available.",
+                        isComplete: status?.payoutSetupPending == false
+                    )
+                    checklistRow(
+                        title: "Business details submitted",
+                        detail: status?.detailsSubmitted == true ? "Stripe has your details." : "Complete identity and business details in Stripe.",
+                        isComplete: status?.detailsSubmitted == true
+                    )
+                    checklistRow(
+                        title: "Charges and payouts",
+                        detail: status?.onboardingComplete == true ? "Ready to sell and receive payouts." : "Charges and payouts are not fully enabled yet.",
+                        isComplete: status?.onboardingComplete == true
+                    )
+                }
+            }
+        }
+    }
+
+    private var actionCard: some View {
+        GlassCard(cornerRadius: 24, snowfallFlakeCount: 42) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Actions")
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
+
+                Button {
+                    Task { await openOnboarding() }
+                } label: {
+                    actionButtonContent(
+                        title: "Continue payout setup",
+                        subtitle: canOpenOnboarding ? "Open Stripe Connect onboarding" : disabledOnboardingReason,
+                        systemImage: "arrow.up.forward.app"
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canOpenOnboarding || isOpeningLink)
+                .opacity(canOpenOnboarding ? 1 : 0.58)
+
+                Button {
+                    Task { await openDashboard() }
+                } label: {
+                    actionButtonContent(
+                        title: "Open Stripe dashboard",
+                        subtitle: canOpenDashboard ? "Manage payouts and account details" : "Available after Stripe Connect is created",
+                        systemImage: "dollarsign.circle"
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canOpenDashboard || isOpeningLink)
+                .opacity(canOpenDashboard ? 1 : 0.58)
+            }
+        }
+    }
+
+    private var disabledOnboardingReason: String {
+        if status?.payoutSetupPending == true {
+            return "TenBelow still needs Stripe keys before sellers can connect payouts"
+        }
+        if status?.onboardingComplete == true {
+            return "Onboarding is already complete"
+        }
+        return "Refresh status before opening onboarding"
+    }
+
+    private var statusIconName: String {
+        guard let status else { return "hourglass" }
+        if status.onboardingComplete { return "checkmark.seal.fill" }
+        if status.payoutSetupPending { return "clock.badge.exclamationmark" }
+        return "person.crop.circle.badge.exclamationmark"
+    }
+
+    private var statusIconColor: Color {
+        guard let status else { return TBTheme.icyBlue }
+        if status.onboardingComplete { return .green }
+        if status.payoutSetupPending { return .orange }
+        return TBTheme.icyBlue
+    }
+
+    private func checklistRow(title: String, detail: String, isComplete: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isComplete ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(isComplete ? .green : TBTheme.deepSky.opacity(0.42))
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
+                Text(detail)
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func actionButtonContent(title: String, subtitle: String, systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(TBTheme.deepSky)
+                .frame(width: 26)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
+                Text(subtitle)
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.secondary.opacity(0.55))
+        }
+        .padding(14)
+        .background(.white.opacity(0.76), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
+        )
+    }
+
+    private func errorCard(_ message: String) -> some View {
+        Label(message, systemImage: "exclamationmark.triangle.fill")
+            .font(.tbCaption)
+            .foregroundStyle(.red)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    @MainActor
+    private func loadStatus() async {
+        guard !normalizedSellerId.isEmpty else {
+            errorMessage = "Sign in as a seller to view payout setup."
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            status = try await SellerPayoutAPI.fetchStatus(sellerId: normalizedSellerId)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func openOnboarding() async {
+        await openPayoutURL {
+            try await SellerPayoutAPI.fetchOnboardingLink(sellerId: normalizedSellerId)
+        }
+    }
+
+    @MainActor
+    private func openDashboard() async {
+        await openPayoutURL {
+            try await SellerPayoutAPI.fetchDashboardLink(sellerId: normalizedSellerId)
+        }
+    }
+
+    @MainActor
+    private func openPayoutURL(_ loadURL: () async throws -> URL) async {
+        isOpeningLink = true
+        errorMessage = nil
+        defer { isOpeningLink = false }
+
+        do {
+            let url = try await loadURL()
+            openURL(url)
+        } catch {
+            errorMessage = error.localizedDescription
+            await loadStatus()
+        }
+    }
+}
+
+private enum SellerPayoutAPI {
+    static func fetchStatus(sellerId: String) async throws -> SellerStatusResponse {
+        try await get(pathComponents: ["seller-onboarding-status", sellerId])
+    }
+
+    static func fetchOnboardingLink(sellerId: String) async throws -> URL {
+        let response: OnboardingLinkResponse = try await get(pathComponents: ["seller-onboarding-link", sellerId])
+        guard let url = URL(string: response.onboardingUrl), !response.onboardingUrl.isEmpty else {
+            throw SellerPayoutAPIError(message: "Payout onboarding is not available yet.")
+        }
+        return url
+    }
+
+    static func fetchDashboardLink(sellerId: String) async throws -> URL {
+        let response: DashboardLinkResponse = try await get(pathComponents: ["seller-dashboard-link", sellerId])
+        guard let url = URL(string: response.dashboardUrl), !response.dashboardUrl.isEmpty else {
+            throw SellerPayoutAPIError(message: "Stripe dashboard is not available yet.")
+        }
+        return url
+    }
+
+    private static func get<T: Decodable>(pathComponents: [String]) async throws -> T {
+        guard let baseURL = AppConstants.backendBaseURL else {
+            throw SellerPayoutAPIError(message: "Connect the TenBelow backend before checking payouts.")
+        }
+
+        try await MarketplaceAuthSession.ensureSellerSessionReady()
+
+        let url = pathComponents.reduce(baseURL) { partialURL, component in
+            partialURL.appendingPathComponent(component)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applySellerAuth(to: &request)
+
+        let (data, response) = try await URLSession.tenBelow.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            if let serverError = try? JSONDecoder().decode(SellerPayoutAPIErrorResponse.self, from: data) {
+                throw SellerPayoutAPIError(message: serverError.error)
+            }
+            throw SellerPayoutAPIError(message: "Payout setup is unavailable right now.")
+        }
+
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+}
+
+private struct SellerPayoutAPIErrorResponse: Decodable {
+    let error: String
+}
+
+private struct SellerPayoutAPIError: LocalizedError {
+    let message: String
+
+    var errorDescription: String? {
+        message
+    }
+}
+
 // MARK: - Preview
 
 private struct SellerStoresDirectoryView: View {
@@ -729,58 +1109,55 @@ private struct SellerStoresDirectoryView: View {
     }
 
     private func sellerStoreTile(_ profile: SellerProfile) -> some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: 12) {
             StorefrontImageView(reference: profile.avatarURL?.absoluteString, contentMode: .fill) {
                 Circle()
                     .fill(TBTheme.skyLight.opacity(0.58))
                     .overlay {
                         Text(avatarInitials(for: profile))
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundStyle(TBTheme.deepSky)
                     }
             }
-            .frame(width: 36, height: 36)
+            .frame(width: 46, height: 46)
             .clipShape(Circle())
             .overlay(
                 Circle()
                     .strokeBorder(.white.opacity(0.9), lineWidth: 2)
             )
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(profile.displayName)
-                    .font(.system(size: 12.5, weight: .bold, design: .rounded))
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(TBTheme.deepSky)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.74)
+                    .minimumScaleFactor(0.82)
 
                 Text(storeStatusText(for: profile))
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(TBTheme.icyBlue)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                    .minimumScaleFactor(0.82)
 
                 Text(storeMetricText(for: profile))
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(TBTheme.icyBlue.opacity(0.86))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.68)
+                    .minimumScaleFactor(0.82)
 
-                HStack(spacing: 4) {
-                    Text(profile.handle)
-                        .font(.system(size: 7.5, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-
-                    Spacer(minLength: 2)
-
-                    viewStoreCapsule
-                }
+                Text(profile.handle)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            viewStoreCapsule
         }
-        .frame(maxWidth: .infinity, minHeight: 78, maxHeight: 78, alignment: .center)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 340, minHeight: 94, alignment: .center)
         .background(
             LinearGradient(
                 colors: [
@@ -797,6 +1174,7 @@ private struct SellerStoresDirectoryView: View {
                 .strokeBorder(TBTheme.skyBlue.opacity(0.16), lineWidth: 0.8)
         )
         .shadow(color: TBTheme.deepSky.opacity(0.035), radius: 8, y: 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func sellerStoreRow(_ profile: SellerProfile) -> some View {
@@ -907,14 +1285,14 @@ private struct SellerStoresDirectoryView: View {
         HStack(spacing: 4) {
             Text("View")
             Image(systemName: "chevron.right")
-                .font(.system(size: 7, weight: .bold, design: .rounded))
+                .font(.system(size: 10, weight: .bold, design: .rounded))
         }
-        .font(.system(size: 8, weight: .bold, design: .rounded))
+        .font(.system(size: 12, weight: .bold, design: .rounded))
         .foregroundStyle(TBTheme.deepSky)
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
         .background(
             Capsule(style: .continuous)
                 .fill(

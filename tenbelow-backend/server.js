@@ -14,7 +14,12 @@ import {
   verifySubscriptionWithAppStore,
 } from "./appStoreMembershipVerification.js";
 import { registerPushDevice, unregisterPushDevice } from "./pushDevicesStore.js";
-import { notifyOrderStatusChanged, notifyPaymentSucceeded } from "./pushOrderNotifications.js";
+import {
+  notifyOrderStatusChanged,
+  notifyOrderSupportEvent,
+  notifyPaymentSucceeded,
+  notifyShipmentStatusToBuyer,
+} from "./pushOrderNotifications.js";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { auditLog, AUDIT_LOG_SCAN_MAX, clientIp, readAuditLogTail } from "./auditLog.js";
@@ -41,9 +46,33 @@ import {
 } from "./storagePaths.js";
 import { ensureSchema, isPgEnabled, loadAllDocumentsInto, upsertDocumentRow } from "./db/pgDocuments.mjs";
 import { storeMediaBytes } from "./mediaObjectStorage.js";
+import {
+  MEDIA_SIZE_LIMITS,
+  isServableMediaExtension,
+  safeContentTypeForExtension,
+  safeMediaServingMiddleware,
+  validateCustomOrderReferenceUpload,
+  validateExchangeProofUpload,
+  validateSellerMediaUpload,
+} from "./mediaUploadPolicy.js";
+import {
+  applyApprovedSupportRequest,
+  normalizeOrderMessage,
+  normalizeOrderSupportFields,
+  normalizeSupportRequest,
+  orderMessagesForSeller,
+  validateSupportRequestCreate,
+} from "./orderSupport.js";
+import {
+  appendInquiryMessage,
+  findInquiryThread,
+  normalizeInquiryThread,
+  upsertInquiryThread,
+} from "./sellerInquiry.js";
 
 const app = express();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || "").trim();
+const stripe = new Stripe(STRIPE_SECRET_KEY || "sk_test_missing");
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
@@ -59,6 +88,7 @@ const SMTP_SECURE =
     .toLowerCase() === "true" || SMTP_PORT === 465;
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3000";
 const CUSTOM_ORDER_ADMIN_EMAIL = String(process.env.CUSTOM_ORDER_ADMIN_EMAIL || "").trim();
+const ADMIN_LOGIN_EMAIL = String(process.env.ADMIN_LOGIN_EMAIL || CUSTOM_ORDER_ADMIN_EMAIL || "").trim().toLowerCase();
 const SELLER_SUBSCRIPTION_PRODUCT_ID =
   process.env.SELLER_SUBSCRIPTION_PRODUCT_ID || "com.innovativecodeworks.com.TenBelow.seller.monthly";
 const APP_API_KEY = process.env.APP_API_KEY || "";
@@ -68,7 +98,18 @@ const ADMIN_SESSION_COOKIE_NAME = "tb_admin_session";
 const LEGACY_ADMIN_COOKIE_NAME = "tb_admin_auth";
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ADMIN_SESSION_TTL_SECONDS = Math.floor(ADMIN_SESSION_TTL_MS / 1000);
+const ADMIN_LOGIN_CODE_TTL_MS = 1000 * 60 * 10;
+const ADMIN_LOGIN_CODE_MAX_ATTEMPTS = 5;
+const EMAIL_OTP_TTL_MS = 1000 * 60 * 10;
+const EMAIL_OTP_MAX_ATTEMPTS = 5;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const STRIPE_CONNECT_SETUP_MESSAGE =
+  "Stripe Connect is not configured yet. Sellers can finish account setup now and connect payouts when TenBelow enables Stripe.";
+const ADMIN_ALLOW_DIRECT_KEY_AUTH =
+  !IS_PRODUCTION &&
+  String(process.env.ADMIN_ALLOW_DIRECT_KEY_AUTH || "")
+    .trim()
+    .toLowerCase() === "true";
 const ALLOWED_CORS_ORIGINS = String(process.env.CORS_ALLOWED_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -149,6 +190,18 @@ const mediaReadLimiter = rateLimit({
   keyGenerator: (req) => clientIp(req) || "unknown",
 });
 
+const mediaUploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number.parseInt(process.env.MEDIA_UPLOAD_RATE_LIMIT_MAX || "120", 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => clientIp(req) || "unknown",
+});
+
+const sellerMediaRawLimit = `${Math.ceil(MEDIA_SIZE_LIMITS.sellerVideoBytes / (1024 * 1024))}mb`;
+const exchangeProofRawLimit = `${Math.ceil(MEDIA_SIZE_LIMITS.exchangeVideoBytes / (1024 * 1024))}mb`;
+const customOrderRefRawLimit = `${Math.ceil(MEDIA_SIZE_LIMITS.customOrderRefBytes / (1024 * 1024))}mb`;
+
 const customOrderLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 48,
@@ -177,7 +230,10 @@ const DROPS_PATH = dataFileURL("drops.json");
 const PRODUCT_REVIEWS_PATH = dataFileURL("product-reviews.json");
 const EXCHANGE_REQUESTS_PATH = dataFileURL("exchange-requests.json");
 const CUSTOM_ORDER_REQUESTS_PATH = dataFileURL("custom-order-requests.json");
+const SELLER_INQUIRIES_PATH = dataFileURL("seller-inquiries.json");
 const WEBHOOK_EVENTS_PATH = dataFileURL("webhook-events.json");
+const PUBLIC_INDEX_HTML_PATH = fileURLToPath(new URL("./public/index.html", import.meta.url));
+const PUBLIC_ASSETS_PATH = fileURLToPath(new URL("./public/", import.meta.url));
 const ADMIN_REVIEW_HTML_PATH = fileURLToPath(new URL("./admin/review.html", import.meta.url));
 const ADMIN_ASSETS_PATH = fileURLToPath(new URL("./admin/", import.meta.url));
 const SNAPSHOT_DIRECTORY_URL = new URL("./snapshots/", DATA_DIRECTORY_URL);
@@ -206,11 +262,14 @@ const MANAGED_DATA_TARGETS = Object.freeze({
   productReviews: PRODUCT_REVIEWS_PATH,
   exchangeRequests: EXCHANGE_REQUESTS_PATH,
   customOrderRequests: CUSTOM_ORDER_REQUESTS_PATH,
+  sellerInquiries: SELLER_INQUIRIES_PATH,
   webhookEvents: WEBHOOK_EVENTS_PATH,
 });
 const DOCUMENT_MEMORY_CACHE = new Map();
 let processedWebhookEventIds = new Set();
 const securityAlertEscalationState = new Map();
+const adminLoginChallenges = new Map();
+const emailOtpChallenges = new Map();
 
 function ensureJSONFile(targetURL, { seedCandidates = [], fallbackValue }) {
   const targetPath = fileURLToPath(targetURL);
@@ -265,6 +324,9 @@ function initializeBackendStorage() {
     fallbackValue: [],
   });
   ensureJSONFile(CUSTOM_ORDER_REQUESTS_PATH, {
+    fallbackValue: [],
+  });
+  ensureJSONFile(SELLER_INQUIRIES_PATH, {
     fallbackValue: [],
   });
   ensureJSONFile(WEBHOOK_EVENTS_PATH, {
@@ -463,6 +525,9 @@ function normalizeHostedMediaReference(value) {
 
   try {
     const parsed = new URL(trimmed);
+    if (parsed.protocol === "file:") {
+      return null;
+    }
     if (parsed.pathname.startsWith("/media/")) {
       return `${parsed.pathname}${parsed.search}`;
     }
@@ -473,8 +538,21 @@ function normalizeHostedMediaReference(value) {
   return trimmed;
 }
 
+function normalizeHostedMediaReferences(values) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => normalizeHostedMediaReference(value))
+    .filter(Boolean);
+}
+
 function isValidSellerId(value) {
   return /^[a-z0-9][a-z0-9_-]{2,23}$/.test(String(value || "").trim());
+}
+
+function normalizeRightsReferenceFlags(value) {
+  return Array.isArray(value)
+    ? value.map((flag) => String(flag || "").trim()).filter(Boolean)
+    : [];
 }
 
 function normalizeCatalogProduct(product = {}) {
@@ -496,9 +574,9 @@ function normalizeCatalogProduct(product = {}) {
     previousPriceCents:
       product.previousPriceCents == null ? null : Math.max(0, asFiniteNumber(product.previousPriceCents, 0)),
     category: String(product.category || "desk").trim().toLowerCase(),
-    imageURLs: Array.isArray(product.imageURLs) ? product.imageURLs.filter(Boolean) : [],
-    demoVideoURL: product.demoVideoURL || null,
-    productionPreviewURL: product.productionPreviewURL || null,
+    imageURLs: normalizeHostedMediaReferences(product.imageURLs),
+    demoVideoURL: normalizeHostedMediaReference(product.demoVideoURL),
+    productionPreviewURL: normalizeHostedMediaReference(product.productionPreviewURL),
     dropHeadline: String(product.dropHeadline || "").trim(),
     dropStory: String(product.dropStory || "").trim(),
     dropBestUseCase: String(product.dropBestUseCase || "").trim(),
@@ -515,6 +593,12 @@ function normalizeCatalogProduct(product = {}) {
     reviewedAt: product.reviewedAt || null,
     reviewNotes: product.reviewNotes || "",
     archivedAt: isArchived ? product.archivedAt || product.reviewedAt || null : null,
+    rightsOwnershipType: product.rightsOwnershipType ? String(product.rightsOwnershipType).trim() : null,
+    rightsReferenceFlags: normalizeRightsReferenceFlags(product.rightsReferenceFlags),
+    rightsCertificationAccepted: product.rightsCertificationAccepted === true,
+    rightsCertificationAcceptedAt: product.rightsCertificationAcceptedAt || null,
+    requiresManualReview: product.requiresManualReview === true,
+    reviewReason: product.reviewReason ? String(product.reviewReason).trim() : null,
   };
 }
 
@@ -535,31 +619,55 @@ function auditOwnershipMismatch(req, details = {}) {
   });
 }
 
+function constantTimeEquals(lhs = "", rhs = "") {
+  const left = Buffer.from(String(lhs));
+  const right = Buffer.from(String(rhs));
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+function setAdminSecurityHeaders(res) {
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "connect-src 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      "img-src 'self' data: https:",
+      "media-src 'self' https:",
+      "object-src 'none'",
+      "script-src 'self'",
+      "style-src 'self'",
+    ].join("; ")
+  );
+}
+
 function requireAdmin(req, res, next) {
   if (!ADMIN_API_KEY) {
     recordSecurityAudit(req, { action: "admin_auth_unconfigured" });
     return res.status(503).json({ error: "Admin auth is not configured" });
   }
 
-  const bearerToken = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
-  const headerToken = String(req.headers["x-admin-key"] || "").trim();
   const sessionToken = readCookieValue(req.headers.cookie, ADMIN_SESSION_COOKIE_NAME);
-  const legacyCookieToken = readCookieValue(req.headers.cookie, LEGACY_ADMIN_COOKIE_NAME);
-  const providedToken = bearerToken || headerToken || legacyCookieToken;
-
   if (isValidAdminSessionToken(sessionToken)) {
     return next();
   }
 
-  if (!providedToken || providedToken !== ADMIN_API_KEY) {
-    recordSecurityAudit(req, {
-      action: "admin_auth_failed",
-      reason: "missing_or_invalid_admin_credentials",
-    });
-    return res.status(401).json({ error: "Unauthorized" });
+  if (ADMIN_ALLOW_DIRECT_KEY_AUTH) {
+    const bearerToken = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+    const headerToken = String(req.headers["x-admin-key"] || "").trim();
+    const providedToken = bearerToken || headerToken;
+    if (providedToken && constantTimeEquals(providedToken, ADMIN_API_KEY)) {
+      return next();
+    }
   }
 
-  return next();
+  recordSecurityAudit(req, {
+    action: "admin_auth_failed",
+    reason: "missing_or_invalid_admin_session",
+  });
+  return res.status(401).json({ error: "Admin session required" });
 }
 
 function requireAppClient(req, res, next) {
@@ -664,14 +772,208 @@ function createAdminSessionToken() {
   return jwt.sign(
     {
       role: "admin",
+      tokenType: "admin_session",
       sessionId: crypto.randomUUID(),
     },
     signingSecret,
     {
       algorithm: "HS256",
+      issuer: "tenbelow-backend",
+      audience: "tenbelow-admin",
       expiresIn: ADMIN_SESSION_TTL_SECONDS,
     }
   );
+}
+
+function pruneExpiredAdminLoginChallenges(now = Date.now()) {
+  for (const [challengeId, challenge] of adminLoginChallenges.entries()) {
+    if (!challenge?.expiresAt || challenge.expiresAt <= now) {
+      adminLoginChallenges.delete(challengeId);
+    }
+  }
+}
+
+function adminCodeHash(challengeId, code) {
+  return crypto
+    .createHash("sha256")
+    .update(`${challengeId}:${String(code || "").trim()}:${ADMIN_API_KEY}`)
+    .digest("hex");
+}
+
+function createAdminLoginChallenge(req) {
+  pruneExpiredAdminLoginChallenges();
+
+  const challengeId = crypto.randomUUID();
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+  const expiresAt = Date.now() + ADMIN_LOGIN_CODE_TTL_MS;
+
+  adminLoginChallenges.set(challengeId, {
+    codeHash: adminCodeHash(challengeId, code),
+    expiresAt,
+    attempts: 0,
+    clientIp: clientIp(req),
+    userAgent: String(req.headers["user-agent"] || "").slice(0, 240),
+  });
+
+  return { challengeId, code, expiresAt };
+}
+
+function maskedEmail(value = "") {
+  const [localPart = "", domain = ""] = String(value || "").split("@");
+  if (!localPart || !domain) return "";
+  const visibleLocal = localPart.length <= 2
+    ? `${localPart[0] || ""}*`
+    : `${localPart.slice(0, 2)}***`;
+  return `${visibleLocal}@${domain}`;
+}
+
+async function sendAdminLoginCodeEmail({ code, expiresAt }) {
+  if (!ADMIN_LOGIN_EMAIL) {
+    throw new Error("ADMIN_LOGIN_EMAIL is not configured");
+  }
+  if (!transactionalEmailConfigured()) {
+    throw new Error("Admin login codes require RESEND_API_KEY or SMTP settings");
+  }
+
+  const expiration = new Date(expiresAt).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  await sendTransactionalEmail({
+    to: ADMIN_LOGIN_EMAIL,
+    subject: "Your TenBelow admin login code",
+    html: `
+      <h2>TenBelow admin login</h2>
+      <p>Your one-time admin login code is:</p>
+      <p style="font-size:28px;font-weight:700;letter-spacing:0.18em">${code}</p>
+      <p>This code expires at ${escapeHtml(expiration)} and can only be used once.</p>
+      <p>If you did not request this code, rotate your admin key and review the audit log.</p>
+    `,
+  });
+}
+
+function verifyAdminLoginChallenge({ challengeId, code }) {
+  pruneExpiredAdminLoginChallenges();
+
+  const normalizedChallengeId = String(challengeId || "").trim();
+  const normalizedCode = String(code || "").replace(/\D/g, "");
+  const challenge = adminLoginChallenges.get(normalizedChallengeId);
+
+  if (!challenge || !normalizedCode) {
+    return { ok: false, reason: "missing_or_expired_code" };
+  }
+
+  challenge.attempts += 1;
+  if (challenge.attempts > ADMIN_LOGIN_CODE_MAX_ATTEMPTS) {
+    adminLoginChallenges.delete(normalizedChallengeId);
+    return { ok: false, reason: "too_many_attempts" };
+  }
+
+  const expectedHash = challenge.codeHash;
+  const actualHash = adminCodeHash(normalizedChallengeId, normalizedCode);
+  if (!constantTimeEquals(actualHash, expectedHash)) {
+    return { ok: false, reason: "invalid_code" };
+  }
+
+  adminLoginChallenges.delete(normalizedChallengeId);
+  return { ok: true };
+}
+
+function pruneExpiredEmailOtpChallenges(now = Date.now()) {
+  for (const [challengeId, challenge] of emailOtpChallenges.entries()) {
+    if (!challenge?.expiresAt || challenge.expiresAt <= now) {
+      emailOtpChallenges.delete(challengeId);
+    }
+  }
+}
+
+function emailOtpHash(challengeId, code) {
+  return crypto
+    .createHash("sha256")
+    .update(`${challengeId}:${String(code || "").trim()}:${AUTH_JWT_SECRET || APP_API_KEY || ADMIN_API_KEY}`)
+    .digest("hex");
+}
+
+function createEmailOtpChallenge({ req, purpose, email, subjectId = "" }) {
+  pruneExpiredEmailOtpChallenges();
+
+  const challengeId = crypto.randomUUID();
+  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+  const expiresAt = Date.now() + EMAIL_OTP_TTL_MS;
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  emailOtpChallenges.set(challengeId, {
+    purpose,
+    email: normalizedEmail,
+    subjectId: String(subjectId || "").trim(),
+    codeHash: emailOtpHash(challengeId, code),
+    expiresAt,
+    attempts: 0,
+    clientIp: clientIp(req),
+    userAgent: String(req.headers["user-agent"] || "").slice(0, 240),
+  });
+
+  return { challengeId, code, expiresAt, email: normalizedEmail };
+}
+
+async function sendEmailOtp({ to, code, expiresAt, title, intro, warning }) {
+  if (!transactionalEmailConfigured()) {
+    throw new Error("Email codes require RESEND_API_KEY or SMTP settings on the backend.");
+  }
+
+  const expiration = new Date(expiresAt).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  await sendTransactionalEmail({
+    to,
+    subject: title,
+    html: `
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(intro)}</p>
+      <p style="font-size:28px;font-weight:700;letter-spacing:0.18em">${escapeHtml(code)}</p>
+      <p>This code expires at ${escapeHtml(expiration)} and can only be used once.</p>
+      <p>${escapeHtml(warning)}</p>
+    `,
+  });
+}
+
+function verifyEmailOtpChallenge({ challengeId, code, purpose, email, subjectId = "" }) {
+  pruneExpiredEmailOtpChallenges();
+
+  const normalizedChallengeId = String(challengeId || "").trim();
+  const normalizedCode = String(code || "").replace(/\D/g, "");
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedSubjectId = String(subjectId || "").trim();
+  const challenge = emailOtpChallenges.get(normalizedChallengeId);
+
+  if (!challenge || !normalizedCode) {
+    return { ok: false, reason: "missing_or_expired_code" };
+  }
+
+  if (challenge.purpose !== purpose || challenge.email !== normalizedEmail) {
+    return { ok: false, reason: "challenge_mismatch" };
+  }
+
+  if (normalizedSubjectId && challenge.subjectId && challenge.subjectId !== normalizedSubjectId) {
+    return { ok: false, reason: "subject_mismatch" };
+  }
+
+  challenge.attempts += 1;
+  if (challenge.attempts > EMAIL_OTP_MAX_ATTEMPTS) {
+    emailOtpChallenges.delete(normalizedChallengeId);
+    return { ok: false, reason: "too_many_attempts" };
+  }
+
+  const actualHash = emailOtpHash(normalizedChallengeId, normalizedCode);
+  if (!constantTimeEquals(actualHash, challenge.codeHash)) {
+    return { ok: false, reason: "invalid_code" };
+  }
+
+  emailOtpChallenges.delete(normalizedChallengeId);
+  return { ok: true, challenge };
 }
 
 function isValidAdminSessionToken(token) {
@@ -680,8 +982,12 @@ function isValidAdminSessionToken(token) {
   if (!signingSecret) return false;
 
   try {
-    const payload = jwt.verify(token, signingSecret);
-    return payload?.role === "admin";
+    const payload = jwt.verify(token, signingSecret, {
+      algorithms: ["HS256"],
+      issuer: "tenbelow-backend",
+      audience: "tenbelow-admin",
+    });
+    return payload?.role === "admin" && payload?.tokenType === "admin_session";
   } catch {
     return false;
   }
@@ -717,28 +1023,12 @@ function ensureAdminSessionFromLegacyCookie(req, res) {
     return true;
   }
 
-  const legacyCookieToken = readCookieValue(req.headers.cookie, LEGACY_ADMIN_COOKIE_NAME);
-  if (!legacyCookieToken || legacyCookieToken !== ADMIN_API_KEY) {
-    return false;
-  }
-
-  const newSessionToken = createAdminSessionToken();
-  setAdminSessionCookie(res, newSessionToken);
   res.clearCookie(LEGACY_ADMIN_COOKIE_NAME, { path: "/admin" });
-  return true;
+  return false;
 }
 
 function shouldAutoAuthenticateLocalAdmin(req) {
-  if (IS_PRODUCTION || !ADMIN_API_KEY) {
-    return false;
-  }
-
-  const host = String(req.hostname || req.headers.host || "")
-    .trim()
-    .toLowerCase()
-    .split(":")[0];
-
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  return false;
 }
 
 function ensureLocalAdminSession(req, res) {
@@ -1576,6 +1866,27 @@ function normalizeSellerRecord(record = {}, sellerId = "") {
   };
 }
 
+function isStripeConnectConfigured() {
+  return Boolean(STRIPE_SECRET_KEY && !STRIPE_SECRET_KEY.includes("REPLACE") && !STRIPE_SECRET_KEY.includes("YOUR_"));
+}
+
+function stripePendingSellerStatus(sellerId, seller = {}) {
+  return {
+    sellerId,
+    stripeAccountId: seller.stripeAccountId || "",
+    chargesEnabled: false,
+    payoutsEnabled: false,
+    detailsSubmitted: false,
+    onboardingComplete: false,
+    payoutSetupPending: true,
+    payoutSetupActionRequired: true,
+    payoutSetupMessage: STRIPE_CONNECT_SETUP_MESSAGE,
+    hasActiveSubscription: seller.membership?.hasActiveSubscription === true,
+    subscriptionExpiresAt: seller.membership?.expiresAt || null,
+    subscriptionProductId: seller.membership?.productId || SELLER_SUBSCRIPTION_PRODUCT_ID,
+  };
+}
+
 function normalizeSellerMap(sellers = {}) {
   return Object.fromEntries(
     Object.entries(sellers).map(([sellerId, record]) => [sellerId, normalizeSellerRecord(record, sellerId)])
@@ -1714,6 +2025,44 @@ function saveCustomOrderRequestsFile(rows) {
   writeManagedJSON("customOrderRequests", Array.isArray(rows) ? rows : []);
 }
 
+function loadSellerInquiriesFile() {
+  const cached = getCachedDocument("sellerInquiries");
+  if (cached !== undefined) {
+    const arr = Array.isArray(cached) ? cached : [];
+    return arr.map((row) => normalizeInquiryThread(row));
+  }
+  try {
+    const raw = JSON.parse(readFileSync(fileURLToPath(SELLER_INQUIRIES_PATH), "utf-8"));
+    const arr = Array.isArray(raw) ? raw : [];
+    setCachedDocument("sellerInquiries", arr);
+    return arr.map((row) => normalizeInquiryThread(row));
+  } catch {
+    setCachedDocument("sellerInquiries", []);
+    return [];
+  }
+}
+
+function saveSellerInquiriesFile(rows) {
+  writeManagedJSON("sellerInquiries", Array.isArray(rows) ? rows : []);
+}
+
+function getOrCreateInquiryThreadForBuyer(sellerId, auth, buyerName = null) {
+  const normalizedSellerId = String(sellerId || "").trim();
+  if (auth?.role !== "buyer" || !auth.buyerEmail || !normalizedSellerId) {
+    return { ok: false, error: "Buyer session required" };
+  }
+  const threads = loadSellerInquiriesFile();
+  const { threads: nextThreads, thread } = upsertInquiryThread(threads, {
+    sellerId: normalizedSellerId,
+    buyerEmail: auth.buyerEmail,
+    buyerName,
+  });
+  if (thread && !findInquiryThread(threads, auth.buyerEmail, normalizedSellerId)) {
+    saveSellerInquiriesFile(nextThreads);
+  }
+  return { ok: true, thread: thread || findInquiryThread(nextThreads, auth.buyerEmail, normalizedSellerId) };
+}
+
 function isAllowedCustomOrderReference(ref, sellerId) {
   const trimmedSellerId = String(sellerId || "").trim();
   const t = String(ref || "").trim();
@@ -1808,6 +2157,8 @@ function normalizeBuyerRecord(record = {}, email = "") {
     email: normalizedEmail,
     fullName: String(record.fullName || "").trim(),
     passwordHash: String(record.passwordHash || "").trim(),
+    emailVerified: record.emailVerified === true,
+    emailVerifiedAt: record.emailVerifiedAt || null,
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: record.updatedAt || new Date().toISOString(),
   };
@@ -2066,15 +2417,90 @@ function groupOrderItemsIntoShipments(orderItems, sellers) {
 function deriveOrderStatus(shipments, current = "placed") {
   if (!shipments.length) return current;
 
-  const deliveredCount = shipments.filter((shipment) => shipment.status === "delivered").length;
-  const shippedCount = shipments.filter((shipment) => shipment.status === "shipped").length;
-  const preparingCount = shipments.filter((shipment) => shipment.status === "preparing").length;
+  const normalized = shipments.map((shipment) => String(shipment?.status || "").trim().toLowerCase());
+  if (normalized.every((status) => status === "cancelled")) return "cancelled";
 
-  if (deliveredCount === shipments.length) return "delivered";
-  if (shippedCount + deliveredCount === shipments.length && shippedCount > 0) return "shipped";
+  const active = shipments.filter((shipment) => String(shipment?.status || "").trim().toLowerCase() !== "cancelled");
+  if (!active.length) return "cancelled";
+
+  const deliveredCount = active.filter((shipment) => shipment.status === "delivered").length;
+  const shippedCount = active.filter((shipment) => shipment.status === "shipped").length;
+  const preparingCount = active.filter((shipment) => shipment.status === "preparing").length;
+
+  if (deliveredCount === active.length) return "delivered";
+  if (shippedCount + deliveredCount === active.length && shippedCount > 0) return "shipped";
   if (shippedCount > 0 && preparingCount > 0) return "partiallyShipped";
   if (preparingCount > 0) return "processing";
   return current;
+}
+
+function hydrateOrderRecord(order = {}) {
+  const support = normalizeOrderSupportFields(order);
+  return {
+    ...order,
+    supportRequests: support.supportRequests,
+    orderMessages: support.orderMessages,
+  };
+}
+
+function loadHydratedOrders() {
+  return loadOrdersFile().map((order) => hydrateOrderRecord(order));
+}
+
+function findOrderForParticipant(orderId, auth) {
+  const orders = loadHydratedOrders();
+  const order = orders.find((entry) => entry.id === orderId);
+  if (!order) return null;
+  if (auth?.role === "buyer" && buyerOwnsOrder(order, auth)) return order;
+  if (auth?.role === "seller" && sellerCanAccessOrder(order, auth.sellerId)) return order;
+  return null;
+}
+
+function saveHydratedOrder(updatedOrder) {
+  const orders = loadOrdersFile();
+  const orderIndex = orders.findIndex((entry) => entry.id === updatedOrder.id);
+  const hydrated = hydrateOrderRecord(updatedOrder);
+  if (orderIndex < 0) {
+    orders.unshift(hydrated);
+  } else {
+    orders[orderIndex] = hydrated;
+  }
+  saveOrdersFile(orders);
+  return hydrated;
+}
+
+function respondWithParticipantOrder(res, order, auth) {
+  if (auth?.role === "seller") {
+    return res.json({ order: sellerScopedOrder(order, auth.sellerId) });
+  }
+  return res.json({ order });
+}
+
+function sellerCanAccessOrder(order, sellerId) {
+  return order.shipments.some((shipment) => String(shipment?.sellerId || "").trim() === String(sellerId || "").trim());
+}
+
+function sellerScopedOrder(order, sellerId) {
+  const normalizedSellerId = String(sellerId || "").trim();
+  const sellerShipments = (Array.isArray(order?.shipments) ? order.shipments : []).filter(
+    (shipment) => String(shipment?.sellerId || "").trim() === normalizedSellerId
+  );
+  const sellerTotalCents = sellerShipments.reduce(
+    (sum, shipment) =>
+      sum +
+      (Array.isArray(shipment.items) ? shipment.items : []).reduce(
+        (itemSum, item) => itemSum + Math.max(1, asFiniteNumber(item.quantity, 1)) * Math.max(0, asFiniteNumber(item.unitPriceCents, 0)),
+        0
+      ),
+    0
+  );
+
+  return {
+    ...order,
+    status: deriveOrderStatus(sellerShipments, order?.status || "placed"),
+    totalCents: sellerTotalCents,
+    shipments: sellerShipments,
+  };
 }
 
 function upsertPaidOrder({ orderId, buyerEmail, shipping, totalCents, currency = "USD", orderItems, sellers }) {
@@ -2085,7 +2511,7 @@ function upsertPaidOrder({ orderId, buyerEmail, shipping, totalCents, currency =
     ? existingOrder.shipments
     : groupOrderItemsIntoShipments(orderItems, sellers);
 
-  const nextOrder = {
+  const nextOrder = hydrateOrderRecord({
     id: orderId,
     createdAt: existingOrder?.createdAt || new Date().toISOString(),
     status: deriveOrderStatus(shipments, "placed"),
@@ -2095,7 +2521,9 @@ function upsertPaidOrder({ orderId, buyerEmail, shipping, totalCents, currency =
     currency,
     totalCents,
     shipments,
-  };
+    supportRequests: existingOrder?.supportRequests || [],
+    orderMessages: existingOrder?.orderMessages || [],
+  });
 
   if (existingIndex >= 0) {
     orders[existingIndex] = nextOrder;
@@ -2272,6 +2700,9 @@ app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   res.setHeader("X-DNS-Prefetch-Control", "off");
+  if (req.path.startsWith("/admin")) {
+    setAdminSecurityHeaders(res);
+  }
   if (IS_PRODUCTION) {
     res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
   }
@@ -2286,11 +2717,41 @@ app.use((err, req, res, next) => {
   }
   return next(err);
 });
-app.use("/media", mediaReadLimiter, express.static(MEDIA_DIRECTORY_PATH));
+app.use(
+  "/media",
+  mediaReadLimiter,
+  safeMediaServingMiddleware(),
+  express.static(MEDIA_DIRECTORY_PATH, {
+    index: false,
+    fallthrough: false,
+    setHeaders(res, filePath) {
+      const extension = String(filePath || "").split(".").pop() || "";
+      if (!isServableMediaExtension(extension)) {
+        res.statusCode = 404;
+        return;
+      }
+      const contentType = safeContentTypeForExtension(extension);
+      if (contentType) {
+        res.setHeader("Content-Type", contentType);
+      }
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Disposition", "inline");
+    },
+  })
+);
+app.use(express.static(PUBLIC_ASSETS_PATH, {
+  index: false,
+  maxAge: IS_PRODUCTION ? "1h" : 0,
+}));
 app.use("/admin/assets", (req, res, next) => {
   res.setHeader("Cache-Control", "no-store, max-age=0");
   next();
 }, express.static(ADMIN_ASSETS_PATH));
+
+app.get("/", (req, res) => {
+  res.setHeader("Cache-Control", IS_PRODUCTION ? "public, max-age=300" : "no-store, max-age=0");
+  res.sendFile(PUBLIC_INDEX_HTML_PATH);
+});
 
 app.get("/admin/review", (req, res) => {
   ensureLocalAdminSession(req, res);
@@ -2298,7 +2759,7 @@ app.get("/admin/review", (req, res) => {
   res.sendFile(ADMIN_REVIEW_HTML_PATH);
 });
 
-app.post("/auth/buyer-account", authLimiter, requireAppClient, (req, res) => {
+app.post("/auth/buyer-account", authLimiter, requireAppClient, async (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();
     const fullName = String(req.body?.fullName || "").trim();
@@ -2319,13 +2780,139 @@ app.post("/auth/buyer-account", authLimiter, requireAppClient, (req, res) => {
         email,
         fullName,
         passwordHash,
+        emailVerified: existing?.emailVerified === true,
+        emailVerifiedAt: existing?.emailVerifiedAt || null,
         createdAt: existing?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
       email
     );
     saveBuyersFile(buyers);
-    res.json({ ok: true, email });
+    let verification = null;
+    if (!buyers[email].emailVerified) {
+      const challenge = createEmailOtpChallenge({
+        req,
+        purpose: "buyer_email_verification",
+        email,
+      });
+      await sendEmailOtp({
+        to: email,
+        code: challenge.code,
+        expiresAt: challenge.expiresAt,
+        title: "Verify your TenBelow email",
+        intro: "Enter this one-time code in TenBelow to verify your buyer account email.",
+        warning: "If you did not create a TenBelow buyer account, you can ignore this email.",
+      });
+      recordSecurityAudit(req, { action: "buyer_email_verification_code_sent", email: maskedEmail(email) });
+      verification = {
+        required: true,
+        challengeId: challenge.challengeId,
+        deliveryTarget: maskedEmail(email),
+        expiresInSeconds: Math.floor(EMAIL_OTP_TTL_MS / 1000),
+      };
+    }
+    res.json({ ok: true, email, emailVerified: buyers[email].emailVerified, verification });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/auth/buyer-email-verification/request", authLimiter, requireAppClient, async (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!isValidBuyerEmail(email)) {
+      return res.status(400).json({ error: "Enter a valid email address" });
+    }
+    const buyers = loadBuyersFile();
+    const buyer = buyers[email];
+    if (!buyer) {
+      return res.status(404).json({ error: "Buyer account not found" });
+    }
+    if (buyer.emailVerified === true) {
+      return res.json({ ok: true, email, emailVerified: true });
+    }
+
+    const challenge = createEmailOtpChallenge({
+      req,
+      purpose: "buyer_email_verification",
+      email,
+    });
+    await sendEmailOtp({
+      to: email,
+      code: challenge.code,
+      expiresAt: challenge.expiresAt,
+      title: "Verify your TenBelow email",
+      intro: "Enter this one-time code in TenBelow to verify your buyer account email.",
+      warning: "If you did not request this code, reset your password and contact support.",
+    });
+    recordSecurityAudit(req, { action: "buyer_email_verification_code_sent", email: maskedEmail(email) });
+    res.json({
+      ok: true,
+      email,
+      emailVerified: false,
+      challengeId: challenge.challengeId,
+      deliveryTarget: maskedEmail(email),
+      expiresInSeconds: Math.floor(EMAIL_OTP_TTL_MS / 1000),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/auth/buyer-email-verification/verify", authLimiter, requireAppClient, (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const challengeId = String(req.body?.challengeId || "").trim();
+    const code = String(req.body?.code || "").trim();
+    if (!isValidBuyerEmail(email) || !challengeId || !code) {
+      return res.status(400).json({ error: "Email, challenge, and code are required" });
+    }
+
+    const result = verifyEmailOtpChallenge({
+      challengeId,
+      code,
+      purpose: "buyer_email_verification",
+      email,
+    });
+    if (!result.ok) {
+      recordSecurityAudit(req, {
+        action: "buyer_email_verification_failed",
+        reason: result.reason,
+        email: maskedEmail(email),
+      });
+      return res.status(401).json({ error: "Invalid or expired verification code" });
+    }
+
+    const buyers = loadBuyersFile();
+    const buyer = buyers[email];
+    if (!buyer) {
+      return res.status(404).json({ error: "Buyer account not found" });
+    }
+    buyers[email] = normalizeBuyerRecord(
+      {
+        ...buyer,
+        emailVerified: true,
+        emailVerifiedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      email
+    );
+    saveBuyersFile(buyers);
+
+    const token = issueUserSessionToken({
+      role: "buyer",
+      buyerEmail: email,
+    });
+    auditLog(auditContext(req, { action: "buyer_email_verified", email: maskedEmail(email) }));
+    res.json({
+      ok: true,
+      email,
+      emailVerified: true,
+      token,
+      role: "buyer",
+      buyerEmail: email,
+      fullName: buyers[email].fullName || "",
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2342,6 +2929,13 @@ app.post("/auth/buyer-session", authLimiter, requireAppClient, (req, res) => {
     const buyer = buyers[email];
     if (!buyer) {
       return res.status(404).json({ error: "Buyer account not found" });
+    }
+    if (buyer.emailVerified !== true) {
+      return res.status(403).json({
+        error: "Buyer email verification required",
+        code: "buyer_email_verification_required",
+        emailVerified: false,
+      });
     }
 
     const token = issueUserSessionToken({
@@ -2374,6 +2968,13 @@ app.post("/auth/buyer-login", authLimiter, requireAppClient, (req, res) => {
     const buyer = buyers[email];
     if (!buyer) {
       return res.status(404).json({ error: "Buyer account not found" });
+    }
+    if (buyer.emailVerified !== true) {
+      return res.status(403).json({
+        error: "Buyer email verification required",
+        code: "buyer_email_verification_required",
+        emailVerified: false,
+      });
     }
 
     const passwordHash = hashBuyerPassword(password);
@@ -2464,6 +3065,8 @@ app.post(
           passwordHash: passwordChanged
             ? hashBuyerPassword(requestedPassword)
             : String(currentBuyer.passwordHash || ""),
+          emailVerified: emailChanged ? false : currentBuyer.emailVerified === true,
+          emailVerifiedAt: emailChanged ? null : currentBuyer.emailVerifiedAt || null,
           updatedAt: new Date().toISOString(),
         },
         nextEmail
@@ -2511,15 +3114,43 @@ app.post(
         passwordChanged,
       });
 
-      const token = issueUserSessionToken({
-        role: "buyer",
-        buyerEmail: nextEmail,
-      });
+      let verification = null;
+      if (emailChanged) {
+        const challenge = createEmailOtpChallenge({
+          req,
+          purpose: "buyer_email_verification",
+          email: nextEmail,
+        });
+        await sendEmailOtp({
+          to: nextEmail,
+          code: challenge.code,
+          expiresAt: challenge.expiresAt,
+          title: "Verify your new TenBelow email",
+          intro: "Enter this one-time code in TenBelow to verify your new buyer account email.",
+          warning: "If you did not request this email change, reset your password and contact support.",
+        });
+        recordSecurityAudit(req, { action: "buyer_email_verification_code_sent", email: maskedEmail(nextEmail) });
+        verification = {
+          required: true,
+          challengeId: challenge.challengeId,
+          deliveryTarget: maskedEmail(nextEmail),
+          expiresInSeconds: Math.floor(EMAIL_OTP_TTL_MS / 1000),
+        };
+      }
+
+      const token = emailChanged
+        ? ""
+        : issueUserSessionToken({
+            role: "buyer",
+            buyerEmail: nextEmail,
+          });
 
       res.json({
         ok: true,
         email: nextEmail,
         token,
+        emailVerified: updatedBuyer.emailVerified === true,
+        verification,
         emailChanged: Boolean(emailChanged),
         passwordChanged,
         confirmationTargets,
@@ -2530,12 +3161,20 @@ app.post(
   }
 );
 
-app.post("/auth/seller-session", authLimiter, requireAppClient, (req, res) => {
+app.post("/auth/seller-session", authLimiter, requireAppClient, requireAuthenticatedSeller, (req, res) => {
   try {
     const sellerId = String(req.body?.sellerId || "").trim();
     const email = String(req.body?.email || "").trim().toLowerCase();
     if (!sellerId) {
       return res.status(400).json({ error: "sellerId is required" });
+    }
+    if (req.auth.sellerId !== sellerId) {
+      auditOwnershipMismatch(req, {
+        scope: "seller_session_refresh",
+        expectedSellerId: sellerId,
+        actualSellerId: req.auth.sellerId || null,
+      });
+      return res.status(403).json({ error: "Seller session refresh denied" });
     }
 
     const sellers = loadSellersFile();
@@ -2620,6 +3259,122 @@ app.post("/auth/seller-login", authLimiter, requireAppClient, (req, res) => {
   }
 });
 
+app.post("/auth/seller-password-reset/request", authLimiter, requireAppClient, async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier || "").trim().toLowerCase();
+    if (!identifier) {
+      return res.status(400).json({ error: "Seller ID or email is required" });
+    }
+
+    const sellers = loadSellersFile();
+    const entry = Object.entries(sellers).find(([sellerId, seller]) =>
+      sellerId.toLowerCase() === identifier ||
+      String(seller.email || "").trim().toLowerCase() === identifier
+    );
+
+    if (entry && transactionalEmailConfigured()) {
+      const [sellerId, seller] = entry;
+      const email = String(seller.email || "").trim().toLowerCase();
+      if (email) {
+        const challenge = createEmailOtpChallenge({
+          req,
+          purpose: "seller_password_reset",
+          email,
+          subjectId: sellerId,
+        });
+        await sendEmailOtp({
+          to: email,
+          code: challenge.code,
+          expiresAt: challenge.expiresAt,
+          title: "Reset your TenBelow seller password",
+          intro: "Enter this one-time code in TenBelow to reset your seller password.",
+          warning: "If you did not request this code, contact support and review your seller account.",
+        });
+        auditLog(auditContext(req, {
+          action: "seller_password_reset_code_sent",
+          sellerId,
+          email: maskedEmail(email),
+        }));
+        return res.json({
+          ok: true,
+          challengeId: challenge.challengeId,
+          deliveryTarget: maskedEmail(email),
+          expiresInSeconds: Math.floor(EMAIL_OTP_TTL_MS / 1000),
+        });
+      }
+    }
+
+    if (entry && !transactionalEmailConfigured()) {
+      return res.status(503).json({
+        error: "Password resets require RESEND_API_KEY or SMTP settings on the backend.",
+      });
+    }
+
+    // Do not reveal whether the seller exists.
+    recordSecurityAudit(req, { action: "seller_password_reset_requested_unknown" });
+    return res.json({
+      ok: true,
+      challengeId: "",
+      deliveryTarget: "the seller email on file",
+      expiresInSeconds: Math.floor(EMAIL_OTP_TTL_MS / 1000),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/auth/seller-password-reset/verify", authLimiter, requireAppClient, (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier || "").trim().toLowerCase();
+    const challengeId = String(req.body?.challengeId || "").trim();
+    const code = String(req.body?.code || "").trim();
+    const newPassword = String(req.body?.newPassword || "");
+    if (!identifier || !challengeId || !code || newPassword.length < 8) {
+      return res.status(400).json({ error: "Seller ID/email, code, and an 8+ character password are required" });
+    }
+
+    const sellers = loadSellersFile();
+    const entry = Object.entries(sellers).find(([sellerId, seller]) =>
+      sellerId.toLowerCase() === identifier ||
+      String(seller.email || "").trim().toLowerCase() === identifier
+    );
+    if (!entry) {
+      return res.status(401).json({ error: "Invalid or expired reset code" });
+    }
+
+    const [sellerId, seller] = entry;
+    const email = String(seller.email || "").trim().toLowerCase();
+    const result = verifyEmailOtpChallenge({
+      challengeId,
+      code,
+      purpose: "seller_password_reset",
+      email,
+      subjectId: sellerId,
+    });
+    if (!result.ok) {
+      recordSecurityAudit(req, {
+        action: "seller_password_reset_failed",
+        reason: result.reason,
+        sellerId,
+        email: maskedEmail(email),
+      });
+      return res.status(401).json({ error: "Invalid or expired reset code" });
+    }
+
+    seller.passwordHash = hashSellerPassword(newPassword);
+    sellers[sellerId] = seller;
+    saveSellersFile(sellers);
+    auditLog(auditContext(req, {
+      action: "seller_password_reset_success",
+      sellerId,
+      email: maskedEmail(email),
+    }));
+    res.json({ ok: true, sellerId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/admin/session", (req, res) => {
   if (!ADMIN_API_KEY) {
     return res.status(503).json({ authenticated: false, error: "Admin auth is not configured" });
@@ -2629,21 +3384,73 @@ app.get("/admin/session", (req, res) => {
   res.json({ authenticated });
 });
 
-app.post("/admin/login", adminLoginLimiter, (req, res) => {
+app.post("/admin/login", adminLoginLimiter, async (req, res) => {
   if (!ADMIN_API_KEY) {
     return res.status(503).json({ authenticated: false, error: "Admin auth is not configured" });
   }
 
+  const challengeId = String(req.body?.challengeId || "").trim();
+  const code = String(req.body?.code || "").trim();
+  if (challengeId || code) {
+    const result = verifyAdminLoginChallenge({ challengeId, code });
+    if (!result.ok) {
+      recordSecurityAudit(req, {
+        action: "admin_login_code_failed",
+        reason: result.reason,
+      });
+      return res.status(401).json({ authenticated: false, error: "Invalid or expired admin code" });
+    }
+
+    const sessionToken = createAdminSessionToken();
+    setAdminSessionCookie(res, sessionToken);
+    auditLog(auditContext(req, { action: "admin_login_success", method: "one_time_code" }));
+    return res.json({ authenticated: true });
+  }
+
   const key = String(req.body?.key || "").trim();
-  if (!key || key !== ADMIN_API_KEY) {
+  if (!key || !constantTimeEquals(key, ADMIN_API_KEY)) {
     recordSecurityAudit(req, { action: "admin_login_failed" });
     return res.status(401).json({ authenticated: false, error: "Invalid admin key" });
   }
 
-  const sessionToken = createAdminSessionToken();
-  setAdminSessionCookie(res, sessionToken);
-  auditLog(auditContext(req, { action: "admin_login_success" }));
-  res.json({ authenticated: true });
+  const challenge = createAdminLoginChallenge(req);
+  const canSendCode = Boolean(ADMIN_LOGIN_EMAIL && transactionalEmailConfigured());
+
+  if (canSendCode) {
+    try {
+      await sendAdminLoginCodeEmail(challenge);
+      auditLog(auditContext(req, { action: "admin_login_code_sent", deliveryTarget: maskedEmail(ADMIN_LOGIN_EMAIL) }));
+      return res.json({
+        authenticated: false,
+        requiresCode: true,
+        challengeId: challenge.challengeId,
+        deliveryTarget: maskedEmail(ADMIN_LOGIN_EMAIL),
+        expiresInSeconds: Math.floor(ADMIN_LOGIN_CODE_TTL_MS / 1000),
+      });
+    } catch (err) {
+      adminLoginChallenges.delete(challenge.challengeId);
+      console.error("admin login code email error:", err?.message || err);
+      return res.status(503).json({ authenticated: false, error: "Could not send admin login code" });
+    }
+  }
+
+  if (IS_PRODUCTION) {
+    adminLoginChallenges.delete(challenge.challengeId);
+    return res.status(503).json({
+      authenticated: false,
+      error: "Admin login codes require ADMIN_LOGIN_EMAIL and RESEND_API_KEY or SMTP settings",
+    });
+  }
+
+  auditLog(auditContext(req, { action: "admin_login_code_created_dev" }));
+  return res.json({
+    authenticated: false,
+    requiresCode: true,
+    challengeId: challenge.challengeId,
+    deliveryTarget: "development console",
+    expiresInSeconds: Math.floor(ADMIN_LOGIN_CODE_TTL_MS / 1000),
+    devCode: challenge.code,
+  });
 });
 
 app.post("/admin/logout", (req, res) => {
@@ -2658,6 +3465,67 @@ app.get("/admin/audit-log", adminMutationLimiter, requireAdmin, (req, res) => {
   const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 150));
   const entries = readAuditLogTail(limit);
   res.json({ entries });
+});
+
+function auditEntryMatchesExportQuery(entry, query = "") {
+  const normalized = String(query || "").trim().toLowerCase();
+  if (!normalized) return true;
+  return [
+    entry?.action,
+    entry?.requestId,
+    entry?.method,
+    entry?.path,
+    entry?.ip,
+    entry?.sellerId,
+    entry?.buyerEmail,
+    entry?.email,
+  ].some((value) => String(value || "").toLowerCase().includes(normalized));
+}
+
+function csvCell(value) {
+  const raw = value == null ? "" : String(value);
+  return `"${raw.replaceAll('"', '""')}"`;
+}
+
+function auditEntriesToCsv(entries) {
+  const columns = ["ts", "action", "requestId", "method", "path", "ip", "sellerId", "email", "reason"];
+  const rows = entries.map((entry) =>
+    columns.map((column) => csvCell(entry?.[column])).join(",")
+  );
+  return [columns.join(","), ...rows].join("\n");
+}
+
+app.get("/admin/audit-log/export", adminMutationLimiter, requireAdmin, (req, res) => {
+  try {
+    const format = String(req.query.format || "json").trim().toLowerCase();
+    const limit = Math.max(1, Math.min(AUDIT_LOG_SCAN_MAX, Number(req.query.limit) || 1000));
+    const query = String(req.query.q || "").trim();
+    const entries = readAuditLogTail(limit, { maxCap: AUDIT_LOG_SCAN_MAX })
+      .filter((entry) => auditEntryMatchesExportQuery(entry, query));
+
+    auditLog(
+      auditContext(req, {
+        action: "admin_audit_exported",
+        format,
+        limit,
+        query: query || null,
+        exportedCount: entries.length,
+      })
+    );
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    if (format === "csv") {
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="tenbelow-audit-${timestamp}.csv"`);
+      return res.send(auditEntriesToCsv(entries));
+    }
+
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="tenbelow-audit-${timestamp}.json"`);
+    return res.send(JSON.stringify({ exportedAt: new Date().toISOString(), entries }, null, 2));
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/admin/data-snapshots", adminMutationLimiter, requireAdmin, (req, res) => {
@@ -3029,10 +3897,20 @@ app.post("/push/test", requireAppClient, requireAuthenticatedUser, async (req, r
 // Create Payment Intent
 // ---------------------------------------------------------------------------
 
-app.post("/create-payment-intent", paymentLimiter, requireAppClient, async (req, res) => {
+app.post("/create-payment-intent", paymentLimiter, requireAppClient, requireAuthenticatedBuyer, async (req, res) => {
   try {
     const { email, shipping, items } = req.body;
     if (!email || !items?.length) return res.status(400).json({ error: "Missing email or items" });
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const authenticatedBuyerEmail = String(req.auth.buyerEmail || "").trim().toLowerCase();
+    if (!normalizedEmail || normalizedEmail !== authenticatedBuyerEmail) {
+      auditOwnershipMismatch(req, {
+        scope: "payment_intent_buyer_email",
+        expectedBuyerEmail: normalizedEmail || null,
+        actualBuyerEmail: authenticatedBuyerEmail || null,
+      });
+      return res.status(403).json({ error: "Checkout email must match the signed-in buyer account" });
+    }
 
     const catalog = await fetchCatalog();
     const productMap = Object.fromEntries(
@@ -3103,7 +3981,7 @@ app.post("/create-payment-intent", paymentLimiter, requireAppClient, async (req,
       payment_method_types: ["card"],
       metadata: {
         orderId,
-        buyerEmail: email,
+        buyerEmail: authenticatedBuyerEmail,
         orderItems: JSON.stringify(orderItems),
         sellerTotals: JSON.stringify(sellerTotals),
         shipping: JSON.stringify({
@@ -3171,13 +4049,13 @@ app.post("/orders/buyer", requireAppClient, requireAuthenticatedBuyer, (req, res
     const orderId = String(req.body?.orderId || "").trim();
     const config = exchangeConfigSnapshot();
     const exchangeRequests = loadExchangeRequestsFile();
-    let orders = attachExchangeSummariesToOrders(loadOrdersFile(), exchangeRequests, config);
+    let orders = attachExchangeSummariesToOrders(loadHydratedOrders(), exchangeRequests, config);
     if (orderId) {
       orders = orders.filter((order) => order.id === orderId);
     }
     orders = orders.filter((order) => (order.buyerEmail || "").trim().toLowerCase() === authEmail);
     orders.sort((lhs, rhs) => new Date(rhs.createdAt).getTime() - new Date(lhs.createdAt).getTime());
-    res.json({ orders });
+    res.json({ orders: orders.map((order) => hydrateOrderRecord(order)) });
   } catch (err) {
     console.error("orders buyer lookup error:", err);
     res.status(500).json({ error: err.message });
@@ -3212,12 +4090,15 @@ app.get("/orders", requireAppClient, requireAuthenticatedUser, (req, res) => {
 
     const config = exchangeConfigSnapshot();
     const exchangeRequests = loadExchangeRequestsFile();
-    let orders = attachExchangeSummariesToOrders(loadOrdersFile(), exchangeRequests, config);
+    let orders = attachExchangeSummariesToOrders(loadHydratedOrders(), exchangeRequests, config);
     if (orderId) {
       orders = orders.filter((order) => order.id === orderId);
     }
     if (sellerId) {
       orders = orders.filter((order) => order.shipments.some((shipment) => shipment.sellerId === sellerId));
+      orders = orders.map((order) => sellerScopedOrder(hydrateOrderRecord(order), sellerId));
+    } else {
+      orders = orders.map((order) => hydrateOrderRecord(order));
     }
 
     orders.sort((lhs, rhs) => new Date(rhs.createdAt).getTime() - new Date(lhs.createdAt).getTime());
@@ -3386,7 +4267,8 @@ app.post(
   "/exchange-requests/:id/proof",
   requireAppClient,
   requireAuthenticatedBuyer,
-  express.raw({ type: "*/*", limit: "80mb" }),
+  mediaUploadLimiter,
+  express.raw({ type: "*/*", limit: exchangeProofRawLimit }),
   async (req, res) => {
     try {
       const exchangeRequestId = String(req.params.id || "").trim();
@@ -3410,19 +4292,27 @@ app.post(
         return res.status(400).json({ error: "Proof uploads are not allowed for this exchange status" });
       }
 
-      const body = req.body;
-      if (!body || !Buffer.isBuffer(body) || body.length === 0) {
-        return res.status(400).json({ error: "Proof file is required" });
-      }
-
       const config = exchangeConfigSnapshot();
       const proofType = String(req.headers["x-proof-type"] || "image").trim().toLowerCase();
       const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
       const fileExtension = sanitizeFileExtension(req.headers["x-file-extension"], proofType === "video" ? "mp4" : "jpg");
       const videoDurationSeconds = Number.parseInt(String(req.headers["x-video-duration-seconds"] || "0"), 10);
+      const body = req.body;
 
-      if (!["image", "video"].includes(proofType)) {
-        return res.status(400).json({ error: "x-proof-type must be image or video" });
+      const mediaValidation = validateExchangeProofUpload({
+        buffer: body,
+        contentType,
+        fileExtension,
+        proofType,
+      });
+      if (!mediaValidation.ok) {
+        recordSecurityAudit(req, {
+          action: "media_upload_rejected",
+          scope: "exchange_proof_upload",
+          reason: mediaValidation.error,
+          proofType,
+        });
+        return res.status(400).json({ error: mediaValidation.error });
       }
 
       if (proofType === "video" && !config.allowProofVideo) {
@@ -3446,28 +4336,18 @@ app.post(
         return res.status(400).json({ error: "Only one proof video is allowed." });
       }
 
-      const allowedImageContentTypes = new Set(["image/jpeg", "image/jpg", "image/png", "image/heic", "image/heif"]);
-      const allowedVideoContentTypes = new Set(["video/mp4", "video/quicktime", "video/mov"]);
-      if (proofType === "image" && contentType && !allowedImageContentTypes.has(contentType)) {
-        return res.status(400).json({ error: "Unsupported proof image type." });
-      }
-      if (proofType === "video" && contentType && !allowedVideoContentTypes.has(contentType)) {
-        return res.status(400).json({ error: "Unsupported proof video type." });
-      }
-
       const assetId = crypto.randomUUID();
-      const relativeKey = `exchanges/${exchangeRequestId}/proof/${assetId}.${fileExtension}`;
-      const ctHeader = String(req.headers["content-type"] || "").trim() || "application/octet-stream";
+      const relativeKey = `exchanges/${exchangeRequestId}/proof/${assetId}.${mediaValidation.extension}`;
       const { url: publicURL } = await storeMediaBytes({
         relativeKey,
         buffer: body,
-        contentType: ctHeader,
+        contentType: mediaValidation.contentType,
       });
       const asset = normalizeExchangeProofAsset({
         id: assetId,
         type: proofType,
         url: publicURL,
-        storagePath: `exchanges/${exchangeRequestId}/proof/${assetId}.${fileExtension}`,
+        storagePath: `exchanges/${exchangeRequestId}/proof/${assetId}.${mediaValidation.extension}`,
         thumbnailURL: proofType === "image" ? publicURL : null,
         uploadedAt: new Date().toISOString(),
         uploadedByUserId: exchangeRequest.buyerUserId,
@@ -3685,50 +4565,511 @@ app.post("/orders/shipment-action", requireAppClient, requireAuthenticatedSeller
         shipment.status = "delivered";
         shipment.deliveredAt = timestamp;
         break;
+      case "updateTracking": {
+        const trimmedCarrier = String(carrier || "").trim();
+        const trimmedTrackingNumber = String(trackingNumber || "").trim();
+        if (!trimmedCarrier || !trimmedTrackingNumber) {
+          return res.status(400).json({ error: "carrier and trackingNumber are required to update tracking" });
+        }
+        if (!["shipped", "delivered"].includes(String(shipment.status || "").trim().toLowerCase())) {
+          return res.status(400).json({ error: "Tracking can only be updated after a shipment is marked shipped" });
+        }
+        shipment.carrier = trimmedCarrier;
+        shipment.trackingNumber = trimmedTrackingNumber;
+        break;
+      }
       default:
         return res.status(400).json({ error: "Unknown shipment action" });
     }
 
     orders[orderIndex].status = deriveOrderStatus(orders[orderIndex].shipments, orders[orderIndex].status);
-    saveOrdersFile(orders);
-    const updatedOrder = orders[orderIndex];
+    const updatedOrder = saveHydratedOrder(orders[orderIndex]);
 
     try {
       const firstItemName = shipment.items?.[0]?.productName || "your item";
-      let buyerNotification = null;
-      if (action === "startProcessing") {
-        buyerNotification = {
-          title: "Your order is being made",
-          body: `${firstItemName} is now in production.`,
-        };
-      } else if (action === "markShipped") {
-        buyerNotification = {
-          title: "Your order is on the way",
-          body: `${firstItemName} has shipped and is headed your way.`,
-        };
-      } else if (action === "markDelivered") {
-        buyerNotification = {
-          title: "Delivered",
-          body: `${firstItemName} was marked as delivered.`,
-        };
-      }
-
-      if (buyerNotification && updatedOrder.buyerEmail) {
-        await notifyOrderStatusChanged({
+      if (updatedOrder.buyerEmail && ["startProcessing", "markShipped", "markDelivered"].includes(action)) {
+        await notifyShipmentStatusToBuyer({
           buyerEmail: updatedOrder.buyerEmail,
-          title: buyerNotification.title,
-          body: buyerNotification.body,
+          action,
+          itemName: firstItemName,
+          carrier: shipment.carrier,
+          trackingNumber: shipment.trackingNumber,
         });
       }
     } catch (pushErr) {
       console.warn("Shipment status push notification error:", pushErr?.message || pushErr);
     }
-    res.json({ order: updatedOrder });
+    res.json({ order: sellerScopedOrder(updatedOrder, sellerId) });
   } catch (err) {
     console.error("shipment action error:", err);
     res.status(500).json({ error: err.message });
   }
 });
+
+app.post(
+  "/orders/:orderId/support-requests",
+  requireAppClient,
+  requireAuthenticatedUser,
+  express.json({ limit: "32kb" }),
+  async (req, res) => {
+    try {
+      const orderId = String(req.params.orderId || "").trim();
+      const sellerId = String(req.body?.sellerId || "").trim();
+      const shipmentId = String(req.body?.shipmentId || "").trim();
+      const type = String(req.body?.type || "").trim().toLowerCase();
+      const reason = String(req.body?.reason || "").trim();
+
+      const order = findOrderForParticipant(orderId, req.auth);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      if (req.auth.role === "seller" && req.auth.sellerId !== sellerId) {
+        return res.status(403).json({ error: "Seller support request denied" });
+      }
+      if (!sellerCanAccessOrder(order, sellerId)) {
+        return res.status(404).json({ error: "Seller shipment not found in this order" });
+      }
+
+      const shipment = order.shipments.find((entry) => entry.id === shipmentId && entry.sellerId === sellerId);
+      const validation = validateSupportRequestCreate({
+        type,
+        reason,
+        shipment,
+        sellerId,
+        existingRequests: order.supportRequests,
+      });
+      if (!validation.ok) {
+        return res.status(400).json({ error: validation.error });
+      }
+
+      const request = normalizeSupportRequest({
+        id: crypto.randomUUID(),
+        type: validation.type,
+        status: "pending",
+        sellerId,
+        shipmentId: shipment?.id || null,
+        reason: validation.reason,
+        requestedBy: req.auth.role === "seller" ? "seller" : "buyer",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      order.supportRequests = [...order.supportRequests, request];
+      const updatedOrder = saveHydratedOrder(order);
+
+      auditLog(
+        auditContext(req, {
+          action: "order_support_request_created",
+          orderId,
+          requestId: request.id,
+          type: request.type,
+          sellerId,
+        })
+      );
+
+      try {
+        const itemName = shipment?.items?.[0]?.productName || "an item";
+        const typeLabel = request.type === "refund" ? "refund" : "cancellation";
+        if (request.requestedBy === "buyer") {
+          await notifyOrderSupportEvent({
+            sellerId,
+            notifySeller: true,
+            title: "New buyer request",
+            body: `A buyer submitted a ${typeLabel} request for ${itemName} on order ${orderId}.`,
+          });
+        }
+      } catch (pushErr) {
+        console.warn("Support request push error:", pushErr?.message || pushErr);
+      }
+
+      respondWithParticipantOrder(res, updatedOrder, req.auth);
+    } catch (err) {
+      console.error("support request create error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+app.patch(
+  "/orders/:orderId/support-requests/:requestId",
+  requireAppClient,
+  requireAuthenticatedUser,
+  express.json({ limit: "32kb" }),
+  async (req, res) => {
+    try {
+      const orderId = String(req.params.orderId || "").trim();
+      const requestId = String(req.params.requestId || "").trim();
+      const status = String(req.body?.status || "").trim().toLowerCase();
+      const resolutionNote = String(req.body?.resolutionNote || "").trim();
+
+      const order = findOrderForParticipant(orderId, req.auth);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      const requestIndex = order.supportRequests.findIndex((entry) => entry.id === requestId);
+      if (requestIndex < 0) return res.status(404).json({ error: "Support request not found" });
+
+      const existing = order.supportRequests[requestIndex];
+      if (req.auth.role === "buyer") {
+        if (!buyerOwnsOrder(order, req.auth)) {
+          return res.status(403).json({ error: "Buyer support update denied" });
+        }
+        if (status !== "withdrawn" || existing.requestedBy !== "buyer") {
+          return res.status(400).json({ error: "Buyers can only withdraw their own pending requests" });
+        }
+      } else if (req.auth.role === "seller") {
+        if (req.auth.sellerId !== existing.sellerId) {
+          return res.status(403).json({ error: "Seller support update denied" });
+        }
+        if (!["approved", "denied"].includes(status)) {
+          return res.status(400).json({ error: "Sellers can approve or deny support requests" });
+        }
+      } else {
+        return res.status(403).json({ error: "Support update denied" });
+      }
+
+      if (existing.status !== "pending") {
+        return res.status(400).json({ error: "Only pending requests can be updated" });
+      }
+
+      const updatedRequest = normalizeSupportRequest({
+        ...existing,
+        status,
+        resolutionNote: resolutionNote || existing.resolutionNote,
+        updatedAt: new Date().toISOString(),
+      });
+      order.supportRequests[requestIndex] = updatedRequest;
+      let nextOrder = saveHydratedOrder(order);
+      if (status === "approved") {
+        nextOrder = saveHydratedOrder(applyApprovedSupportRequest(nextOrder, updatedRequest));
+      }
+
+      auditLog(
+        auditContext(req, {
+          action: "order_support_request_updated",
+          orderId,
+          requestId,
+          status,
+          sellerId: existing.sellerId,
+        })
+      );
+
+      try {
+        const itemName =
+          nextOrder.shipments
+            ?.find((entry) => entry.id === existing.shipmentId)
+            ?.items?.[0]?.productName || "your item";
+        if (req.auth.role === "seller") {
+          const typeLabel = existing.type === "refund" ? "Refund" : "Cancel";
+          const title =
+            status === "approved" ? `${typeLabel} request approved` : `${typeLabel} request denied`;
+          const body =
+            status === "approved"
+              ? `Your ${existing.type} request for ${itemName} was approved.`
+              : `Your ${existing.type} request for ${itemName} was denied.`;
+          await notifyOrderSupportEvent({
+            buyerEmail: nextOrder.buyerEmail,
+            notifyBuyer: true,
+            title,
+            body,
+          });
+        } else if (status === "withdrawn") {
+          await notifyOrderSupportEvent({
+            sellerId: existing.sellerId,
+            notifySeller: true,
+            title: "Request withdrawn",
+            body: `The buyer withdrew their ${existing.type} request for order ${orderId}.`,
+          });
+        }
+      } catch (pushErr) {
+        console.warn("Support request update push error:", pushErr?.message || pushErr);
+      }
+
+      respondWithParticipantOrder(res, nextOrder, req.auth);
+    } catch (err) {
+      console.error("support request update error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+app.get("/orders/:orderId/support-thread", requireAppClient, requireAuthenticatedUser, (req, res) => {
+  try {
+    const orderId = String(req.params.orderId || "").trim();
+    const sellerId = String(req.query.sellerId || "").trim();
+    if (!sellerId) return res.status(400).json({ error: "sellerId is required" });
+
+    const order = findOrderForParticipant(orderId, req.auth);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (!sellerCanAccessOrder(order, sellerId)) {
+      return res.status(404).json({ error: "Seller not found in this order" });
+    }
+    if (req.auth.role === "seller" && req.auth.sellerId !== sellerId) {
+      return res.status(403).json({ error: "Seller thread access denied" });
+    }
+
+    res.json({
+      orderId,
+      sellerId,
+      messages: orderMessagesForSeller(order.orderMessages, sellerId),
+    });
+  } catch (err) {
+    console.error("support thread fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post(
+  "/orders/:orderId/support-thread",
+  requireAppClient,
+  requireAuthenticatedUser,
+  express.json({ limit: "16kb" }),
+  async (req, res) => {
+    try {
+      const orderId = String(req.params.orderId || "").trim();
+      const sellerId = String(req.body?.sellerId || "").trim();
+      const text = String(req.body?.text || "").trim();
+      if (!sellerId || text.length < 1) {
+        return res.status(400).json({ error: "sellerId and message text are required" });
+      }
+      if (text.length > 2000) {
+        return res.status(400).json({ error: "Message is too long" });
+      }
+
+      const order = findOrderForParticipant(orderId, req.auth);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+      if (!sellerCanAccessOrder(order, sellerId)) {
+        return res.status(404).json({ error: "Seller not found in this order" });
+      }
+      if (req.auth.role === "seller" && req.auth.sellerId !== sellerId) {
+        return res.status(403).json({ error: "Seller thread access denied" });
+      }
+
+      const message = normalizeOrderMessage({
+        id: crypto.randomUUID(),
+        sellerId,
+        senderRole: req.auth.role === "seller" ? "seller" : "buyer",
+        senderEmail:
+          req.auth.role === "buyer"
+            ? req.auth.buyerEmail
+            : null,
+        senderName: String(req.body?.senderName || "").trim() || null,
+        text,
+        createdAt: new Date().toISOString(),
+      });
+
+      order.orderMessages = [...order.orderMessages, message];
+      const updatedOrder = saveHydratedOrder(order);
+
+      auditLog(
+        auditContext(req, {
+          action: "order_support_message_sent",
+          orderId,
+          sellerId,
+          messageId: message.id,
+          senderRole: message.senderRole,
+        })
+      );
+
+      try {
+        const preview = text.length > 140 ? `${text.slice(0, 137)}…` : text;
+        if (message.senderRole === "buyer") {
+          await notifyOrderSupportEvent({
+            sellerId,
+            notifySeller: true,
+            title: "Buyer message",
+            body: `New message on order ${orderId}: ${preview}`,
+          });
+        } else {
+          await notifyOrderSupportEvent({
+            buyerEmail: updatedOrder.buyerEmail,
+            notifyBuyer: true,
+            title: "Seller update",
+            body: `Reply on order ${orderId}: ${preview}`,
+          });
+        }
+      } catch (pushErr) {
+        console.warn("Support message push error:", pushErr?.message || pushErr);
+      }
+
+      res.json({
+        orderId,
+        sellerId,
+        message,
+        messages: orderMessagesForSeller(updatedOrder.orderMessages, sellerId),
+        order: req.auth.role === "seller" ? sellerScopedOrder(updatedOrder, sellerId) : updatedOrder,
+      });
+    } catch (err) {
+      console.error("support thread post error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+app.get("/buyer/inquiry-threads", requireAppClient, requireAuthenticatedBuyer, (req, res) => {
+  try {
+    const buyerEmail = String(req.auth.buyerEmail || "").trim().toLowerCase();
+    const threads = loadSellerInquiriesFile()
+      .filter((thread) => thread.buyerEmail === buyerEmail)
+      .sort((lhs, rhs) => new Date(rhs.updatedAt).getTime() - new Date(lhs.updatedAt).getTime());
+    res.json({ threads });
+  } catch (err) {
+    console.error("buyer inquiry threads list error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/seller/inquiry-threads", requireAppClient, requireAuthenticatedSeller, (req, res) => {
+  try {
+    const sellerId = String(req.auth.sellerId || "").trim();
+    const threads = loadSellerInquiriesFile()
+      .filter((thread) => thread.sellerId === sellerId)
+      .sort((lhs, rhs) => new Date(rhs.updatedAt).getTime() - new Date(lhs.updatedAt).getTime());
+    res.json({ threads });
+  } catch (err) {
+    console.error("seller inquiry threads list error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/sellers/:sellerId/inquiry-thread", requireAppClient, requireAuthenticatedUser, (req, res) => {
+  try {
+    const sellerId = String(req.params.sellerId || "").trim();
+    if (!sellerId) return res.status(400).json({ error: "sellerId is required" });
+
+    if (req.auth.role === "seller") {
+      if (req.auth.sellerId !== sellerId) {
+        return res.status(403).json({ error: "Seller inquiry access denied" });
+      }
+      const buyerEmail = String(req.query.buyerEmail || "").trim().toLowerCase();
+      if (!buyerEmail) {
+        return res.status(400).json({ error: "buyerEmail is required for seller inquiry lookup" });
+      }
+      const threads = loadSellerInquiriesFile();
+      const thread = findInquiryThread(threads, buyerEmail, sellerId);
+      return res.json({
+        sellerId,
+        buyerEmail,
+        thread: thread || null,
+        messages: thread?.messages || [],
+      });
+    }
+
+    const created = getOrCreateInquiryThreadForBuyer(
+      sellerId,
+      req.auth,
+      String(req.query.buyerName || "").trim() || null
+    );
+    if (!created.ok) return res.status(401).json({ error: created.error });
+    const thread = created.thread;
+    res.json({
+      sellerId,
+      buyerEmail: thread.buyerEmail,
+      threadId: thread.id,
+      messages: thread.messages,
+    });
+  } catch (err) {
+    console.error("inquiry thread fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post(
+  "/sellers/:sellerId/inquiry-thread",
+  requireAppClient,
+  requireAuthenticatedUser,
+  express.json({ limit: "16kb" }),
+  async (req, res) => {
+    try {
+      const sellerId = String(req.params.sellerId || "").trim();
+      const text = String(req.body?.text || "").trim();
+      if (!sellerId || text.length < 1) {
+        return res.status(400).json({ error: "sellerId and message text are required" });
+      }
+      if (text.length > 2000) {
+        return res.status(400).json({ error: "Message is too long" });
+      }
+
+      if (req.auth.role === "seller" && req.auth.sellerId !== sellerId) {
+        return res.status(403).json({ error: "Seller inquiry access denied" });
+      }
+
+      let buyerEmail = "";
+      let buyerName = null;
+      if (req.auth.role === "buyer") {
+        buyerEmail = String(req.auth.buyerEmail || "").trim().toLowerCase();
+        buyerName = String(req.body?.senderName || "").trim() || null;
+      } else {
+        buyerEmail = String(req.body?.buyerEmail || req.query?.buyerEmail || "").trim().toLowerCase();
+        if (!buyerEmail) {
+          return res.status(400).json({ error: "buyerEmail is required when replying as seller" });
+        }
+      }
+
+      const message = normalizeOrderMessage({
+        id: crypto.randomUUID(),
+        sellerId,
+        senderRole: req.auth.role === "seller" ? "seller" : "buyer",
+        senderEmail: req.auth.role === "buyer" ? req.auth.buyerEmail : null,
+        senderName: String(req.body?.senderName || "").trim() || null,
+        text,
+        createdAt: new Date().toISOString(),
+      });
+
+      const threads = loadSellerInquiriesFile();
+      const { threads: nextThreads, thread, message: savedMessage } = appendInquiryMessage(threads, {
+        sellerId,
+        buyerEmail,
+        buyerName,
+        message,
+      });
+      if (!thread || !savedMessage) {
+        return res.status(500).json({ error: "Failed to save inquiry message" });
+      }
+      saveSellerInquiriesFile(nextThreads);
+
+      auditLog(
+        auditContext(req, {
+          action: "seller_inquiry_message_sent",
+          sellerId,
+          buyerEmail,
+          messageId: savedMessage.id,
+          senderRole: savedMessage.senderRole,
+        })
+      );
+
+      try {
+        const preview = text.length > 140 ? `${text.slice(0, 137)}…` : text;
+        if (savedMessage.senderRole === "buyer") {
+          await notifyOrderSupportEvent({
+            sellerId,
+            notifySeller: true,
+            title: "Shop message",
+            body: `New message from a buyer: ${preview}`,
+          });
+        } else {
+          await notifyOrderSupportEvent({
+            buyerEmail: thread.buyerEmail,
+            notifyBuyer: true,
+            title: "Seller replied",
+            body: `${preview}`,
+          });
+        }
+      } catch (pushErr) {
+        console.warn("Inquiry message push error:", pushErr?.message || pushErr);
+      }
+
+      res.json({
+        sellerId,
+        buyerEmail: thread.buyerEmail,
+        threadId: thread.id,
+        message: savedMessage,
+        messages: thread.messages,
+      });
+    } catch (err) {
+      console.error("inquiry thread post error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
 
 app.post("/orders/production-preview", requireAppClient, requireAuthenticatedSeller, async (req, res) => {
   try {
@@ -3794,7 +5135,7 @@ app.post("/orders/production-preview", requireAppClient, requireAuthenticatedSel
       }
     }
 
-    res.json({ order: updatedOrder });
+    res.json({ order: sellerScopedOrder(updatedOrder, sellerId) });
   } catch (err) {
     console.error("order production preview error:", err);
     res.status(500).json({ error: err.message });
@@ -3923,7 +5264,7 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
     const sellerPoliciesAcknowledged = req.body.sellerPoliciesAcknowledged === true;
 
     if (!sellerId || !email) return res.status(400).json({ error: "sellerId and email required" });
-    if (password && password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+    if (!password || password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
     if (!legalName) return res.status(400).json({ error: "Legal name is required" });
     if (!shippingOriginCountry || !shippingOriginState) {
       return res.status(400).json({ error: "Shipping origin country and state are required" });
@@ -3937,17 +5278,21 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
     const sellers = loadSellersFile();
     if (sellers[sellerId]) return res.status(409).json({ error: "Seller already exists" });
 
-    const account = await stripe.accounts.create({
-      type: "express",
-      email,
-      business_profile: { name: businessName || sellerId },
-      capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
-    });
+    let account = null;
+    let onboardingUrl = "";
+    if (isStripeConnectConfigured()) {
+      account = await stripe.accounts.create({
+        type: "express",
+        email,
+        business_profile: { name: businessName || sellerId },
+        capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+      });
+    }
 
     sellers[sellerId] = {
-      stripeAccountId: account.id,
+      stripeAccountId: account?.id || "",
       email,
-      passwordHash: password ? hashSellerPassword(password) : "",
+      passwordHash: hashSellerPassword(password),
       businessName: businessName || "",
       legalName,
       shippingOrigin: {
@@ -3965,14 +5310,30 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
     };
     saveSellersFile(sellers);
 
-    const link = await stripe.accountLinks.create({
-      account: account.id,
-      refresh_url: `${BACKEND_URL}/seller-onboarding-refresh?sellerId=${sellerId}`,
-      return_url: `${BACKEND_URL}/seller-onboarding-complete?sellerId=${sellerId}`,
-      type: "account_onboarding",
+    if (account?.id) {
+      const link = await stripe.accountLinks.create({
+        account: account.id,
+        refresh_url: `${BACKEND_URL}/seller-onboarding-refresh?sellerId=${sellerId}`,
+        return_url: `${BACKEND_URL}/seller-onboarding-complete?sellerId=${sellerId}`,
+        type: "account_onboarding",
+      });
+      onboardingUrl = link.url;
+    }
+
+    const token = issueUserSessionToken({
+      role: "seller",
+      sellerId,
+      sellerEmail: email,
     });
 
-    res.json({ sellerId, stripeAccountId: account.id, onboardingUrl: link.url });
+    res.json({
+      sellerId,
+      stripeAccountId: account?.id || "",
+      onboardingUrl,
+      token,
+      payoutSetupPending: !account?.id,
+      payoutSetupMessage: account?.id ? null : STRIPE_CONNECT_SETUP_MESSAGE,
+    });
   } catch (err) {
     console.error("create-seller-account error:", err);
     res.status(500).json({ error: err.message });
@@ -3993,6 +5354,12 @@ app.get("/seller-onboarding-link/:sellerId", requireAppClient, requireAuthentica
     const sellers = loadSellersFile();
     const seller = sellers[requestedSellerId];
     if (!seller) return res.status(404).json({ error: "Seller not found" });
+    if (!isStripeConnectConfigured() || !seller.stripeAccountId) {
+      return res.status(503).json({
+        error: STRIPE_CONNECT_SETUP_MESSAGE,
+        payoutSetupPending: true,
+      });
+    }
     const link = await stripe.accountLinks.create({
       account: seller.stripeAccountId,
       refresh_url: `${BACKEND_URL}/seller-onboarding-refresh?sellerId=${requestedSellerId}`,
@@ -4019,6 +5386,9 @@ app.get("/seller-onboarding-status/:sellerId", requireAppClient, requireAuthenti
     const sellers = loadSellersFile();
     const seller = sellers[requestedSellerId];
     if (!seller) return res.status(404).json({ error: "Seller not found" });
+    if (!isStripeConnectConfigured() || !seller.stripeAccountId) {
+      return res.json(stripePendingSellerStatus(requestedSellerId, seller));
+    }
     const account = await stripe.accounts.retrieve(seller.stripeAccountId);
     res.json({
       sellerId: requestedSellerId,
@@ -4027,6 +5397,9 @@ app.get("/seller-onboarding-status/:sellerId", requireAppClient, requireAuthenti
       payoutsEnabled: account.payouts_enabled,
       detailsSubmitted: account.details_submitted,
       onboardingComplete: account.charges_enabled && account.payouts_enabled && account.details_submitted,
+      payoutSetupPending: false,
+      payoutSetupActionRequired: !(account.charges_enabled && account.payouts_enabled && account.details_submitted),
+      payoutSetupMessage: null,
       hasActiveSubscription: seller.membership.hasActiveSubscription,
       subscriptionExpiresAt: seller.membership.expiresAt,
       subscriptionProductId: seller.membership.productId,
@@ -4050,6 +5423,12 @@ app.get("/seller-dashboard-link/:sellerId", requireAppClient, requireAuthenticat
     const sellers = loadSellersFile();
     const seller = sellers[requestedSellerId];
     if (!seller) return res.status(404).json({ error: "Seller not found" });
+    if (!isStripeConnectConfigured() || !seller.stripeAccountId) {
+      return res.status(503).json({
+        error: STRIPE_CONNECT_SETUP_MESSAGE,
+        payoutSetupPending: true,
+      });
+    }
     const link = await stripe.accounts.createLoginLink(seller.stripeAccountId);
     res.json({ sellerId: requestedSellerId, dashboardUrl: link.url });
   } catch (err) {
@@ -4194,7 +5573,8 @@ app.post(
   "/custom-order-reference/:sellerId",
   requireAppClient,
   customOrderLimiter,
-  express.raw({ type: "*/*", limit: "12mb" }),
+  mediaUploadLimiter,
+  express.raw({ type: "*/*", limit: customOrderRefRawLimit }),
   async (req, res) => {
     try {
       const sellerId = sanitizePathSegment(req.params.sellerId, "seller");
@@ -4212,30 +5592,29 @@ app.post(
       }
 
       const body = req.body;
-      if (!body || !Buffer.isBuffer(body) || body.length === 0) {
-        return res.status(400).json({ error: "Image data is required" });
-      }
-      if (body.length > 11 * 1024 * 1024) {
-        return res.status(400).json({ error: "Image too large" });
-      }
-
       const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
-      const allowedTypes = new Set(["image/jpeg", "image/jpg", "image/png", "image/heic", "image/heif"]);
-      if (contentType && !allowedTypes.has(contentType)) {
-        return res.status(400).json({ error: "Unsupported image type" });
-      }
-
       const extension = sanitizeFileExtension(req.headers["x-file-extension"], "jpg");
-      if (!["jpg", "jpeg", "png", "heic", "heif"].includes(extension)) {
-        return res.status(400).json({ error: "Unsupported file extension" });
+      const mediaValidation = validateCustomOrderReferenceUpload({
+        buffer: body,
+        contentType,
+        fileExtension: extension,
+      });
+      if (!mediaValidation.ok) {
+        recordSecurityAudit(req, {
+          action: "media_upload_rejected",
+          scope: "custom_order_reference_upload",
+          reason: mediaValidation.error,
+          sellerId,
+        });
+        return res.status(400).json({ error: mediaValidation.error });
       }
 
       const assetId = crypto.randomUUID();
-      const relativeKey = `custom-order-ref/${sellerId}/${assetId}.${extension}`;
+      const relativeKey = `custom-order-ref/${sellerId}/${assetId}.${mediaValidation.extension}`;
       const { url } = await storeMediaBytes({
         relativeKey,
         buffer: body,
-        contentType: contentType || "image/jpeg",
+        contentType: mediaValidation.contentType,
       });
 
       res.json({ url });
@@ -4537,6 +5916,16 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
     const existingIndex = existingProducts.findIndex((product) => product.id === productId);
     const existingProduct = existingIndex >= 0 ? existingProducts[existingIndex] : null;
 
+    if (existingProduct && existingProduct.sellerId !== sellerId) {
+      auditOwnershipMismatch(req, {
+        scope: "seller_product_upsert_owner",
+        expectedSellerId: existingProduct.sellerId || null,
+        actualSellerId: sellerId,
+        productId,
+      });
+      return res.status(403).json({ error: "Seller product update denied" });
+    }
+
     if (
       requestedPriceCents >= PREMIUM_LISTING_MIN_PRICE_CENTS &&
       !sellerQualifiesForVerifiedMarketplaceAccess(sellerId, sellers, catalog.products || [], orders)
@@ -4571,6 +5960,12 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
       submittedAt: nowISO,
       reviewedAt: null,
       reviewNotes: "",
+      rightsOwnershipType: body.rightsOwnershipType,
+      rightsReferenceFlags: body.rightsReferenceFlags,
+      rightsCertificationAccepted: body.rightsCertificationAccepted,
+      rightsCertificationAcceptedAt: body.rightsCertificationAcceptedAt,
+      requiresManualReview: body.requiresManualReview,
+      reviewReason: body.reviewReason,
     });
 
     if (!nextProduct.name) {
@@ -5215,7 +6610,9 @@ app.put(
   "/seller-media/:sellerId/:productId/:mediaKind/:slot",
   requireAppClient,
   requireAuthenticatedSeller,
-  express.raw({ type: "*/*", limit: "80mb" }),
+  mediaUploadLimiter,
+  sellerWriteLimiter,
+  express.raw({ type: "*/*", limit: sellerMediaRawLimit }),
   async (req, res) => {
     try {
       const sellerId = sanitizePathSegment(req.params.sellerId, "seller");
@@ -5230,16 +6627,48 @@ app.put(
       const productId = sanitizePathSegment(req.params.productId, "product");
       const mediaKind = sanitizePathSegment(req.params.mediaKind, "media");
       const slot = sanitizePathSegment(req.params.slot, "0");
-      const body = req.body;
-      if (!body || !Buffer.isBuffer(body) || body.length === 0) {
-        return res.status(400).json({ error: "Media file is required" });
+      const catalog = await fetchCatalog();
+      const catalogProducts = Array.isArray(catalog.products) ? catalog.products : [];
+      const existingProduct = catalogProducts.find((product) => String(product.id || "") === productId);
+      if (existingProduct && String(existingProduct.sellerId || "").trim() !== sellerId) {
+        auditOwnershipMismatch(req, {
+          scope: "seller_media_upload_product_owner",
+          expectedSellerId: existingProduct.sellerId || null,
+          actualSellerId: sellerId,
+          productId,
+          mediaKind,
+        });
+        return res.status(403).json({ error: "Seller media upload denied" });
       }
 
-      const extension = sanitizeFileExtension(req.headers["x-file-extension"], "bin");
-      const filename = `${mediaKind}-${slot}.${extension}`;
+      const body = req.body;
+      const extension = sanitizeFileExtension(req.headers["x-file-extension"], "jpg");
+      const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
+      const mediaValidation = validateSellerMediaUpload({
+        buffer: body,
+        contentType,
+        fileExtension: extension,
+        mediaKind,
+      });
+      if (!mediaValidation.ok) {
+        recordSecurityAudit(req, {
+          action: "media_upload_rejected",
+          scope: "seller_media_upload",
+          reason: mediaValidation.error,
+          sellerId,
+          productId,
+          mediaKind,
+        });
+        return res.status(400).json({ error: mediaValidation.error });
+      }
+
+      const filename = `${mediaKind}-${slot}.${mediaValidation.extension}`;
       const relativeKey = `${sellerId}/${productId}/${filename}`;
-      const contentType = String(req.headers["content-type"] || "").trim() || "application/octet-stream";
-      const { url } = await storeMediaBytes({ relativeKey, buffer: body, contentType });
+      const { url } = await storeMediaBytes({
+        relativeKey,
+        buffer: body,
+        contentType: mediaValidation.contentType,
+      });
       const version = Date.now();
       const withQuery = url.includes("?") ? `${url}&v=${version}` : `${url}?v=${version}`;
 
@@ -5516,6 +6945,12 @@ function buildDropProduct(product = {}, entry = {}, index = 0) {
     reviewedAt: normalizedProduct.reviewedAt || null,
     submittedAt: entry.submittedAt || new Date().toISOString(),
     slotNumber: index + 1,
+    rightsOwnershipType: normalizedProduct.rightsOwnershipType || null,
+    rightsReferenceFlags: normalizedProduct.rightsReferenceFlags || [],
+    rightsCertificationAccepted: normalizedProduct.rightsCertificationAccepted === true,
+    rightsCertificationAcceptedAt: normalizedProduct.rightsCertificationAcceptedAt || null,
+    requiresManualReview: normalizedProduct.requiresManualReview === true,
+    reviewReason: normalizedProduct.reviewReason || null,
   };
 }
 
@@ -5777,6 +7212,12 @@ app.post("/drop/submit", requireAppClient, requireAuthenticatedSeller, async (re
       careWarnings,
       shipsInMinDays,
       shipsInMaxDays,
+      rightsOwnershipType,
+      rightsReferenceFlags,
+      rightsCertificationAccepted,
+      rightsCertificationAcceptedAt,
+      requiresManualReview,
+      reviewReason,
     } = req.body;
 
     if (!sellerId || !name || !priceCents) {
@@ -5875,6 +7316,12 @@ app.post("/drop/submit", requireAppClient, requireAuthenticatedSeller, async (re
       submittedAt: existingProduct?.submittedAt || new Date().toISOString(),
       reviewedAt: null,
       reviewNotes: "",
+      rightsOwnershipType,
+      rightsReferenceFlags,
+      rightsCertificationAccepted,
+      rightsCertificationAcceptedAt,
+      requiresManualReview,
+      reviewReason,
     });
 
     const productIndex = catalogProducts.findIndex((catalogProduct) => catalogProduct.id === product.id);
@@ -5920,6 +7367,12 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
       careWarnings,
       shipsInMinDays,
       shipsInMaxDays,
+      rightsOwnershipType,
+      rightsReferenceFlags,
+      rightsCertificationAccepted,
+      rightsCertificationAcceptedAt,
+      requiresManualReview,
+      reviewReason,
     } = req.body;
 
     if (!sellerId || !name || !priceCents) {
@@ -5988,6 +7441,15 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
       return res.status(404).json({ error: "Drop product not found in catalog." });
     }
     const existingProduct = catalogProducts[existingProductIndex];
+    if (existingProduct.sellerId !== sellerId) {
+      auditOwnershipMismatch(req, {
+        scope: "drop_update_catalog_owner",
+        expectedSellerId: existingProduct.sellerId || null,
+        actualSellerId: sellerId,
+        productId,
+      });
+      return res.status(403).json({ error: "Seller drop update denied" });
+    }
 
     const updatedProduct = normalizeCatalogProduct({
       ...existingProduct,
@@ -6018,6 +7480,12 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
       submittedAt: existingProduct?.submittedAt || new Date().toISOString(),
       reviewedAt: null,
       reviewNotes: "",
+      rightsOwnershipType,
+      rightsReferenceFlags,
+      rightsCertificationAccepted,
+      rightsCertificationAcceptedAt,
+      requiresManualReview,
+      reviewReason,
     });
 
     catalogProducts[existingProductIndex] = updatedProduct;

@@ -34,14 +34,32 @@ struct OrderTimelineView: View {
     }
 
     private var steps: [(title: String, subtitle: String?, isComplete: Bool)] {
-        let shippedCount = order.shipments.filter { $0.status == .shipped || $0.status == .delivered }.count
-        let deliveredCount = order.shipments.filter { $0.status == .delivered }.count
+        if order.status == .cancelled {
+            let cancelledCount = order.shipments.filter { $0.status == .cancelled }.count
+            return [
+                ("Order placed", order.createdAt.formatted(date: .abbreviated, time: .shortened), true),
+                (
+                    "Cancelled",
+                    "\(cancelledCount) of \(order.shipments.count) shipment\(order.shipments.count == 1 ? "" : "s") cancelled",
+                    true
+                ),
+            ]
+        }
+
+        let activeShipments = order.shipments.filter { $0.status != .cancelled }
+        let shippedCount = activeShipments.filter { $0.status == .shipped || $0.status == .delivered }.count
+        let deliveredCount = activeShipments.filter { $0.status == .delivered }.count
+        let shipmentTotal = max(activeShipments.count, 1)
 
         return [
             ("Order placed", order.createdAt.formatted(date: .abbreviated, time: .shortened), true),
             ("Processing", "Preparing items across sellers", order.status != .placed),
-            ("Shipped", "\(shippedCount) of \(order.shipments.count) shipments sent", shippedCount > 0),
-            ("Delivered", "\(deliveredCount) of \(order.shipments.count) shipments delivered", deliveredCount == order.shipments.count && order.shipments.count > 0)
+            ("Shipped", "\(shippedCount) of \(shipmentTotal) shipments sent", shippedCount > 0),
+            (
+                "Delivered",
+                "\(deliveredCount) of \(shipmentTotal) shipments delivered",
+                deliveredCount == shipmentTotal && !activeShipments.isEmpty
+            ),
         ]
     }
 }

@@ -532,6 +532,14 @@ struct CheckoutView: View {
 
         isSubmitting = true
 
+        let signedInBuyerEmail = buyerEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !signedInBuyerEmail.isEmpty, signedInBuyerEmail == trimmedEmail else {
+            errorMessage = "Checkout email must match your signed-in buyer account."
+            isSubmitting = false
+            return
+        }
+        await MarketplaceAuthSession.syncAfterIdentityChange()
+
         let req = CreatePaymentIntentRequest(
             email: trimmedEmail,
             shipping: ShippingAddress(

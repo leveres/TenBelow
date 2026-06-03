@@ -5,6 +5,7 @@ enum NotificationType: String, Codable, Hashable, CaseIterable {
     case newProduct
     case orderReceived
     case orderStatusUpdate
+    case orderSupportUpdate
     case exchangeUpdate
     case itemFavorited
     case system

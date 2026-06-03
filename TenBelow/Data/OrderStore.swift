@@ -5,6 +5,7 @@ enum SellerShipmentAction: String {
     case startProcessing
     case markShipped
     case markDelivered
+    case updateTracking
 
     var buttonTitle: String {
         switch self {
@@ -14,6 +15,8 @@ enum SellerShipmentAction: String {
             return "Mark Shipped"
         case .markDelivered:
             return "Mark Delivered"
+        case .updateTracking:
+            return "Update Tracking"
         }
     }
 }
@@ -25,16 +28,25 @@ final class OrderStore: ObservableObject {
     @Published var refreshError: String?
     @Published var shipmentActionError: String?
     @Published var productionPreviewActionError: String?
+    @Published var orderSupportError: String?
 
     private let storageKey = "orderStore.orders"
     private let eventStore: CommerceEventStore
 
     init(eventStore: CommerceEventStore) {
         self.eventStore = eventStore
-        orders = LocalCodableStore.load(
+        let storedOrders: [Order] = LocalCodableStore.load(
             key: storageKey,
             default: [Order]()
         )
+        #if DEBUG
+        orders = storedOrders.isEmpty ? SampleOrders.data : storedOrders
+        if storedOrders.isEmpty {
+            persist()
+        }
+        #else
+        orders = storedOrders
+        #endif
     }
 
     func order(withId orderId: String) -> Order? {
@@ -141,13 +153,17 @@ final class OrderStore: ObservableObject {
 
     func nextAction(for shipment: Shipment, order: Order) -> SellerShipmentAction? {
         switch shipment.status {
-        case .delivered:
+        case .delivered, .cancelled:
             return nil
         case .shipped:
             return .markDelivered
         case .preparing:
             return order.status == .placed ? .startProcessing : .markShipped
         }
+    }
+
+    func canUpdateTracking(for shipment: Shipment) -> Bool {
+        shipment.status == .shipped || shipment.status == .delivered
     }
 
     func perform(
@@ -175,20 +191,30 @@ final class OrderStore: ObservableObject {
         case .markDelivered:
             orders[orderIndex].shipments[shipmentIndex].status = .delivered
             orders[orderIndex].shipments[shipmentIndex].deliveredAt = timestamp
+        case .updateTracking:
+            orders[orderIndex].shipments[shipmentIndex].carrier = carrier
+            orders[orderIndex].shipments[shipmentIndex].trackingNumber = trackingNumber
         }
 
         orders[orderIndex].status = derivedOrderStatus(from: orders[orderIndex].shipments, current: orders[orderIndex].status)
         persist()
 
+        let shipment = orders[orderIndex].shipments[shipmentIndex]
         eventStore.record(
             CommerceEvent(
                 kind: .shipmentStatusUpdated,
+                buyerIdentity: buyerIdentityKey,
+                productId: shipment.items.first?.productId,
                 orderId: orderId,
                 shipmentId: shipmentId,
                 sellerId: sellerId,
                 metadata: [
                     "action": action.rawValue,
-                    "shipmentStatus": orders[orderIndex].shipments[shipmentIndex].status.rawValue
+                    "shipmentStatus": shipment.status.rawValue,
+                    "productName": shipment.items.first?.productName ?? "your item",
+                    "carrier": shipment.carrier ?? "",
+                    "trackingNumber": shipment.trackingNumber ?? "",
+                    "buyerUserId": buyerIdentityKey
                 ]
             )
         )
@@ -370,23 +396,111 @@ final class OrderStore: ObservableObject {
         let shippedCount = shipments.filter { $0.status == .shipped }.count
         let preparingCount = shipments.filter { $0.status == .preparing }.count
 
-        if deliveredCount == shipments.count {
+        let cancelledCount = shipments.filter { $0.status == .cancelled }.count
+        if cancelledCount == shipments.count {
+            return .cancelled
+        }
+
+        let active = shipments.filter { $0.status != .cancelled }
+        if active.isEmpty {
+            return .cancelled
+        }
+
+        let activeDelivered = active.filter { $0.status == .delivered }.count
+        let activeShipped = active.filter { $0.status == .shipped }.count
+        let activePreparing = active.filter { $0.status == .preparing }.count
+
+        if activeDelivered == active.count {
             return .delivered
         }
 
-        if shippedCount + deliveredCount == shipments.count, shippedCount > 0 {
+        if activeShipped + activeDelivered == active.count, activeShipped > 0 {
             return .shipped
         }
 
-        if shippedCount > 0 && preparingCount > 0 {
+        if activeShipped > 0 && activePreparing > 0 {
             return .partiallyShipped
         }
 
-        if preparingCount > 0 {
+        if activePreparing > 0 {
             return .processing
         }
 
         return current
+    }
+
+    func createSupportRequest(
+        orderId: String,
+        type: OrderSupportRequestType,
+        sellerId: String,
+        shipmentId: String,
+        reason: String
+    ) async {
+        orderSupportError = nil
+        do {
+            let updated = try await OrdersAPI.createSupportRequest(
+                orderId: orderId,
+                type: type,
+                sellerId: sellerId,
+                shipmentId: shipmentId,
+                reason: reason
+            )
+            upsertOrder(updated)
+        } catch {
+            orderSupportError = error.localizedDescription
+        }
+    }
+
+    func updateSupportRequest(
+        orderId: String,
+        requestId: String,
+        status: OrderSupportRequestStatus,
+        resolutionNote: String? = nil
+    ) async {
+        orderSupportError = nil
+        do {
+            let updated = try await OrdersAPI.updateSupportRequest(
+                orderId: orderId,
+                requestId: requestId,
+                status: status,
+                resolutionNote: resolutionNote
+            )
+            upsertOrder(updated)
+        } catch {
+            orderSupportError = error.localizedDescription
+        }
+    }
+
+    func fetchSupportThread(orderId: String, sellerId: String) async -> [OrderSupportMessage] {
+        orderSupportError = nil
+        do {
+            return try await OrdersAPI.fetchSupportThread(orderId: orderId, sellerId: sellerId)
+        } catch {
+            orderSupportError = error.localizedDescription
+            if let order = order(withId: orderId) {
+                return order.orderMessages.filter { $0.sellerId == sellerId }
+            }
+            return []
+        }
+    }
+
+    func sendSupportMessage(orderId: String, sellerId: String, text: String, senderName: String? = nil) async -> [OrderSupportMessage] {
+        orderSupportError = nil
+        do {
+            let response = try await OrdersAPI.sendSupportMessage(
+                orderId: orderId,
+                sellerId: sellerId,
+                text: text,
+                senderName: senderName
+            )
+            if let order = response.order {
+                upsertOrder(order)
+            }
+            return response.messages
+        } catch {
+            orderSupportError = error.localizedDescription
+            return []
+        }
     }
 
     private func persist() {
@@ -481,7 +595,74 @@ final class OrderStore: ObservableObject {
                     metadata: [
                         "shipmentStatus": shipment.status.rawValue,
                         "productName": shipment.items.first?.productName ?? "your item",
+                        "carrier": shipment.carrier ?? "",
+                        "trackingNumber": shipment.trackingNumber ?? "",
                         "buyerUserId": buyerIdentity ?? ""
+                    ]
+                )
+            )
+        }
+
+        emitSupportEventsIfNeeded(for: order, previous: previous)
+    }
+
+    private func emitSupportEventsIfNeeded(for order: Order, previous: Order?) {
+        guard previous != nil else { return }
+
+        let buyerIdentity = order.buyerEmail
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .flatMap { $0.isEmpty ? nil : "buyer:\($0)" }
+
+        let previousRequests = Dictionary(uniqueKeysWithValues: (previous?.supportRequests ?? []).map { ($0.id, $0) })
+        for request in order.supportRequests {
+            let prior = previousRequests[request.id]
+            if prior == nil {
+                eventStore.record(
+                    CommerceEvent(
+                        kind: .orderSupportRequestCreated,
+                        buyerIdentity: buyerIdentity,
+                        orderId: order.id,
+                        sellerId: request.sellerId,
+                        metadata: [
+                            "requestId": request.id,
+                            "requestType": request.type.rawValue,
+                            "requestStatus": request.status.rawValue,
+                            "requestedBy": request.requestedBy,
+                            "reason": request.reason
+                        ]
+                    )
+                )
+            } else if prior?.status != request.status {
+                eventStore.record(
+                    CommerceEvent(
+                        kind: .orderSupportRequestUpdated,
+                        buyerIdentity: buyerIdentity,
+                        orderId: order.id,
+                        sellerId: request.sellerId,
+                        metadata: [
+                            "requestId": request.id,
+                            "requestType": request.type.rawValue,
+                            "requestStatus": request.status.rawValue,
+                            "requestedBy": request.requestedBy,
+                            "resolutionNote": request.resolutionNote ?? ""
+                        ]
+                    )
+                )
+            }
+        }
+
+        let previousMessageIDs = Set(previous?.orderMessages.map(\.id) ?? [])
+        for message in order.orderMessages where !previousMessageIDs.contains(message.id) {
+            eventStore.record(
+                CommerceEvent(
+                    kind: .orderSupportMessageSent,
+                    buyerIdentity: buyerIdentity,
+                    orderId: order.id,
+                    sellerId: message.sellerId,
+                    metadata: [
+                        "messageId": message.id,
+                        "senderRole": message.senderRole,
+                        "text": message.text
                     ]
                 )
             )

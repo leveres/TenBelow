@@ -21,7 +21,6 @@ struct HomeView: View {
     @AppStorage("sellerBusinessName") private var sellerBusinessName = ""
     @State private var showCart = false
     @State private var liveDrop: CurrentDropResponse?
-    @State private var selectedFeaturedProduct: Product?
     @State private var selectedFeaturedCreator: SellerProfile?
     @State private var featuredRotationIndex = 0
     @State private var creatorRotationIndex = 0
@@ -65,7 +64,7 @@ struct HomeView: View {
         static let freshFavoritesMaxStripCards = 6
 
         static func dealBannerHeight(for contentWidth: CGFloat) -> CGFloat {
-            return min(max(contentWidth * 0.272, 98), 114)
+            return min(max(contentWidth * 0.30, 118), 132)
         }
 
         static func freshFavoriteCardWidth(for contentWidth: CGFloat) -> CGFloat {
@@ -692,11 +691,9 @@ struct HomeView: View {
                 Color.clear
                     .frame(height: layout.logoToDealSpacing)
 
-                DealOfDayBanner(product: dealOfDayProduct) {
-                    selectedFeaturedProduct = dealOfDayProduct
-                }
-                .environment(\.dealBannerContentWidth, contentWidth)
-                .frame(height: dealBannerHeight)
+                DealOfDayBanner(product: dealOfDayProduct)
+                    .environment(\.dealBannerContentWidth, contentWidth)
+                    .frame(height: dealBannerHeight)
 
                 Color.clear
                     .frame(height: layout.dealToFavoritesSpacing)
@@ -841,9 +838,6 @@ struct HomeView: View {
                     .environmentObject(catalog)
                     .environmentObject(localProducts)
             }
-            .navigationDestination(item: $selectedFeaturedProduct) { product in
-                ProductDetailView(product: product)
-            }
             .navigationDestination(item: $selectedFeaturedCreator) { seller in
                 PublicSellerProfileView(
                     seller: seller,
@@ -884,7 +878,6 @@ private struct DealOfDayBanner: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dealBannerContentWidth) private var bannerContentWidth
     let product: Product
-    let onSeeDetails: () -> Void
 
     /// Matches the “Deal of the Day” label capsule so the CTA does not read larger.
     private enum DealCapsuleMetrics {
@@ -914,7 +907,7 @@ private struct DealOfDayBanner: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: bannerSpacing) {
+        HStack(alignment: .top, spacing: bannerSpacing) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Deal of the Day")
                     .font(DealCapsuleMetrics.font)
@@ -946,9 +939,10 @@ private struct DealOfDayBanner: View {
                     .shadow(color: TBTheme.bannerCTAForeground.opacity(0.16), radius: 1.5, y: 1)
 
                 actionStack
+                    .layoutPriority(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             ZStack {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -1031,7 +1025,9 @@ private struct DealOfDayBanner: View {
     }
 
     private var detailsButton: some View {
-        Button(action: onSeeDetails) {
+        NavigationLink {
+            ProductDetailView(product: product)
+        } label: {
             HStack(spacing: 5) {
                 Text("View details")
                 Image(systemName: "arrow.right")
@@ -1064,8 +1060,10 @@ private struct DealOfDayBanner: View {
                     .strokeBorder(.white.opacity(0.32), lineWidth: 0.9)
             )
             .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("View details for \(product.name)")
     }
 }
 

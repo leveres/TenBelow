@@ -61,6 +61,20 @@ struct StoredProduct: Identifiable, Codable, Hashable {
     var createdAt: Date
     var updatedAt: Date
     var previousPriceCents: Int?
+    var rightsOwnershipType: String?
+    var rightsReferenceFlags: [String]
+    var rightsCertificationAccepted: Bool
+    var rightsCertificationAcceptedAt: Date?
+    var requiresManualReview: Bool
+    var reviewReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, sellerId, name, priceCents, category, imageNames, demoVideoURL, productionPreviewURL
+        case pageViewCount, favoriteCount, material, productionNote, durabilityNote, careWarnings
+        case shipsInMinDays, shipsInMaxDays, createdAt, updatedAt, previousPriceCents
+        case rightsOwnershipType, rightsReferenceFlags, rightsCertificationAccepted
+        case rightsCertificationAcceptedAt, requiresManualReview, reviewReason
+    }
 
     init(
         product: Product,
@@ -87,6 +101,12 @@ struct StoredProduct: Identifiable, Codable, Hashable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.previousPriceCents = product.previousPriceCents ?? previousPriceCents
+        rightsOwnershipType = product.rightsOwnershipType
+        rightsReferenceFlags = product.rightsReferenceFlags
+        rightsCertificationAccepted = product.rightsCertificationAccepted
+        rightsCertificationAcceptedAt = product.rightsCertificationAcceptedAt
+        requiresManualReview = product.requiresManualReview
+        reviewReason = product.reviewReason
     }
 
     init(
@@ -120,6 +140,41 @@ struct StoredProduct: Identifiable, Codable, Hashable {
         } else {
             previousPriceCents = existing?.previousPriceCents
         }
+        rightsOwnershipType = draft.rightsOwnershipType
+        rightsReferenceFlags = draft.rightsReferenceFlags
+        rightsCertificationAccepted = draft.rightsCertificationAccepted
+        rightsCertificationAcceptedAt = draft.rightsCertificationAcceptedAt
+        requiresManualReview = draft.requiresManualReview
+        reviewReason = draft.reviewReason
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        sellerId = try container.decode(String.self, forKey: .sellerId)
+        name = try container.decode(String.self, forKey: .name)
+        priceCents = try container.decode(Int.self, forKey: .priceCents)
+        category = try container.decode(Category.self, forKey: .category)
+        imageNames = try container.decode([String].self, forKey: .imageNames)
+        demoVideoURL = try container.decodeIfPresent(URL.self, forKey: .demoVideoURL)
+        productionPreviewURL = try container.decodeIfPresent(URL.self, forKey: .productionPreviewURL)
+        pageViewCount = try container.decode(Int.self, forKey: .pageViewCount)
+        favoriteCount = try container.decode(Int.self, forKey: .favoriteCount)
+        material = try container.decode(String.self, forKey: .material)
+        productionNote = try container.decode(String.self, forKey: .productionNote)
+        durabilityNote = try container.decode(String.self, forKey: .durabilityNote)
+        careWarnings = try container.decode([String].self, forKey: .careWarnings)
+        shipsInMinDays = try container.decode(Int.self, forKey: .shipsInMinDays)
+        shipsInMaxDays = try container.decode(Int.self, forKey: .shipsInMaxDays)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        previousPriceCents = try container.decodeIfPresent(Int.self, forKey: .previousPriceCents)
+        rightsOwnershipType = try container.decodeIfPresent(String.self, forKey: .rightsOwnershipType)
+        rightsReferenceFlags = try container.decodeIfPresent([String].self, forKey: .rightsReferenceFlags) ?? []
+        rightsCertificationAccepted = try container.decodeIfPresent(Bool.self, forKey: .rightsCertificationAccepted) ?? false
+        rightsCertificationAcceptedAt = try container.decodeIfPresent(Date.self, forKey: .rightsCertificationAcceptedAt)
+        requiresManualReview = try container.decodeIfPresent(Bool.self, forKey: .requiresManualReview) ?? false
+        reviewReason = try container.decodeIfPresent(String.self, forKey: .reviewReason)
     }
 
     var product: Product {
@@ -140,7 +195,13 @@ struct StoredProduct: Identifiable, Codable, Hashable {
             careWarnings: careWarnings,
             shipsInDays: shipsInMinDays...shipsInMaxDays,
             createdAt: createdAt,
-            previousPriceCents: previousPriceCents
+            previousPriceCents: previousPriceCents,
+            rightsOwnershipType: rightsOwnershipType,
+            rightsReferenceFlags: rightsReferenceFlags,
+            rightsCertificationAccepted: rightsCertificationAccepted,
+            rightsCertificationAcceptedAt: rightsCertificationAcceptedAt,
+            requiresManualReview: requiresManualReview,
+            reviewReason: reviewReason
         )
     }
 }
@@ -157,6 +218,9 @@ enum CommerceEventKind: String, Codable, Hashable {
     case orderPlaced
     case orderStatusUpdated
     case shipmentStatusUpdated
+    case orderSupportRequestCreated
+    case orderSupportRequestUpdated
+    case orderSupportMessageSent
     case exchangeSubmitted
     case exchangeProofUploaded
     case exchangeStatusUpdated

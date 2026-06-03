@@ -42,6 +42,17 @@ struct RolePickerView: View {
     @State private var sellerErrorMessage: String?
     @State private var isCreatingBuyerAccount = false
     @State private var isCreatingSellerAccount = false
+    @State private var buyerVerificationChallengeId = ""
+    @State private var buyerVerificationCode = ""
+    @State private var buyerVerificationDeliveryTarget = ""
+    @State private var isVerifyingBuyerEmail = false
+    @State private var sellerResetChallengeId = ""
+    @State private var sellerResetCode = ""
+    @State private var sellerResetNewPassword = ""
+    @State private var sellerResetDeliveryTarget = ""
+    @State private var sellerResetMessage: String?
+    @State private var isRequestingSellerReset = false
+    @State private var isResettingSellerPassword = false
     @FocusState private var focusedSellerField: SellerAccountFieldFocus?
 
     init(startInSellerAccount: Bool = false, sellerEntryMode: SellerAccountEntryMode = .create) {
@@ -208,16 +219,45 @@ struct RolePickerView: View {
                 errorCard(message: buyerErrorMessage)
             }
 
-            Button {
-                createBuyerAccount()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "person.crop.circle.badge.checkmark")
-                    Text(isCreatingBuyerAccount ? "Creating account..." : "Create buyer account")
+            if buyerVerificationChallengeId.isEmpty {
+                Button {
+                    Task { await createBuyerAccount() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "person.crop.circle.badge.checkmark")
+                        Text(isCreatingBuyerAccount ? "Sending code..." : "Create buyer account")
+                    }
+                }
+                .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+                .disabled(isCreatingBuyerAccount)
+            } else {
+                formCard(
+                    title: "Verify your email",
+                    subtitle: "Enter the 6-digit code sent to \(buyerVerificationDeliveryTarget.isEmpty ? "your email" : buyerVerificationDeliveryTarget)."
+                ) {
+                    VStack(spacing: 12) {
+                        formField(title: "Verification Code", text: $buyerVerificationCode, prompt: "123456", keyboard: .numberPad)
+
+                        Button {
+                            Task { await verifyBuyerEmailCode() }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "checkmark.shield")
+                                Text(isVerifyingBuyerEmail ? "Verifying..." : "Verify email")
+                            }
+                        }
+                        .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+                        .disabled(isVerifyingBuyerEmail || buyerVerificationCode.trimmingCharacters(in: .whitespacesAndNewlines).count < 6)
+
+                        Button("Send a new code") {
+                            Task { await resendBuyerVerificationCode() }
+                        }
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky)
+                        .disabled(isCreatingBuyerAccount || isVerifyingBuyerEmail)
+                    }
                 }
             }
-            .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
-            .disabled(isCreatingBuyerAccount)
 
             backButton
         }
@@ -261,6 +301,10 @@ struct RolePickerView: View {
                 .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
                 .disabled(isCreatingSellerAccount)
 
+                if sellerEntryMode == .signIn {
+                    sellerPasswordResetSection
+                }
+
                 backButton
             }
         }
@@ -293,30 +337,91 @@ struct RolePickerView: View {
         }
     }
 
-    private var sellerAccountScreen: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 0) {
-                Spacer().frame(height: 18)
-
-                sellerAccountHeader
-
-                VStack(spacing: 10) {
-                    sellerAccountContent
-                }
-                .padding(.top, 14)
-
-                Spacer(minLength: 28)
+    private var sellerPasswordResetSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                Task { await requestSellerPasswordReset() }
+            } label: {
+                Text(isRequestingSellerReset ? "Sending reset code..." : "Forgot password?")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 20)
-            .frame(maxWidth: .infinity, alignment: .top)
+            .buttonStyle(.plain)
+            .disabled(isRequestingSellerReset || isCreatingSellerAccount)
+
+            if !sellerResetChallengeId.isEmpty {
+                VStack(spacing: 10) {
+                    Text("Code sent to \(sellerResetDeliveryTarget.isEmpty ? "the seller email on file" : sellerResetDeliveryTarget).")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    formField(title: "Reset Code", text: $sellerResetCode, prompt: "123456", keyboard: .numberPad)
+
+                    SecureField("New password", text: $sellerResetNewPassword)
+                        .textContentType(.newPassword)
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    Button {
+                        Task { await verifySellerPasswordReset() }
+                    } label: {
+                        Text(isResettingSellerPassword ? "Resetting password..." : "Reset password")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+                    .disabled(isResettingSellerPassword || sellerResetCode.count < 6 || sellerResetNewPassword.count < 8)
+                }
+                .padding(14)
+                .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+
+            if let sellerResetMessage {
+                Text(sellerResetMessage)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(sellerResetMessage.localizedCaseInsensitiveContains("reset") ? .green : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 6)
+    }
+
+    private var sellerAccountScreen: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 18)
+
+                    sellerAccountHeader
+
+                    VStack(spacing: 10) {
+                        sellerAccountContent
+                    }
+                    .padding(.top, 14)
+
+                    Spacer(minLength: 28)
+                }
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: focusedSellerField) { _, field in
+                guard let field else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        proxy.scrollTo(field, anchor: sellerFieldScrollAnchor(for: field))
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .contentShape(Rectangle())
         .onTapGesture {
             dismissSellerKeyboard()
         }
-        // Keep the screen from sliding up with the keyboard; users scroll the form by focus if needed.
-        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private var sellerAccountHeader: some View {
@@ -583,7 +688,7 @@ struct RolePickerView: View {
         transitionToOnboarding(as: "buyer")
     }
 
-    private func createBuyerAccount() {
+    private func createBuyerAccount() async {
         let trimmedName = buyerNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedEmail = buyerEmailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
@@ -604,17 +709,102 @@ struct RolePickerView: View {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         #endif
 
-        buyerFullName = trimmedName
-        buyerEmail = trimmedEmail
-        buyerAccountCreated = true
-        buyerCheckoutPreference = BuyerCheckoutPreference.account.rawValue
-        isCreatingBuyerAccount = false
+        do {
+            let response = try await BuyerAccountAPI.createAccount(fullName: trimmedName, email: trimmedEmail)
+            await MainActor.run {
+                buyerFullName = trimmedName
+                buyerEmail = trimmedEmail
+                buyerCheckoutPreference = BuyerCheckoutPreference.account.rawValue
+                isCreatingBuyerAccount = false
 
-        transitionToOnboarding(as: "buyer")
+                if response.emailVerified == true {
+                    buyerAccountCreated = true
+                    transitionToOnboarding(as: "buyer")
+                } else if let verification = response.verification {
+                    buyerVerificationChallengeId = verification.challengeId
+                    buyerVerificationDeliveryTarget = verification.deliveryTarget
+                    buyerVerificationCode = ""
+                    buyerErrorMessage = nil
+                } else {
+                    buyerErrorMessage = "Check your email for a verification code, then request a new code here."
+                }
+            }
+        } catch {
+            await MainActor.run {
+                buyerErrorMessage = error.localizedDescription
+                isCreatingBuyerAccount = false
+            }
+        }
+    }
 
-        Task {
-            await MarketplaceAuthSession.syncAfterIdentityChange()
+    private func resendBuyerVerificationCode() async {
+        let email = buyerEmailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard isValidEmail(email) else {
+            buyerErrorMessage = "Please enter a valid email address."
+            return
+        }
+
+        await MainActor.run {
+            isCreatingBuyerAccount = true
+            buyerErrorMessage = nil
+        }
+        defer {
+            Task { @MainActor in isCreatingBuyerAccount = false }
+        }
+
+        do {
+            let response = try await BuyerAccountAPI.requestEmailVerification(email: email)
+            await MainActor.run {
+                buyerVerificationChallengeId = response.challengeId ?? ""
+                buyerVerificationDeliveryTarget = response.deliveryTarget ?? ""
+                buyerVerificationCode = ""
+                buyerErrorMessage = response.emailVerified == true ? "Email is already verified." : nil
+            }
+        } catch {
+            await MainActor.run {
+                buyerErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func verifyBuyerEmailCode() async {
+        let email = buyerEmailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let code = buyerVerificationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !buyerVerificationChallengeId.isEmpty, code.count >= 6 else {
+            buyerErrorMessage = "Enter the 6-digit verification code."
+            return
+        }
+
+        await MainActor.run {
+            isVerifyingBuyerEmail = true
+            buyerErrorMessage = nil
+        }
+
+        do {
+            let response = try await BuyerAccountAPI.verifyEmail(
+                email: email,
+                challengeId: buyerVerificationChallengeId,
+                code: code
+            )
+            await MainActor.run {
+                if let token = response.token, !token.isEmpty {
+                    MarketplaceAuthSession.storeBuyerSessionToken(token)
+                }
+                buyerFullName = response.fullName ?? buyerNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                buyerEmail = response.buyerEmail ?? email
+                buyerAccountCreated = true
+                buyerCheckoutPreference = BuyerCheckoutPreference.account.rawValue
+                buyerVerificationChallengeId = ""
+                buyerVerificationCode = ""
+                isVerifyingBuyerEmail = false
+                transitionToOnboarding(as: "buyer")
+            }
             await PushDeviceRegistration.syncAfterIdentityChange()
+        } catch {
+            await MainActor.run {
+                buyerErrorMessage = error.localizedDescription
+                isVerifyingBuyerEmail = false
+            }
         }
     }
 
@@ -696,7 +886,7 @@ struct RolePickerView: View {
 
         do {
             // Membership is purchased in-app via StoreKit (`SellerSubscriptionStore`). We do not open Stripe Connect onboarding here—that flow remains available from the seller dashboard for payouts when needed.
-            try await SellerAPI.createAccount(
+            let response = try await SellerAPI.createAccount(
                 sellerId: validated.sellerId,
                 email: validated.email,
                 businessName: validated.businessName.isEmpty ? nil : validated.businessName,
@@ -707,6 +897,9 @@ struct RolePickerView: View {
                 sellerAgreementAccepted: true,
                 sellerPoliciesAcknowledged: true
             )
+            if let token = response.token, !token.isEmpty {
+                MarketplaceAuthSession.storeSellerSessionToken(token)
+            }
 
             await applyCreatedSellerRegistration(
                 trimmedSellerId: validated.sellerId,
@@ -791,6 +984,76 @@ struct RolePickerView: View {
             await MainActor.run {
                 sellerErrorMessage = error.localizedDescription
                 isCreatingSellerAccount = false
+            }
+        }
+    }
+
+    private func requestSellerPasswordReset() async {
+        let identifier = sellerIdentifierInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !identifier.isEmpty else {
+            sellerErrorMessage = "Enter your seller ID or email first."
+            return
+        }
+
+        await MainActor.run {
+            isRequestingSellerReset = true
+            sellerErrorMessage = nil
+            sellerResetMessage = nil
+        }
+
+        do {
+            let response = try await SellerAPI.requestPasswordReset(identifier: identifier)
+            await MainActor.run {
+                sellerResetChallengeId = response.challengeId
+                sellerResetDeliveryTarget = response.deliveryTarget
+                sellerResetCode = ""
+                sellerResetNewPassword = ""
+                sellerResetMessage = response.challengeId.isEmpty
+                    ? "If that seller exists, a reset code was sent to the email on file."
+                    : "Enter the reset code from your email."
+                isRequestingSellerReset = false
+            }
+        } catch {
+            await MainActor.run {
+                sellerErrorMessage = error.localizedDescription
+                isRequestingSellerReset = false
+            }
+        }
+    }
+
+    private func verifySellerPasswordReset() async {
+        let identifier = sellerIdentifierInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let code = sellerResetCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !identifier.isEmpty, !sellerResetChallengeId.isEmpty, code.count >= 6, sellerResetNewPassword.count >= 8 else {
+            sellerErrorMessage = "Enter the reset code and a new password with at least 8 characters."
+            return
+        }
+
+        await MainActor.run {
+            isResettingSellerPassword = true
+            sellerErrorMessage = nil
+        }
+
+        do {
+            _ = try await SellerAPI.verifyPasswordReset(
+                identifier: identifier,
+                challengeId: sellerResetChallengeId,
+                code: code,
+                newPassword: sellerResetNewPassword
+            )
+            await MainActor.run {
+                sellerPasswordInput = sellerResetNewPassword
+                sellerResetChallengeId = ""
+                sellerResetCode = ""
+                sellerResetNewPassword = ""
+                sellerResetDeliveryTarget = ""
+                sellerResetMessage = "Password reset. You can sign in with the new password now."
+                isResettingSellerPassword = false
+            }
+        } catch {
+            await MainActor.run {
+                sellerErrorMessage = error.localizedDescription
+                isResettingSellerPassword = false
             }
         }
     }
@@ -1214,6 +1477,18 @@ struct RolePickerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+        .id(focus)
+    }
+
+    private func sellerFieldScrollAnchor(for field: SellerAccountFieldFocus) -> UnitPoint {
+        switch field {
+        case .businessName, .shippingState, .shippingCountry:
+            return UnitPoint(x: 0.5, y: 0.88)
+        case .legalName, .password:
+            return UnitPoint(x: 0.5, y: 0.72)
+        case .identifier, .sellerId, .email:
+            return UnitPoint(x: 0.5, y: 0.58)
+        }
     }
 
     private func advanceSellerField(from field: SellerAccountFieldFocus?) {
@@ -1343,17 +1618,24 @@ private struct SellerAgreementAcceptanceView: View {
                 WinterSceneBackground()
                     .ignoresSafeArea()
 
+                let horizontalPadding: CGFloat = 20
+                let headerHorizontalPadding: CGFloat = 10
+                let headerWidth = max(geometry.size.width - headerHorizontalPadding * 2, 0)
+
                 VStack(spacing: 8) {
-                    header
+                    header(contentWidth: headerWidth)
+                        .padding(.horizontal, headerHorizontalPadding)
 
                     requirementSummary
+                        .padding(.horizontal, horizontalPadding)
 
                     agreementCard
                         .layoutPriority(1)
+                        .padding(.horizontal, horizontalPadding)
 
                     actionBar
+                        .padding(.horizontal, horizontalPadding)
                 }
-                .padding(.horizontal, 20)
                 .padding(.top, max(geometry.safeAreaInsets.top - 24, 0))
                 .padding(.bottom, geometry.safeAreaInsets.bottom + 6)
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
@@ -1385,9 +1667,22 @@ private struct SellerAgreementAcceptanceView: View {
         .interactiveDismissDisabled(isTransitioning)
     }
 
-    private var header: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 4) {
+    private func header(contentWidth: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 12) {
+                Button {
+                    onCancel()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(TBTheme.deepSky)
+                        .frame(width: 34, height: 34)
+                        .background(.white.opacity(0.72), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isCreatingAccount)
+                .padding(.top, 2)
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Seller onboarding")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -1399,33 +1694,18 @@ private struct SellerAgreementAcceptanceView: View {
                         .tracking(-0.5)
                         .foregroundStyle(TBTheme.deepSky)
                 }
-                .padding(.leading, 46)
-
-                Text("Review and accept before seller onboarding continues.")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(TBTheme.deepSky.opacity(0.72))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
-                    .lineSpacing(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
 
-            Button {
-                onCancel()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(TBTheme.deepSky)
-                    .frame(width: 34, height: 34)
-                    .background(.white.opacity(0.72), in: Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(isCreatingAccount)
-            .padding(.top, 2)
+            Text("Review and accept before seller onboarding continues.")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(TBTheme.deepSky.opacity(0.72))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .allowsTightening(true)
+                .frame(width: contentWidth, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(width: contentWidth, alignment: .leading)
     }
 
     private var requirementSummary: some View {

@@ -9,6 +9,29 @@ private struct SellerLoginRequest: Encodable {
     let password: String
 }
 
+private struct SellerPasswordResetRequest: Encodable {
+    let identifier: String
+}
+
+private struct SellerPasswordResetVerifyRequest: Encodable {
+    let identifier: String
+    let challengeId: String
+    let code: String
+    let newPassword: String
+}
+
+struct SellerPasswordResetChallengeResponse: Decodable {
+    let ok: Bool
+    let challengeId: String
+    let deliveryTarget: String
+    let expiresInSeconds: Int
+}
+
+struct SellerPasswordResetVerifyResponse: Decodable {
+    let ok: Bool
+    let sellerId: String
+}
+
 struct SellerLoginResponse: Decodable {
     let token: String
     let role: String
@@ -97,6 +120,48 @@ enum SellerAPI {
             throw SellerAPIError(statusCode: http.statusCode, message: serverErrorMessage(from: data))
         }
         return try JSONDecoder().decode(SellerLoginResponse.self, from: data)
+    }
+
+    static func requestPasswordReset(identifier: String) async throws -> SellerPasswordResetChallengeResponse {
+        let url = baseURL.appendingPathComponent("auth/seller-password-reset/request")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        request.httpBody = try JSONEncoder().encode(SellerPasswordResetRequest(identifier: identifier))
+
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw SellerAPIError(statusCode: http.statusCode, message: serverErrorMessage(from: data))
+        }
+        return try JSONDecoder().decode(SellerPasswordResetChallengeResponse.self, from: data)
+    }
+
+    static func verifyPasswordReset(
+        identifier: String,
+        challengeId: String,
+        code: String,
+        newPassword: String
+    ) async throws -> SellerPasswordResetVerifyResponse {
+        let url = baseURL.appendingPathComponent("auth/seller-password-reset/verify")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        request.httpBody = try JSONEncoder().encode(
+            SellerPasswordResetVerifyRequest(
+                identifier: identifier,
+                challengeId: challengeId,
+                code: code,
+                newPassword: newPassword
+            )
+        )
+
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw SellerAPIError(statusCode: http.statusCode, message: serverErrorMessage(from: data))
+        }
+        return try JSONDecoder().decode(SellerPasswordResetVerifyResponse.self, from: data)
     }
 
     private static func serverErrorMessage(from data: Data) -> String {

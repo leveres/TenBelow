@@ -11,6 +11,69 @@ import UIKit
 import UniformTypeIdentifiers
 #endif
 
+private enum OrderDateFilter: String, CaseIterable, Identifiable {
+    case allTime
+    case last30Days
+    case last90Days
+    case thisYear
+    case lastYear
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .allTime:
+            return "All dates"
+        case .last30Days:
+            return "Last 30 days"
+        case .last90Days:
+            return "Last 90 days"
+        case .thisYear:
+            return "This year"
+        case .lastYear:
+            return "Last year"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .allTime:
+            return "calendar"
+        case .last30Days, .last90Days:
+            return "calendar.badge.clock"
+        case .thisYear, .lastYear:
+            return "calendar.badge.checkmark"
+        }
+    }
+
+    func dateInterval(calendar: Calendar = .current, now: Date = .now) -> DateInterval? {
+        switch self {
+        case .allTime:
+            return nil
+        case .last30Days:
+            return daysBack(30, calendar: calendar, now: now)
+        case .last90Days:
+            return daysBack(90, calendar: calendar, now: now)
+        case .thisYear:
+            return calendar.dateInterval(of: .year, for: now)
+        case .lastYear:
+            guard let currentYear = calendar.dateInterval(of: .year, for: now),
+                  let previousYearStart = calendar.date(byAdding: .year, value: -1, to: currentYear.start) else {
+                return nil
+            }
+            return DateInterval(start: previousYearStart, end: currentYear.start)
+        }
+    }
+
+    private func daysBack(_ days: Int, calendar: Calendar, now: Date) -> DateInterval? {
+        let end = now.addingTimeInterval(1)
+        guard let start = calendar.date(byAdding: .day, value: -days, to: now) else {
+            return nil
+        }
+        return DateInterval(start: start, end: end)
+    }
+}
+
 struct OrdersView: View {
     private enum PlaceholderSeller {
         static let id = "SELL-01"
@@ -33,6 +96,7 @@ struct OrdersView: View {
     @AppStorage("buyerEmail") private var buyerEmail = ""
     @AppStorage("sellerSellerId") private var sellerId = ""
     @State private var selectedFilter: OrderListFilter = .all
+    @State private var selectedDateFilter: OrderDateFilter = .allTime
     @State private var lastOrdersRefresh = Date.distantPast
 
     /// Mode is driven by role picked at app start — no segmented control.
@@ -85,7 +149,7 @@ struct OrdersView: View {
 
     private var emptyState: some View {
         VStack(spacing: 0) {
-            ordersHeaderBlock(statusBarOrders: baseOrders, filterBinding: $selectedFilter)
+            ordersHeaderBlock(statusBarOrders: baseOrders)
 
             ScrollView {
                 VStack(spacing: 10) {
@@ -112,7 +176,7 @@ struct OrdersView: View {
 
     private var ordersList: some View {
         VStack(spacing: 0) {
-            ordersHeaderBlock(statusBarOrders: baseOrders, filterBinding: $selectedFilter)
+            ordersHeaderBlock(statusBarOrders: baseOrders)
 
             ScrollView {
                 LazyVStack(spacing: 12) {
@@ -140,10 +204,7 @@ struct OrdersView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func ordersHeaderBlock(
-        statusBarOrders: [Order],
-        filterBinding: Binding<OrderListFilter>
-    ) -> some View {
+    private func ordersHeaderBlock(statusBarOrders: [Order]) -> some View {
         GlassCard(cornerRadius: 20) {
             VStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .center, spacing: HeroMetrics.headerSpacing) {
@@ -188,14 +249,66 @@ struct OrdersView: View {
                     orders: statusBarOrders,
                     mode: mode,
                     sellerId: mode == .seller ? effectiveSellerId : nil,
-                    selectedFilter: filterBinding
+                    selectedFilter: $selectedFilter
                 )
                 .frame(maxWidth: .infinity, alignment: .center)
+
+                completedDateFilterMenu
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)
         .padding(.bottom, 8)
+    }
+
+    private var completedDateFilterMenu: some View {
+        HStack(spacing: 7) {
+            Menu {
+                ForEach(OrderDateFilter.allCases) { filter in
+                    Button {
+                        selectedFilter = .completed
+                        selectedDateFilter = filter
+                    } label: {
+                        Label(filter.title, systemImage: selectedDateFilter == filter ? "checkmark" : filter.systemImage)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(selectedDateFilter.title)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(selectedFilter == .completed ? TBTheme.deepSky : Color.primary.opacity(0.64))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(selectedFilter == .completed ? TBTheme.skyBlue.opacity(0.10) : Color.white.opacity(0.68))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(TBTheme.skyBlue.opacity(selectedFilter == .completed ? 0.18 : 0.10), lineWidth: 0.8)
+                )
+            }
+            .accessibilityLabel("Filter completed orders by date")
+
+            if selectedDateFilter != .allTime {
+                Button {
+                    selectedDateFilter = .allTime
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.65), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear completed orders date filter")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private var baseOrders: [Order] {
@@ -207,7 +320,7 @@ struct OrdersView: View {
     }
 
     private var filteredOrders: [Order] {
-        filtered(baseOrders, for: selectedFilter)
+        filterByDateIfNeeded(filtered(baseOrders, for: selectedFilter))
     }
 
     private var emptyStateMessage: String {
@@ -241,7 +354,7 @@ struct OrdersView: View {
         case .active:
             return "No active orders"
         case .completed:
-            return "No completed orders"
+            return selectedDateFilter == .allTime ? "No completed orders" : "No completed orders in this range"
         }
     }
 
@@ -264,6 +377,32 @@ struct OrdersView: View {
             let myShipments = order.shipments.filter { $0.sellerId == effectiveSellerId }
             guard !myShipments.isEmpty else { return false }
             return myShipments.allSatisfy { $0.status == .shipped || $0.status == .delivered }
+        }
+    }
+
+    private func filterByDateIfNeeded(_ orders: [Order]) -> [Order] {
+        guard selectedFilter == .completed,
+              let dateInterval = selectedDateFilter.dateInterval()
+        else { return orders }
+
+        return orders.filter { order in
+            guard let date = completedDate(for: order) else { return false }
+            return dateInterval.contains(date)
+        }
+    }
+
+    private func completedDate(for order: Order) -> Date? {
+        switch mode {
+        case .buyer:
+            return order.deliveredAt
+                ?? order.shipments.compactMap(\.deliveredAt).max()
+                ?? order.shipments.compactMap(\.shippedAt).max()
+                ?? order.createdAt
+        case .seller:
+            let myShipments = order.shipments.filter { $0.sellerId == effectiveSellerId }
+            return myShipments.compactMap(\.deliveredAt).max()
+                ?? myShipments.compactMap(\.shippedAt).max()
+                ?? order.createdAt
         }
     }
 
@@ -332,14 +471,31 @@ private enum BuyerExchangeSheet: Identifiable {
     }
 }
 
+private enum BuyerOrderSupportSheet: Identifiable {
+    case thread(sellerId: String, sellerName: String)
+    case request(Shipment, OrderSupportRequestType)
+
+    var id: String {
+        switch self {
+        case .thread(let sellerId, _): return "thread-\(sellerId)"
+        case .request(let shipment, let type): return "request-\(shipment.id)-\(type.rawValue)"
+        }
+    }
+}
+
 struct BuyerOrderDetailView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var exchangeStore: ExchangeStore
     @EnvironmentObject private var localProducts: LocalProductStore
+    @EnvironmentObject private var orderStore: OrderStore
     let order: Order
+    private var activeOrder: Order {
+        orderStore.order(withId: order.id) ?? order
+    }
     @State private var selectedProductionPreview: ProductionPreviewEntry?
     @State private var exchangeSheet: BuyerExchangeSheet?
     @State private var showExchangePolicyBrowser = false
+    @State private var supportSheet: BuyerOrderSupportSheet?
 
     var body: some View {
         ScrollView {
@@ -351,28 +507,28 @@ struct BuyerOrderDetailView: View {
                                 Text("Your order")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text(order.id)
+                                Text(activeOrder.id)
                                     .font(.headline)
                                     .fontWeight(.semibold)
                             }
                             Spacer()
-                            OrderStatusPill(status: order.status)
+                            OrderStatusPill(status: activeOrder.status)
                         }
 
-                        Text(order.createdAt.formatted(date: .long, time: .shortened))
+                        Text(activeOrder.createdAt.formatted(date: .long, time: .shortened))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
 
-                        Text("This order ships in \(order.shipments.count) shipment\(order.shipments.count == 1 ? "" : "s") from different sellers.")
+                        Text("This order ships in \(activeOrder.shipments.count) shipment\(activeOrder.shipments.count == 1 ? "" : "s") from different sellers.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
 
-                        if let city = order.shipToCity, let state = order.shipToState {
+                        if let city = activeOrder.shipToCity, let state = activeOrder.shipToState {
                             Label("Delivering to \(city), \(state)", systemImage: "location.fill")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
-                        if let email = order.buyerEmail {
+                        if let email = activeOrder.buyerEmail {
                             Label("Receipt: \(email)", systemImage: "envelope.fill")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -382,7 +538,7 @@ struct BuyerOrderDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
 
-                OrderTimelineView(order: order)
+                OrderTimelineView(order: activeOrder)
                     .padding(.horizontal, 16)
 
                 if !productionPreviewEntries.isEmpty {
@@ -396,7 +552,7 @@ struct BuyerOrderDetailView: View {
                         .fontWeight(.semibold)
                         .padding(.horizontal, 18)
 
-                    ForEach(order.shipments) { shipment in
+                    ForEach(activeOrder.shipments) { shipment in
                         ShipmentCard(shipment: shipment, mode: .buyer)
                             .padding(.horizontal, 16)
                     }
@@ -405,13 +561,16 @@ struct BuyerOrderDetailView: View {
                 buyerExchangeSection
                     .padding(.horizontal, 16)
 
+                buyerSupportSection
+                    .padding(.horizontal, 16)
+
                 GlassCard(cornerRadius: 20) {
                     HStack {
                         Text("Order Total")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text(formatMoney(order.totalCents, order.currency))
+                        Text(formatMoney(activeOrder.totalCents, activeOrder.currency))
                             .font(.headline)
                             .fontWeight(.semibold)
                     }
@@ -432,7 +591,7 @@ struct BuyerOrderDetailView: View {
             switch sheet {
             case .request:
                 ExchangeRequestFlowSheet(
-                    order: order,
+                    order: activeOrder,
                     items: exchangeEligibleItemContexts
                 )
                 .environmentObject(exchangeStore)
@@ -447,8 +606,79 @@ struct BuyerOrderDetailView: View {
         .sheet(isPresented: $showExchangePolicyBrowser) {
             LegalDocumentSheet(document: .exchangePolicy)
         }
+        .sheet(item: $supportSheet) { sheet in
+            switch sheet {
+            case .thread(let sellerId, let sellerName):
+                OrderSupportThreadView(
+                    orderId: order.id,
+                    sellerId: sellerId,
+                    sellerName: sellerName,
+                    viewerRole: .buyer
+                )
+                .environmentObject(orderStore)
+            case .request(let shipment, let type):
+                OrderSupportRequestSheet(order: activeOrder, shipment: shipment, requestType: type)
+                    .environmentObject(orderStore)
+            }
+        }
         .task(id: order.id) {
             _ = try? await exchangeStore.refreshRequests(for: order.id)
+        }
+    }
+
+    private var buyerSupportSection: some View {
+        GlassCard(cornerRadius: 20) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Help & support")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+
+                Text("Message sellers about this order, or submit a cancel/refund request for a specific shipment.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                OrderSupportRequestsSection(order: activeOrder, sellerId: nil, isSellerView: false, embeddedInCard: true)
+                    .environmentObject(orderStore)
+
+                ForEach(activeOrder.shipments) { shipment in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(shipment.sellerName)
+                            .font(.tbBodyStrong)
+                            .foregroundStyle(TBTheme.deepSky)
+
+                        Button {
+                            supportSheet = .thread(sellerId: shipment.sellerId, sellerName: shipment.sellerName)
+                        } label: {
+                            Label("Message \(shipment.sellerName)", systemImage: "bubble.left.and.bubble.right")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(TBTheme.icyBlue)
+
+                        if shipment.status == .preparing {
+                            Button {
+                                supportSheet = .request(shipment, .cancel)
+                            } label: {
+                                Label("Request cancellation", systemImage: "xmark.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        if shipment.status == .shipped || shipment.status == .delivered {
+                            Button {
+                                supportSheet = .request(shipment, .refund)
+                            } label: {
+                                Label("Request refund", systemImage: "dollarsign.arrow.circlepath")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+            }
         }
     }
 
@@ -532,7 +762,7 @@ struct BuyerOrderDetailView: View {
     }
 
     private var exchangeItemContexts: [ExchangeOrderItemContext] {
-        order.shipments.flatMap { shipment in
+        activeOrder.shipments.flatMap { shipment in
             shipment.items.map { item in
                 ExchangeOrderItemContext(
                     orderId: order.id,
@@ -570,7 +800,7 @@ struct BuyerOrderDetailView: View {
     }
 
     private var orderLineItems: [OrderLineItem] {
-        order.shipments.flatMap(\.items)
+        activeOrder.shipments.flatMap(\.items)
     }
 
     private var productionPreviewEntries: [ProductionPreviewEntry] {
@@ -699,6 +929,7 @@ struct SellerOrderDetailView: View {
     let currentSellerId: String
     @State private var displayedOrder: Order
     @State private var pendingShipmentDraft: ShipmentTrackingDraft?
+    @State private var showBuyerSupportThread = false
     @State private var isShowingProductionPreviewPicker = false
     @State private var activeProductionPreviewTarget: SellerProductionPreviewTarget?
     @State private var selectedProductionPreviewEntry: ProductionPreviewEntry?
@@ -813,11 +1044,51 @@ struct SellerOrderDetailView: View {
                                     }
                                     .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true, horizontalPadding: 20, verticalPadding: 12, fontSize: 15))
                                 }
+
+                                if orderStore.canUpdateTracking(for: shipment) {
+                                    Button {
+                                        handleShipmentAction(.updateTracking, for: shipment)
+                                    } label: {
+                                        Label("Update tracking", systemImage: "barcode.viewfinder")
+                                            .font(.tbBodyStrong)
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .tint(TBTheme.icyBlue)
+                                }
                             }
                             .padding(.horizontal, 16)
                         }
                     }
                 }
+
+                OrderSupportRequestsSection(
+                    order: displayedOrder,
+                    sellerId: currentSellerId,
+                    isSellerView: true
+                )
+                .environmentObject(orderStore)
+                .padding(.horizontal, 16)
+
+                GlassCard(cornerRadius: 20) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Buyer support")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                        Text("Use a private thread for shipping updates, missing package questions, or refund/cancel follow-up.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            showBuyerSupportThread = true
+                        } label: {
+                            Label("Message buyer", systemImage: "bubble.left.and.bubble.right")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true, horizontalPadding: 20, verticalPadding: 12, fontSize: 15))
+                    }
+                }
+                .padding(.horizontal, 16)
 
                 GlassCard(cornerRadius: 20) {
                     HStack {
@@ -849,9 +1120,24 @@ struct SellerOrderDetailView: View {
                 displayedOrder = newOrder
             }
         }
+        .onChange(of: orderStore.orders) { _, _ in
+            if let latest = orderStore.order(withId: order.id), !isPreviewOrder {
+                displayedOrder = latest
+            }
+        }
+        .sheet(isPresented: $showBuyerSupportThread) {
+            OrderSupportThreadView(
+                orderId: displayedOrder.id,
+                sellerId: currentSellerId,
+                sellerName: myShipments.first?.sellerName ?? currentSellerId,
+                viewerRole: .seller
+            )
+            .environmentObject(orderStore)
+        }
         .sheet(item: $pendingShipmentDraft) { draft in
             ShipmentTrackingSheet(
                 sellerName: draft.sellerName,
+                trackingAction: draft.trackingAction,
                 carrier: $carrier,
                 trackingNumber: $trackingNumber,
                 onCancel: {
@@ -863,22 +1149,26 @@ struct SellerOrderDetailView: View {
                     guard !trimmedCarrier.isEmpty, !trimmedTrackingNumber.isEmpty else { return }
 
                     Task {
+                        let action = draft.trackingAction
                         if isPreviewOrder {
                             applyPreviewShipmentAction(
-                                .markShipped,
+                                action,
                                 shipmentId: draft.shipmentId,
                                 carrier: trimmedCarrier,
                                 trackingNumber: trimmedTrackingNumber
                             )
                         } else {
                             await orderStore.performShipmentAction(
-                                .markShipped,
+                                action,
                                 orderId: draft.orderId,
                                 shipmentId: draft.shipmentId,
                                 sellerId: draft.sellerId,
                                 carrier: trimmedCarrier,
                                 trackingNumber: trimmedTrackingNumber
                             )
+                            if let latest = orderStore.order(withId: draft.orderId) {
+                                displayedOrder = latest
+                            }
                         }
                         pendingShipmentDraft = nil
                     }
@@ -926,6 +1216,8 @@ struct SellerOrderDetailView: View {
             return "truck.box.fill"
         case .markDelivered:
             return "checkmark.circle.fill"
+        case .updateTracking:
+            return "barcode.viewfinder"
         }
     }
 
@@ -933,7 +1225,7 @@ struct SellerOrderDetailView: View {
         switch action {
         case .markShipped:
             return "Add Tracking & Mark Shipped"
-        case .startProcessing, .markDelivered:
+        case .startProcessing, .markDelivered, .updateTracking:
             return action.buttonTitle
         }
     }
@@ -1200,14 +1492,15 @@ struct SellerOrderDetailView: View {
 
     private func handleShipmentAction(_ action: SellerShipmentAction, for shipment: Shipment) {
         switch action {
-        case .markShipped:
+        case .markShipped, .updateTracking:
             carrier = shipment.carrier ?? ""
             trackingNumber = shipment.trackingNumber ?? ""
             pendingShipmentDraft = ShipmentTrackingDraft(
                 orderId: order.id,
                 shipmentId: shipment.id,
                 sellerId: currentSellerId,
-                sellerName: shipment.sellerName
+                sellerName: shipment.sellerName,
+                trackingAction: action
             )
         case .startProcessing, .markDelivered:
             if isPreviewOrder {
@@ -1258,6 +1551,9 @@ struct SellerOrderDetailView: View {
         case .markDelivered:
             displayedOrder.shipments[shipmentIndex].status = .delivered
             displayedOrder.shipments[shipmentIndex].deliveredAt = timestamp
+        case .updateTracking:
+            displayedOrder.shipments[shipmentIndex].carrier = carrier
+            displayedOrder.shipments[shipmentIndex].trackingNumber = trackingNumber
         }
 
         displayedOrder.status = derivedPreviewOrderStatus(
@@ -1395,15 +1691,17 @@ private struct ShipmentTrackingDraft: Identifiable {
     let shipmentId: String
     let sellerId: String
     let sellerName: String
+    let trackingAction: SellerShipmentAction
 
     var id: String {
-        "\(orderId)|\(shipmentId)|\(sellerId)"
+        "\(orderId)|\(shipmentId)|\(sellerId)|\(trackingAction.rawValue)"
     }
 }
 
 private struct ShipmentTrackingSheet: View {
     @Environment(\.dismiss) private var dismiss
     let sellerName: String
+    let trackingAction: SellerShipmentAction
     @Binding var carrier: String
     @Binding var trackingNumber: String
     let onCancel: () -> Void
@@ -1469,7 +1767,7 @@ private struct ShipmentTrackingSheet: View {
                 .padding(16)
             }
             .background(Color.blue.opacity(0.03).ignoresSafeArea())
-            .navigationTitle("Add Tracking")
+            .navigationTitle(trackingAction == .updateTracking ? "Update Tracking" : "Add Tracking")
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif

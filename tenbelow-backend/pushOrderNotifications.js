@@ -39,8 +39,8 @@ export async function notifyPaymentSucceeded({ orderId, buyerEmail, sellerTotals
     for (const t of tokens) {
       jobs.push(
         sendApnsAlert(t, {
-          title: "New order",
-          body: `You have a new TenBelow order ${orderId}.`,
+          title: "New order received",
+          body: `You have a new order (${orderId}) ready to fulfill.`,
         })
       );
     }
@@ -85,4 +85,55 @@ export async function notifyOrderStatusChanged({ buyerEmail, sellerId, title, bo
 
   await Promise.allSettled(jobs);
   return { sent: jobs.length };
+}
+
+/**
+ * Buyer alerts for shipment lifecycle (shipped / delivered / production).
+ */
+export async function notifyShipmentStatusToBuyer({
+  buyerEmail,
+  action,
+  itemName = "your item",
+  carrier = "",
+  trackingNumber = "",
+}) {
+  const trimmedAction = String(action || "").trim();
+  let title = "";
+  let body = "";
+
+  if (trimmedAction === "markShipped") {
+    title = "Order shipped";
+    const trackingBits = [String(carrier || "").trim(), String(trackingNumber || "").trim()].filter(Boolean);
+    const trackingSuffix = trackingBits.length ? ` Tracking: ${trackingBits.join(" ")}.` : "";
+    body = `${itemName} is on the way.${trackingSuffix}`;
+  } else if (trimmedAction === "markDelivered") {
+    title = "Order delivered";
+    body = `${itemName} has been delivered.`;
+  } else if (trimmedAction === "startProcessing") {
+    title = "Order in production";
+    body = `${itemName} is being prepared by the seller.`;
+  } else {
+    return { skipped: true };
+  }
+
+  return notifyOrderStatusChanged({ buyerEmail, title, body });
+}
+
+/**
+ * Order support: cancel/refund requests, resolutions, and thread messages.
+ */
+export async function notifyOrderSupportEvent({
+  buyerEmail,
+  sellerId,
+  notifyBuyer = false,
+  notifySeller = false,
+  title,
+  body,
+}) {
+  return notifyOrderStatusChanged({
+    buyerEmail: notifyBuyer ? buyerEmail : undefined,
+    sellerId: notifySeller ? sellerId : undefined,
+    title,
+    body,
+  });
 }

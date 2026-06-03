@@ -72,7 +72,19 @@ enum OrdersAPI {
             throw URLError(.badURL)
         }
 
-        return try await URLSession.tenBelow.decode(OrdersResponse.self, from: url).orders
+        var request = URLRequest(url: url)
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            throw NSError(domain: "OrdersAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(OrdersResponse.self, from: data).orders
     }
 
     static func performShipmentAction(
@@ -145,5 +157,117 @@ enum OrdersAPI {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(ShipmentActionResponse.self, from: data).order
+    }
+
+    private static func authorizedJSONRequest(path: String, method: String, body: Encodable? = nil) throws -> URLRequest {
+        let url = baseURL.appendingPathComponent(path)
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+        if let body {
+            request.httpBody = try JSONEncoder().encode(body)
+        }
+        return request
+    }
+
+    private static func decodeOrderResponse(data: Data, resp: URLResponse) throws -> Order {
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            throw NSError(domain: "OrdersAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(ShipmentActionResponse.self, from: data).order
+    }
+
+    static func createSupportRequest(
+        orderId: String,
+        type: OrderSupportRequestType,
+        sellerId: String,
+        shipmentId: String,
+        reason: String
+    ) async throws -> Order {
+        struct Body: Encodable {
+            let type: String
+            let sellerId: String
+            let shipmentId: String
+            let reason: String
+        }
+        let request = try authorizedJSONRequest(
+            path: "orders/\(orderId)/support-requests",
+            method: "POST",
+            body: Body(type: type.rawValue, sellerId: sellerId, shipmentId: shipmentId, reason: reason)
+        )
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        return try decodeOrderResponse(data: data, resp: resp)
+    }
+
+    static func updateSupportRequest(
+        orderId: String,
+        requestId: String,
+        status: OrderSupportRequestStatus,
+        resolutionNote: String?
+    ) async throws -> Order {
+        struct Body: Encodable {
+            let status: String
+            let resolutionNote: String?
+        }
+        let request = try authorizedJSONRequest(
+            path: "orders/\(orderId)/support-requests/\(requestId)",
+            method: "PATCH",
+            body: Body(status: status.rawValue, resolutionNote: resolutionNote)
+        )
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        return try decodeOrderResponse(data: data, resp: resp)
+    }
+
+    static func fetchSupportThread(orderId: String, sellerId: String) async throws -> [OrderSupportMessage] {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("orders/\(orderId)/support-thread"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "sellerId", value: sellerId)]
+        guard let url = components?.url else { throw URLError(.badURL) }
+
+        var request = URLRequest(url: url)
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            throw NSError(domain: "OrdersAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(OrderSupportThreadResponse.self, from: data).messages
+    }
+
+    static func sendSupportMessage(
+        orderId: String,
+        sellerId: String,
+        text: String,
+        senderName: String?
+    ) async throws -> OrderSupportMessagePostResponse {
+        struct Body: Encodable {
+            let sellerId: String
+            let text: String
+            let senderName: String?
+        }
+        let request = try authorizedJSONRequest(
+            path: "orders/\(orderId)/support-thread",
+            method: "POST",
+            body: Body(sellerId: sellerId, text: text, senderName: senderName)
+        )
+        let (data, resp) = try await URLSession.tenBelow.data(for: request)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            throw NSError(domain: "OrdersAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(OrderSupportMessagePostResponse.self, from: data)
     }
 }

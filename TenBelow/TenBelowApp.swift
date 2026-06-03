@@ -24,7 +24,7 @@ struct TenBelowApp: App {
     @StateObject private var exchangeStore: ExchangeStore
     @StateObject private var notifications: NotificationStore
     @StateObject private var sellerSubscription = SellerSubscriptionStore()
-    @StateObject private var buyerSellerThreads = BuyerSellerThreadStore()
+    @StateObject private var sellerInquiries = SellerInquiryStore()
 
     init() {
         #if DEBUG
@@ -83,7 +83,7 @@ struct TenBelowApp: App {
                 .environmentObject(exchangeStore)
                 .environmentObject(notifications)
                 .environmentObject(sellerSubscription)
-                .environmentObject(buyerSellerThreads)
+                .environmentObject(sellerInquiries)
                 .accentColor(TBTheme.icyBlue)
         }
     }

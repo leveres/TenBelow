@@ -33,9 +33,12 @@ struct MainTabView: View {
     @State private var selectedTab: MainTab = .home
     @State private var lastCatalogRefresh = Date.distantPast
     @State private var lastSellerOrdersRefresh = Date.distantPast
+    @State private var lastDropStatusRefresh = Date.distantPast
     @State private var hasPerformedInitialRefresh = false
     @State private var hasCompletedInitialLoad = false
     @State private var catalogRefreshJitter = Double.random(in: 0...6)
+    @State private var currentDropStatus: CurrentDropResponse?
+    @State private var isDropStatusRefreshInFlight = false
     @State private var activeNotificationBanner: AppNotification?
     @State private var lastPresentedNotificationID: String?
     @State private var notificationBannerDismissTask: Task<Void, Never>?
@@ -82,6 +85,7 @@ struct MainTabView: View {
             guard !hasPerformedInitialRefresh else { return }
             hasPerformedInitialRefresh = true
             await refreshCatalog(force: true)
+            await refreshDropStatusIfNeeded(force: true)
             hasCompletedInitialLoad = true
         }
         .onAppear {
@@ -106,6 +110,10 @@ struct MainTabView: View {
                 selectedTab = launchTab
             }
         }
+        .onChange(of: selectedTab) { _, newValue in
+            guard newValue == .drop else { return }
+            Task { await refreshDropStatusIfNeeded() }
+        }
         .onChange(of: catalogRefreshToken) { _, _ in
             Task { await refreshCatalog(force: true) }
         }
@@ -119,6 +127,7 @@ struct MainTabView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await refreshCatalog() }
+            Task { await refreshDropStatusIfNeeded() }
             Task { await refreshSellerOrdersForTabBadgeIfNeeded() }
             if userRole == "seller" {
                 Task { await MarketplaceAuthSession.syncAfterIdentityChange() }
@@ -161,7 +170,7 @@ struct MainTabView: View {
 
             DropView()
                 .tag(MainTab.drop)
-                .tabItem { Label("Drop", systemImage: "flame") }
+                .tabItem { Label("Drop", systemImage: dropTabSymbolName) }
 
             NavigationStack {
                 OrdersView()
@@ -175,7 +184,21 @@ struct MainTabView: View {
                 .tabItem { Label("Settings", systemImage: "gear") }
                 .badge(settingsTabBadge)
         }
-        .tint(TBTheme.icyBlue)
+        .tint(tabBarTint)
+    }
+
+    private var isWeeklyDropLive: Bool {
+        currentDropStatus?.active == true
+    }
+
+    private var dropTabSymbolName: String {
+        isWeeklyDropLive ? "flame.fill" : "flame"
+    }
+
+    private var tabBarTint: Color {
+        selectedTab == .drop && isWeeklyDropLive
+            ? Color(red: 0.98, green: 0.36, blue: 0.10)
+            : TBTheme.icyBlue
     }
 
     private var notificationAudienceLabel: String {
@@ -221,7 +244,9 @@ struct MainTabView: View {
     private func openNotificationBanner(_ notification: AppNotification) {
         notifications.markAsRead(notification.id)
 
-        if notification.relatedOrderId != nil || notification.relatedExchangeRequestId != nil {
+        if notification.relatedOrderId != nil
+            || notification.relatedExchangeRequestId != nil
+            || notification.type == .orderSupportUpdate {
             selectedTab = .orders
         } else if notification.relatedProductId != nil {
             selectedTab = .store
@@ -287,6 +312,21 @@ struct MainTabView: View {
             catalogRefreshJitter = Double.random(in: 0...6)
         }
         await catalog.load()
+    }
+
+    private func refreshDropStatusIfNeeded(force: Bool = false) async {
+        let now = Date()
+        guard !isDropStatusRefreshInFlight else { return }
+        guard force || now.timeIntervalSince(lastDropStatusRefresh) >= 45 else { return }
+        isDropStatusRefreshInFlight = true
+        defer { isDropStatusRefreshInFlight = false }
+        lastDropStatusRefresh = now
+
+        do {
+            currentDropStatus = try await DropAPI.currentDrop()
+        } catch {
+            // Keep the previous tab state during transient network failures.
+        }
     }
 
     private func dismissEntrySplashIfReady() {
@@ -427,6 +467,10 @@ private struct BannerStyle {
             iconName = "truck.box.fill"
             typeLabel = "Order update"
             tint = TBTheme.deepSky
+        case .orderSupportUpdate:
+            iconName = "bubble.left.and.exclamationmark.bubble.right.fill"
+            typeLabel = "Order support"
+            tint = Color(red: 0.42, green: 0.52, blue: 0.92)
         case .exchangeUpdate:
             iconName = "arrow.triangle.2.circlepath"
             typeLabel = "Exchange"

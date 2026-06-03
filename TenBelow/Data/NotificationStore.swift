@@ -123,6 +123,12 @@ final class NotificationStore: ObservableObject {
             handleBuyerOrderStatusUpdate(event)
         case .shipmentStatusUpdated:
             handleShipmentStatusUpdate(event)
+        case .orderSupportRequestCreated:
+            handleOrderSupportRequestCreated(event)
+        case .orderSupportRequestUpdated:
+            handleOrderSupportRequestUpdated(event)
+        case .orderSupportMessageSent:
+            handleOrderSupportMessageSent(event)
         case .productFavorited:
             handleProductFavorited(event)
         case .exchangeSubmitted:
@@ -225,8 +231,8 @@ final class NotificationStore: ObservableObject {
                 AppNotification(
                     userId: Self.sellerUserId(for: shipment.sellerId),
                     type: .orderReceived,
-                    title: "New Order 💰",
-                    message: "You just received an order for \(firstItemName).",
+                    title: "New order received",
+                    message: "You received a new order for \(firstItemName). Open Orders to fulfill it.",
                     relatedProductId: shipment.items.first?.productId,
                     relatedOrderId: order.id,
                     relatedSellerId: shipment.sellerId,
@@ -301,12 +307,12 @@ final class NotificationStore: ObservableObject {
             )
         case OrderStatus.shipped.rawValue, OrderStatus.partiallyShipped.rawValue:
             content = (
-                "Your order is on the way",
-                "Your \(firstItemName) has shipped and is headed your way."
+                "Order shipped",
+                "Your \(firstItemName) is on the way."
             )
         case OrderStatus.delivered.rawValue:
             content = (
-                "Delivered",
+                "Order delivered",
                 "Your \(firstItemName) has been delivered."
             )
         default:
@@ -345,13 +351,24 @@ final class NotificationStore: ObservableObject {
         let title: String
         let message: String
 
+        let carrier = event.metadata["carrier"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let tracking = event.metadata["trackingNumber"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let trackingSuffix: String = {
+            let parts = [carrier, tracking].filter { !$0.isEmpty }
+            guard !parts.isEmpty else { return "" }
+            return " Tracking: \(parts.joined(separator: " "))."
+        }()
+
         switch shipmentStatus {
         case ShipmentStatus.shipped.rawValue:
-            title = "Shipment update"
-            message = "\(itemName) is on the way."
+            title = "Order shipped"
+            message = "\(itemName) is on the way.\(trackingSuffix)"
         case ShipmentStatus.delivered.rawValue:
-            title = "Delivered"
-            message = "\(itemName) was delivered."
+            title = "Order delivered"
+            message = "\(itemName) has been delivered."
+        case ShipmentStatus.cancelled.rawValue:
+            title = "Shipment cancelled"
+            message = "\(itemName) was cancelled for this order."
         default:
             title = "Production update"
             message = "\(itemName) is now being prepared."
@@ -429,6 +446,126 @@ final class NotificationStore: ObservableObject {
                 dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "itemFavorited.\(productId)")
             )
         )
+    }
+
+    private func handleOrderSupportRequestCreated(_ event: CommerceEvent) {
+        guard let orderId = event.orderId,
+              let sellerId = event.sellerId,
+              let requestId = event.metadata["requestId"]
+        else { return }
+
+        let requestType = event.metadata["requestType"] ?? "cancel"
+        let requestedBy = event.metadata["requestedBy"] ?? "buyer"
+        let itemName = orderStore.order(withId: orderId)?
+            .shipments
+            .first(where: { $0.sellerId == sellerId })?
+            .items
+            .first?
+            .productName ?? "an item"
+
+        guard requestedBy == "buyer" else { return }
+
+        let typeLabel = requestType == "refund" ? "Refund" : "Cancel"
+        appendNotification(
+            AppNotification(
+                userId: Self.sellerUserId(for: sellerId),
+                type: .orderSupportUpdate,
+                title: "New buyer request",
+                message: "A buyer submitted a \(typeLabel.lowercased()) request for \(itemName).",
+                relatedOrderId: orderId,
+                relatedSellerId: sellerId,
+                dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportCreated.seller.\(requestId)")
+            )
+        )
+    }
+
+    private func handleOrderSupportRequestUpdated(_ event: CommerceEvent) {
+        guard let orderId = event.orderId,
+              let sellerId = event.sellerId,
+              let requestId = event.metadata["requestId"]
+        else { return }
+
+        let requestType = event.metadata["requestType"] ?? "cancel"
+        let status = event.metadata["requestStatus"] ?? ""
+        let requestedBy = event.metadata["requestedBy"] ?? "buyer"
+        let itemName = orderStore.order(withId: orderId)?
+            .shipments
+            .first(where: { $0.sellerId == sellerId })?
+            .items
+            .first?
+            .productName ?? "your item"
+
+        let typeLabel = requestType == "refund" ? "Refund" : "Cancel"
+
+        if ["approved", "denied"].contains(status), requestedBy == "buyer",
+           let buyerIdentity = event.buyerIdentity {
+            let title = status == "approved" ? "\(typeLabel) request approved" : "\(typeLabel) request denied"
+            let message = status == "approved"
+                ? "Your \(requestType) request for \(itemName) was approved."
+                : "Your \(requestType) request for \(itemName) was denied."
+            appendNotification(
+                AppNotification(
+                    userId: buyerIdentity,
+                    type: .orderSupportUpdate,
+                    title: title,
+                    message: message,
+                    relatedOrderId: orderId,
+                    relatedSellerId: sellerId,
+                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportUpdated.buyer.\(requestId).\(status)")
+                )
+            )
+        } else if status == "withdrawn" {
+            appendNotification(
+                AppNotification(
+                    userId: Self.sellerUserId(for: sellerId),
+                    type: .orderSupportUpdate,
+                    title: "Request withdrawn",
+                    message: "The buyer withdrew their \(requestType) request for order \(orderId).",
+                    relatedOrderId: orderId,
+                    relatedSellerId: sellerId,
+                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportWithdrawn.seller.\(requestId)")
+                )
+            )
+        }
+    }
+
+    private func handleOrderSupportMessageSent(_ event: CommerceEvent) {
+        guard let orderId = event.orderId,
+              let sellerId = event.sellerId,
+              let messageId = event.metadata["messageId"]
+        else { return }
+
+        let senderRole = event.metadata["senderRole"] ?? "buyer"
+        let preview = event.metadata["text"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let clipped = preview.count > 120 ? String(preview.prefix(117)) + "…" : preview
+        let body = clipped.isEmpty ? "Open the order thread to read the message." : clipped
+
+        if senderRole == "buyer" {
+            appendNotification(
+                AppNotification(
+                    userId: Self.sellerUserId(for: sellerId),
+                    type: .orderSupportUpdate,
+                    title: "Buyer message",
+                    message: body,
+                    relatedOrderId: orderId,
+                    relatedSellerId: sellerId,
+                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportMessage.seller.\(messageId)")
+                )
+            )
+        } else if let buyerIdentity = event.buyerIdentity {
+            appendNotification(
+                AppNotification(
+                    userId: buyerIdentity,
+                    type: .orderSupportUpdate,
+                    title: "Seller update",
+                    message: body,
+                    relatedOrderId: orderId,
+                    relatedSellerId: sellerId,
+                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportMessage.buyer.\(messageId)")
+                )
+            )
+        }
     }
 
     private func handleExchangeSubmitted(_ event: CommerceEvent) {

@@ -13,143 +13,39 @@ struct SettingsView: View {
     @AppStorage("sellerSellerId") private var sellerSellerId = ""
     @AppStorage("sellerEmail") private var sellerEmail = ""
     @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
-    #if DEBUG
-    @AppStorage(AppConstants.testingModeUserDefaultsKey) private var testingModeEnabled = false
-    @AppStorage("buyerDropPreviewMode") private var buyerDropPreviewMode = false
-    #endif
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    SnowfallTitleContainer(
-                        cornerRadius: 26,
-                        horizontalPadding: 8,
-                        verticalPadding: 14,
-                        flakeCount: 78,
-                        effectHorizontalInset: 18,
-                        effectVerticalInset: 16
-                    ) {
-                        Image("SettingsTitle")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 108)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 4, trailing: 12))
-                }
+            GeometryReader { proxy in
+                let metrics = SettingsScreenMetrics.resolved(for: proxy.size.height)
 
-                if userRole == "seller" {
-                    Section("Seller membership") {
-                        NavigationLink {
-                            SellerSubscriptionView()
-                                .environmentObject(sellerSubscription)
-                        } label: {
-                            Label("Manage seller membership", systemImage: "creditcard")
-                        }
-                    }
-                }
+                VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
+                    settingsTitle(height: metrics.titleHeight)
 
-                Section {
                     if userRole == "seller" {
-                        if !sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Label(sellerSellerId, systemImage: "person.text.rectangle")
-                        }
-
-                        if !sellerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Label(sellerEmail, systemImage: "envelope")
-                        }
-
-                        Button(role: .destructive) {
-                            signOutSeller()
-                        } label: {
-                            Label("Sign out of seller account", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
-                    } else {
-                        NavigationLink {
-                            RolePickerView(startInSellerAccount: true, sellerEntryMode: .signIn)
-                        } label: {
-                            Label("Sign in as seller", systemImage: "storefront")
-                        }
-                    }
-                } header: {
-                    Text("Seller account")
-                } footer: {
-                    Text("Seller sign-out only removes this device’s seller session. Your shop, products, and review status stay on TenBelow.")
-                }
-
-                Section("Account") {
-                    NavigationLink {
-                        NotificationSettingsView()
-                    } label: {
-                        Label("Notification settings", systemImage: "bell.badge")
-                    }
-
-                    if userRole != "seller" {
-                        if sellerAccountCreated {
-                            Button {
-                                switchAppMode(to: "seller", launchTab: 1)
-                            } label: {
-                                Label("Switch to seller mode", systemImage: "arrow.triangle.2.circlepath.circle.fill")
-                            }
-                        } else {
-                            NavigationLink {
-                                RolePickerView(startInSellerAccount: true, sellerEntryMode: .create)
-                            } label: {
-                                Label("Become a seller", systemImage: "storefront")
+                        settingsSection("Seller membership") {
+                            settingsNavigationRow(
+                                title: "Manage seller membership",
+                                systemImage: "creditcard",
+                                rowHeight: metrics.rowHeight
+                            ) {
+                                SellerSubscriptionView()
+                                    .environmentObject(sellerSubscription)
                             }
                         }
                     }
 
-                    if userRole == "seller" {
-                        Button {
-                            switchAppMode(to: "buyer", launchTab: 0)
-                        } label: {
-                            Label("Switch to buyer mode", systemImage: "arrow.triangle.2.circlepath.circle")
-                        }
-                    }
+                    sellerAccountSection(rowHeight: metrics.rowHeight, footerFontSize: metrics.footerFontSize)
+                    accountSection(rowHeight: metrics.rowHeight)
+                    legalSection(rowHeight: metrics.compactRowHeight)
+
+                    Spacer(minLength: 0)
                 }
-
-                Section("Legal") {
-                    NavigationLink("View terms of service") {
-                        LegalDocumentView(document: .termsOfService)
-                    }
-
-                    NavigationLink("View privacy policy") {
-                        LegalDocumentView(document: .privacyPolicy)
-                    }
-
-                    NavigationLink("View DMCA policy") {
-                        LegalDocumentView(document: .dmcaPolicy)
-                    }
-
-                    NavigationLink("View seller agreement") {
-                        LegalDocumentView(document: .sellerAgreement)
-                    }
-
-                    NavigationLink("View exchange policy") {
-                        LegalDocumentView(document: .exchangePolicy)
-                    }
-                }
-
-                #if DEBUG
-                Section {
-                    Toggle("Testing mode (relaxed checkout)", isOn: $testingModeEnabled)
-                    Toggle("Sample Drop lineup (Drop tab)", isOn: $buyerDropPreviewMode)
-                    DebugBackendURLField()
-                } header: {
-                    Text("Developer")
-                } footer: {
-                    Text(
-                        "Testing mode allows checkout and related flows without a live backend URL and Stripe publishable key, using simulated behavior where applicable. "
-                            + "For a real iPhone, run the full backend on your Mac and set “Backend URL (this device)” to http://YOUR_MAC_LAN_IP:3000 (same Wi‑Fi). "
-                            + "Match BACKEND_URL in TenBelow/tenbelow-backend/.env to that URL so /media links resolve."
-                    )
-                }
-                #endif
+                .padding(.horizontal, metrics.horizontalPadding)
+                .padding(.top, metrics.topPadding)
+                .padding(.bottom, metrics.bottomPadding)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                .background(TBTheme.cloudWhite)
             }
-            .contentMargins(.top, 4, for: .scrollContent)
             .background(TBTheme.cloudWhite)
             .navigationTitle("")
             #if os(iOS) || os(visionOS)
@@ -159,6 +55,209 @@ struct SettingsView: View {
                 guard userRole == "seller" else { return }
                 await sellerSubscription.refresh()
             }
+        }
+    }
+
+    private func settingsTitle(height: CGFloat) -> some View {
+        SnowfallTitleContainer(
+            cornerRadius: 26,
+            horizontalPadding: 8,
+            verticalPadding: 2,
+            flakeCount: 78,
+            effectHorizontalInset: 18,
+            effectVerticalInset: 16
+        ) {
+            Image("SettingsTitle")
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity)
+                .frame(height: height)
+                .scaleEffect(1.10)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func sellerAccountSection(rowHeight: CGFloat, footerFontSize: CGFloat) -> some View {
+        settingsSection("Seller account") {
+            if userRole == "seller" {
+                if !sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    settingsStaticRow(title: sellerSellerId, systemImage: "person.text.rectangle", rowHeight: rowHeight)
+                }
+
+                if !sellerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    settingsStaticRow(title: sellerEmail, systemImage: "envelope", rowHeight: rowHeight)
+                }
+
+                settingsButtonRow(
+                    title: "Sign out of seller account",
+                    systemImage: "rectangle.portrait.and.arrow.right",
+                    isDestructive: true,
+                    rowHeight: rowHeight,
+                    action: signOutSeller
+                )
+
+                Text("Seller sign-out only removes this device's seller session. Your shop stays on TenBelow.")
+                    .font(.system(size: footerFontSize, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.top, -2)
+                    .padding(.bottom, 2)
+            } else {
+                settingsNavigationRow(title: "Sign in as seller", systemImage: "storefront", rowHeight: rowHeight) {
+                    RolePickerView(startInSellerAccount: true, sellerEntryMode: .signIn)
+                }
+            }
+        }
+    }
+
+    private func accountSection(rowHeight: CGFloat) -> some View {
+        settingsSection("Account") {
+            settingsNavigationRow(title: "Notification settings", systemImage: "bell.badge", rowHeight: rowHeight) {
+                NotificationSettingsView()
+            }
+
+            if userRole != "seller" {
+                if sellerAccountCreated {
+                    settingsButtonRow(
+                        title: "Switch to seller mode",
+                        systemImage: "arrow.triangle.2.circlepath.circle.fill",
+                        rowHeight: rowHeight
+                    ) {
+                        switchAppMode(to: "seller", launchTab: 1)
+                    }
+                } else {
+                    settingsNavigationRow(title: "Become a seller", systemImage: "storefront", rowHeight: rowHeight) {
+                        RolePickerView(startInSellerAccount: true, sellerEntryMode: .create)
+                    }
+                }
+            }
+
+            if userRole == "seller" {
+                settingsButtonRow(
+                    title: "Switch to buyer mode",
+                    systemImage: "arrow.triangle.2.circlepath.circle",
+                    rowHeight: rowHeight
+                ) {
+                    switchAppMode(to: "buyer", launchTab: 0)
+                }
+            }
+        }
+    }
+
+    private func legalSection(rowHeight: CGFloat) -> some View {
+        settingsSection("Legal") {
+            settingsNavigationRow(title: "View terms of service", rowHeight: rowHeight) {
+                LegalDocumentView(document: .termsOfService)
+            }
+            settingsNavigationRow(title: "View privacy policy", rowHeight: rowHeight) {
+                LegalDocumentView(document: .privacyPolicy)
+            }
+            settingsNavigationRow(title: "View DMCA policy", rowHeight: rowHeight) {
+                LegalDocumentView(document: .dmcaPolicy)
+            }
+            settingsNavigationRow(title: "View seller agreement", rowHeight: rowHeight) {
+                LegalDocumentView(document: .sellerAgreement)
+            }
+            settingsNavigationRow(title: "View exchange policy", rowHeight: rowHeight) {
+                LegalDocumentView(document: .exchangePolicy)
+            }
+        }
+    }
+
+    private func settingsSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+
+            VStack(spacing: 0) {
+                content()
+            }
+            .background(.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+    }
+
+    private func settingsNavigationRow<Destination: View>(
+        title: String,
+        systemImage: String? = nil,
+        rowHeight: CGFloat,
+        @ViewBuilder destination: () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            settingsRowContent(title: title, systemImage: systemImage, rowHeight: rowHeight, showsChevron: true)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func settingsStaticRow(title: String, systemImage: String, rowHeight: CGFloat) -> some View {
+        settingsRowContent(title: title, systemImage: systemImage, rowHeight: rowHeight, showsChevron: false)
+    }
+
+    private func settingsButtonRow(
+        title: String,
+        systemImage: String,
+        isDestructive: Bool = false,
+        rowHeight: CGFloat,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            settingsRowContent(
+                title: title,
+                systemImage: systemImage,
+                rowHeight: rowHeight,
+                showsChevron: false,
+                foregroundColor: isDestructive ? .red : TBTheme.deepSky
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func settingsRowContent(
+        title: String,
+        systemImage: String?,
+        rowHeight: CGFloat,
+        showsChevron: Bool,
+        foregroundColor: Color = .primary
+    ) -> some View {
+        HStack(spacing: 12) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(TBTheme.deepSky.opacity(0.82))
+                    .frame(width: 26)
+            }
+
+            Text(title)
+                .font(.system(size: 18, weight: .regular, design: .rounded))
+                .foregroundStyle(foregroundColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+
+            Spacer(minLength: 8)
+
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary.opacity(0.55))
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: rowHeight)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.black.opacity(0.07))
+                .frame(height: 0.6)
+                .padding(.leading, systemImage == nil ? 16 : 54)
+                .padding(.trailing, 16)
         }
     }
 
@@ -182,41 +281,39 @@ struct SettingsView: View {
     }
 }
 
-#if DEBUG
-private struct DebugBackendURLField: View {
-    @AppStorage(AppConstants.debugBackendBaseURLOverrideKey) private var overrideURL = ""
+private struct SettingsScreenMetrics {
+    let topPadding: CGFloat
+    let bottomPadding: CGFloat
+    let horizontalPadding: CGFloat
+    let sectionSpacing: CGFloat
+    let titleHeight: CGFloat
+    let rowHeight: CGFloat
+    let compactRowHeight: CGFloat
+    let footerFontSize: CGFloat
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Backend URL (this device)")
-                .font(.subheadline.weight(.semibold))
-
-            TextField("http://192.168.1.12:3000", text: $overrideURL)
-                #if os(iOS)
-                .keyboardType(.URL)
-                .textContentType(.URL)
-                #endif
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-
-            Button("Clear override (use Xcode plist URL)") {
-                overrideURL = ""
-            }
-            .font(.caption.weight(.semibold))
-            .buttonStyle(.borderless)
-
-            if let active = AppConstants.backendBaseURL {
-                Text("Active: \(active.absoluteString)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("No backend URL — enable Testing mode or set an override.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+    static func resolved(for height: CGFloat) -> SettingsScreenMetrics {
+        if height < 720 {
+            return SettingsScreenMetrics(
+                topPadding: 2,
+                bottomPadding: 8,
+                horizontalPadding: 12,
+                sectionSpacing: 8,
+                titleHeight: 76,
+                rowHeight: 44,
+                compactRowHeight: 40,
+                footerFontSize: 11
+            )
         }
-        .padding(.vertical, 4)
+
+        return SettingsScreenMetrics(
+            topPadding: 6,
+            bottomPadding: 10,
+            horizontalPadding: 14,
+            sectionSpacing: 8,
+            titleHeight: 82,
+            rowHeight: 46,
+            compactRowHeight: 42,
+            footerFontSize: 12
+        )
     }
 }
-#endif
-

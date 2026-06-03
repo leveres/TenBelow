@@ -11,6 +11,7 @@ struct OrderStatusPill: View {
         case .partiallyShipped: return "Partially Shipped"
         case .shipped: return "Shipped"
         case .delivered: return "Delivered"
+        case .cancelled: return "Cancelled"
         }
     }
 
@@ -21,6 +22,7 @@ struct OrderStatusPill: View {
         case .partiallyShipped: return "shippingbox.and.arrow.backward"
         case .shipped: return "truck.box"
         case .delivered: return "checkmark.seal"
+        case .cancelled: return "xmark.circle"
         }
     }
 
@@ -31,6 +33,7 @@ struct OrderStatusPill: View {
         case .partiallyShipped: return .indigo.opacity(0.12)
         case .shipped: return .green.opacity(0.14)
         case .delivered: return .black.opacity(0.06)
+        case .cancelled: return .red.opacity(0.10)
         }
     }
 
@@ -41,6 +44,7 @@ struct OrderStatusPill: View {
         case .partiallyShipped: return .indigo
         case .shipped: return .green
         case .delivered: return .primary.opacity(0.75)
+        case .cancelled: return .red
         }
     }
 
@@ -75,6 +79,7 @@ struct ShipmentStatusPill: View {
         case .preparing: return "Preparing"
         case .shipped: return "Shipped"
         case .delivered: return "Delivered"
+        case .cancelled: return "Cancelled"
         }
     }
 
@@ -83,6 +88,7 @@ struct ShipmentStatusPill: View {
         case .preparing: return "clock"
         case .shipped: return "truck.box"
         case .delivered: return "checkmark.seal"
+        case .cancelled: return "xmark.circle"
         }
     }
 
@@ -91,6 +97,7 @@ struct ShipmentStatusPill: View {
         case .preparing: return .blue.opacity(0.10)
         case .shipped: return .green.opacity(0.12)
         case .delivered: return .black.opacity(0.06)
+        case .cancelled: return .red.opacity(0.10)
         }
     }
 
@@ -99,6 +106,7 @@ struct ShipmentStatusPill: View {
         case .preparing: return .blue
         case .shipped: return .green
         case .delivered: return .primary.opacity(0.75)
+        case .cancelled: return .red
         }
     }
 

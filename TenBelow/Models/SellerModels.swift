@@ -16,6 +16,9 @@ struct CreateSellerResponse: Codable {
     let sellerId: String
     let stripeAccountId: String
     let onboardingUrl: String
+    let token: String?
+    let payoutSetupPending: Bool?
+    let payoutSetupMessage: String?
 }
 
 struct SellerMembershipSyncRequest: Codable {
@@ -57,6 +60,9 @@ struct SellerStatusResponse: Codable {
     let hasActiveSubscription: Bool
     let subscriptionExpiresAt: String?
     let subscriptionProductId: String?
+    let payoutSetupPending: Bool
+    let payoutSetupActionRequired: Bool
+    let payoutSetupMessage: String?
 
     enum CodingKeys: String, CodingKey {
         case sellerId, stripeAccountId
@@ -64,6 +70,7 @@ struct SellerStatusResponse: Codable {
         case completedSalesCount, totalReviewCount, positiveReviewCount, averageRating, activeDays
         case trustedTesterVerified
         case hasActiveSubscription, subscriptionExpiresAt, subscriptionProductId
+        case payoutSetupPending, payoutSetupActionRequired, payoutSetupMessage
     }
 
     init(
@@ -81,7 +88,10 @@ struct SellerStatusResponse: Codable {
         trustedTesterVerified: Bool = false,
         hasActiveSubscription: Bool = false,
         subscriptionExpiresAt: String? = nil,
-        subscriptionProductId: String? = nil
+        subscriptionProductId: String? = nil,
+        payoutSetupPending: Bool = false,
+        payoutSetupActionRequired: Bool = false,
+        payoutSetupMessage: String? = nil
     ) {
         self.sellerId = sellerId
         self.stripeAccountId = stripeAccountId
@@ -98,6 +108,9 @@ struct SellerStatusResponse: Codable {
         self.hasActiveSubscription = hasActiveSubscription
         self.subscriptionExpiresAt = subscriptionExpiresAt
         self.subscriptionProductId = subscriptionProductId
+        self.payoutSetupPending = payoutSetupPending
+        self.payoutSetupActionRequired = payoutSetupActionRequired
+        self.payoutSetupMessage = payoutSetupMessage
     }
 
     init(from decoder: Decoder) throws {
@@ -117,6 +130,9 @@ struct SellerStatusResponse: Codable {
         hasActiveSubscription = try c.decodeIfPresent(Bool.self, forKey: .hasActiveSubscription) ?? false
         subscriptionExpiresAt = try c.decodeIfPresent(String.self, forKey: .subscriptionExpiresAt)
         subscriptionProductId = try c.decodeIfPresent(String.self, forKey: .subscriptionProductId)
+        payoutSetupPending = try c.decodeIfPresent(Bool.self, forKey: .payoutSetupPending) ?? false
+        payoutSetupActionRequired = try c.decodeIfPresent(Bool.self, forKey: .payoutSetupActionRequired) ?? !onboardingComplete
+        payoutSetupMessage = try c.decodeIfPresent(String.self, forKey: .payoutSetupMessage)
     }
 }
 

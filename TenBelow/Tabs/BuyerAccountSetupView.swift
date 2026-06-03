@@ -15,8 +15,12 @@ struct BuyerAccountSetupView: View {
     @State private var nameInput = ""
     @State private var emailInput = ""
     @State private var passwordInput = ""
+    @State private var verificationCode = ""
+    @State private var verificationChallengeId = ""
+    @State private var verificationDeliveryTarget = ""
     @State private var errorMessage: String?
     @State private var isCreatingAccount = false
+    @State private var isVerifyingEmail = false
 
     var body: some View {
         ScrollView {
@@ -64,19 +68,48 @@ struct BuyerAccountSetupView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Button {
-                        Task { await saveAccount() }
-                    } label: {
-                        if isCreatingAccount {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                        } else {
-                            Label("Create buyer account", systemImage: "person.crop.circle.badge.checkmark")
-                                .frame(maxWidth: .infinity)
+                    if verificationChallengeId.isEmpty {
+                        Button {
+                            Task { await saveAccount() }
+                        } label: {
+                            if isCreatingAccount {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Label("Create buyer account", systemImage: "person.crop.circle.badge.checkmark")
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
+                        .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+                        .disabled(isCreatingAccount)
+                    } else {
+                        labeledField(title: "Verification code") {
+                            TextField("123456", text: $verificationCode)
+                                .keyboardType(.numberPad)
+                                .padding(12)
+                                .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+
+                        Button {
+                            Task { await verifyEmail() }
+                        } label: {
+                            if isVerifyingEmail {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Label("Verify email", systemImage: "checkmark.shield")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+                        .disabled(isVerifyingEmail || verificationCode.count < 6)
+
+                        Button("Send a new code") {
+                            Task { await resendCode() }
+                        }
+                        .font(.tbBodyStrong)
+                        .foregroundStyle(TBTheme.deepSky)
                     }
-                    .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
-                    .disabled(isCreatingAccount)
                 }
             }
             .padding(.horizontal, 16)
@@ -142,7 +175,7 @@ struct BuyerAccountSetupView: View {
         isCreatingAccount = true
 
         do {
-            try await BuyerAccountAPI.createAccount(
+            let response = try await BuyerAccountAPI.createAccount(
                 fullName: trimmedName,
                 email: trimmedEmail,
                 password: trimmedPassword
@@ -154,16 +187,59 @@ struct BuyerAccountSetupView: View {
 
             buyerFullName = trimmedName
             buyerEmail = trimmedEmail
-            buyerAccountCreated = true
             buyerCheckoutPreference = "account"
-
-            await MarketplaceAuthSession.syncAfterIdentityChange()
-            await PushDeviceRegistration.syncAfterIdentityChange()
-
             isCreatingAccount = false
-            dismiss()
+
+            if response.emailVerified == true {
+                buyerAccountCreated = true
+                await MarketplaceAuthSession.syncAfterIdentityChange()
+                await PushDeviceRegistration.syncAfterIdentityChange()
+                dismiss()
+            } else if let verification = response.verification {
+                verificationChallengeId = verification.challengeId
+                verificationDeliveryTarget = verification.deliveryTarget
+                errorMessage = "Enter the code sent to \(verification.deliveryTarget)."
+            }
         } catch {
             isCreatingAccount = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func resendCode() async {
+        let trimmedEmail = emailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        do {
+            let response = try await BuyerAccountAPI.requestEmailVerification(email: trimmedEmail)
+            verificationChallengeId = response.challengeId ?? ""
+            verificationDeliveryTarget = response.deliveryTarget ?? verificationDeliveryTarget
+            verificationCode = ""
+            errorMessage = "New code sent to \(verificationDeliveryTarget)."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func verifyEmail() async {
+        let trimmedEmail = emailInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        isVerifyingEmail = true
+        defer { isVerifyingEmail = false }
+
+        do {
+            let response = try await BuyerAccountAPI.verifyEmail(
+                email: trimmedEmail,
+                challengeId: verificationChallengeId,
+                code: verificationCode
+            )
+            if let token = response.token, !token.isEmpty {
+                MarketplaceAuthSession.storeBuyerSessionToken(token)
+            }
+            buyerFullName = response.fullName ?? nameInput
+            buyerEmail = response.buyerEmail ?? trimmedEmail
+            buyerAccountCreated = true
+            buyerCheckoutPreference = "account"
+            await PushDeviceRegistration.syncAfterIdentityChange()
+            dismiss()
+        } catch {
             errorMessage = error.localizedDescription
         }
     }

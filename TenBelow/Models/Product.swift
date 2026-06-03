@@ -7,6 +7,61 @@
 
 import Foundation
 
+enum ProductRightsOwnershipOption: String, CaseIterable, Identifiable, Codable {
+    case createdMyself = "I created this product myself"
+    case ownCommercialRights = "I own the commercial rights to this product"
+    case purchasedCommercialLicense = "I purchased a commercial license to sell this product"
+    case writtenPermission = "I have written permission from the creator or rights holder"
+    case other = "Other"
+
+    var id: String { rawValue }
+
+    var requiresManualReview: Bool {
+        switch self {
+        case .createdMyself, .ownCommercialRights:
+            return false
+        case .purchasedCommercialLicense, .writtenPermission, .other:
+            return true
+        }
+    }
+}
+
+enum ProductRightsReferenceFlag: String, CaseIterable, Identifiable, Codable {
+    case brandLogos = "Brand logos"
+    case sportsTeams = "Sports teams"
+    case moviesOrTelevisionCharacters = "Movies or television characters"
+    case videoGameCharacters = "Video game characters"
+    case celebrityLikenesses = "Celebrity likenesses"
+    case trademarkedNames = "Trademarked names"
+    case noneOfTheAbove = "None of the above"
+
+    var id: String { rawValue }
+}
+
+enum ProductRightsReview {
+    static let manualReviewReason = "Potential brand, trademark, character, or likeness reference"
+
+    static func requiresManualReview(ownershipType: String?, referenceFlags: [String]) -> Bool {
+        if referenceFlags.contains(where: { $0 != ProductRightsReferenceFlag.noneOfTheAbove.rawValue }) {
+            return true
+        }
+
+        guard let ownershipType,
+              let ownershipOption = ProductRightsOwnershipOption(rawValue: ownershipType)
+        else {
+            return false
+        }
+
+        return ownershipOption.requiresManualReview
+    }
+
+    static func reviewReason(referenceFlags: [String]) -> String? {
+        referenceFlags.contains(where: { $0 != ProductRightsReferenceFlag.noneOfTheAbove.rawValue })
+            ? manualReviewReason
+            : nil
+    }
+}
+
 struct Product: Identifiable, Hashable {
     let id: String
     let sellerId: String
@@ -31,6 +86,12 @@ struct Product: Identifiable, Hashable {
     let shipsInDays: ClosedRange<Int>
     let createdAt: Date
     let previousPriceCents: Int?
+    let rightsOwnershipType: String?
+    let rightsReferenceFlags: [String]
+    let rightsCertificationAccepted: Bool
+    let rightsCertificationAcceptedAt: Date?
+    let requiresManualReview: Bool
+    let reviewReason: String?
 
     init(
         id: String,
@@ -51,7 +112,13 @@ struct Product: Identifiable, Hashable {
         careWarnings: [String],
         shipsInDays: ClosedRange<Int>,
         createdAt: Date = .now,
-        previousPriceCents: Int? = nil
+        previousPriceCents: Int? = nil,
+        rightsOwnershipType: String? = nil,
+        rightsReferenceFlags: [String] = [],
+        rightsCertificationAccepted: Bool = false,
+        rightsCertificationAcceptedAt: Date? = nil,
+        requiresManualReview: Bool = false,
+        reviewReason: String? = nil
     ) {
         self.id = id
         self.sellerId = sellerId
@@ -72,6 +139,12 @@ struct Product: Identifiable, Hashable {
         self.shipsInDays = shipsInDays
         self.createdAt = createdAt
         self.previousPriceCents = previousPriceCents
+        self.rightsOwnershipType = rightsOwnershipType
+        self.rightsReferenceFlags = rightsReferenceFlags
+        self.rightsCertificationAccepted = rightsCertificationAccepted
+        self.rightsCertificationAcceptedAt = rightsCertificationAcceptedAt
+        self.requiresManualReview = requiresManualReview
+        self.reviewReason = reviewReason
     }
 }
 

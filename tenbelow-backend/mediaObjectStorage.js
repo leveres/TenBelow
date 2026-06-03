@@ -2,6 +2,12 @@ import { mkdirSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { MEDIA_DIRECTORY_URL } from "./storagePaths.js";
+import {
+  isBlockedMediaMime,
+  isServableMediaExtension,
+  normalizeMediaExtension,
+  safeContentTypeForExtension,
+} from "./mediaUploadPolicy.js";
 
 function backendBase() {
   return String(process.env.BACKEND_URL || "http://localhost:3000").replace(/\/$/, "");
@@ -49,6 +55,20 @@ export async function storeMediaBytes({ relativeKey, buffer, contentType }) {
     throw new Error("storeMediaBytes: relativeKey required");
   }
 
+  const extension = normalizeMediaExtension(normalizedKey.split(".").pop() || "");
+  if (!isServableMediaExtension(extension)) {
+    throw new Error("Unsupported media file type");
+  }
+  const safeContentType = safeContentTypeForExtension(extension);
+  const requestedType = String(contentType || "").trim().toLowerCase();
+  const resolvedContentType =
+    requestedType && !isBlockedMediaMime(requestedType) && requestedType === safeContentType
+      ? requestedType
+      : safeContentType;
+  if (!resolvedContentType) {
+    throw new Error("Unsupported media content type");
+  }
+
   const mediaPath = `/media/${normalizedKey}`;
   const publicBase = String(process.env.PUBLIC_MEDIA_BASE_URL || "").trim().replace(/\/$/, "");
 
@@ -66,7 +86,7 @@ export async function storeMediaBytes({ relativeKey, buffer, contentType }) {
       Bucket: bucket,
       Key: normalizedKey,
       Body: buffer,
-      ContentType: contentType || "application/octet-stream",
+      ContentType: resolvedContentType,
     })
   );
 

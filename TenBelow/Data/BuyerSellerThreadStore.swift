@@ -1,12 +1,9 @@
 import Foundation
 import Combine
 
-/// One conversation thread per buyer+seller pair (`buyerIdentity|sellerId`).
-/// Persisted locally until a real backend exists.
-///
-/// **Product direction:** When the buyer taps Message on a storefront, push this thread (only messages
-/// between the current buyer and that seller). A future **Inbox** tab can list `sellerIds` sorted by
-/// `lastMessageDate` and navigate into the same `SellerMessagesView(seller:)`.
+/// Legacy local-only buyer↔seller threads (UserDefaults). **Deprecated:** messaging now uses
+/// server-backed `orderMessages` via `OrderSupportThreadView` and `OrderSupportThreads`.
+/// This type remains for migration reference only and is no longer injected into the app.
 @MainActor
 final class BuyerSellerThreadStore: ObservableObject {
     private static let storageKey = "BuyerSellerThreadStore.v1"

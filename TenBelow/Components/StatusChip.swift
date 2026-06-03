@@ -11,6 +11,7 @@ struct StatusChip: View {
         case .partiallyShipped: return TBTheme.deepSky
         case .shipped:          return TBTheme.accent
         case .delivered:        return .green
+        case .cancelled:        return .red
         }
     }
 
@@ -21,6 +22,7 @@ struct StatusChip: View {
         case .partiallyShipped: return "shippingbox"
         case .shipped:          return "box.truck.fill"
         case .delivered:        return "checkmark.circle.fill"
+        case .cancelled:        return "xmark.circle.fill"
         }
     }
 
@@ -31,6 +33,7 @@ struct StatusChip: View {
         case .partiallyShipped: return "Partially Shipped"
         case .shipped:          return "Shipped"
         case .delivered:        return "Delivered"
+        case .cancelled:        return "Cancelled"
         }
     }
 

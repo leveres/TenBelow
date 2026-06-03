@@ -12,12 +12,14 @@ enum OrderStatus: String, Codable {
     case partiallyShipped
     case shipped
     case delivered
+    case cancelled
 }
 
 enum ShipmentStatus: String, Codable {
     case preparing
     case shipped
     case delivered
+    case cancelled
 }
 
 struct Order: Identifiable, Codable, Hashable {
@@ -33,6 +35,8 @@ struct Order: Identifiable, Codable, Hashable {
     var totalCents: Int
 
     var shipments: [Shipment]
+    var supportRequests: [OrderSupportRequest] = []
+    var orderMessages: [OrderSupportMessage] = []
     var exchangeEligibleUntil: Date? = nil
     var hasExchangeRequest: Bool? = nil
     var exchangeRequestId: String? = nil

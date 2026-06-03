@@ -34,6 +34,17 @@ struct ProductDetailView: View {
     @State private var latestAverageRating: Double?
     @State private var latestReviewCount: Int?
     @State private var loadedReviews: [ProductReview] = []
+    #if os(iOS)
+    @State private var showShareSheet = false
+    #endif
+
+    private var relatedProducts: [Product] {
+        sellerProducts
+            .filter { $0.id != product.id }
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(6)
+            .map { $0 }
+    }
 
     private var sellerProfile: SellerProfile? {
         resolvedSellerProfile(
@@ -363,9 +374,31 @@ struct ProductDetailView: View {
                                 .tracking(-0.3)
                                 .tbProductNameTitleStyle()
 
-                            Text(Money.format(cents: product.priceCents))
-                                .font(.tbProductPriceMD)
-                                .foregroundStyle(.primary.opacity(0.82))
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text(Money.format(cents: product.priceCents))
+                                    .font(.tbProductPriceMD)
+                                    .foregroundStyle(.primary.opacity(0.82))
+
+                                if product.hasPriceDrop, let previous = product.previousPriceCents {
+                                    Text(Money.format(cents: previous))
+                                        .font(.tbCaption.weight(.semibold))
+                                        .strikethrough()
+                                        .foregroundStyle(.secondary)
+
+                                    Text("Price drop")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(TBTheme.accent, in: Capsule())
+                                }
+                            }
+
+                            if product.isRecentlyAdded {
+                                Label("New this week", systemImage: "sparkles")
+                                    .font(.tbCaption.weight(.semibold))
+                                    .foregroundStyle(TBTheme.icyBlue)
+                            }
                         }
 
                         productRatingSection
@@ -450,6 +483,10 @@ struct ProductDetailView: View {
                         }
                     }
 
+                    if !relatedProducts.isEmpty {
+                        relatedProductsSection
+                    }
+
                 }
                 .padding()
             }
@@ -483,6 +520,17 @@ struct ProductDetailView: View {
                         .accessibilityLabel(isFavorited ? "Remove from favorites" : "Add to favorites")
                     }
 
+                    #if os(iOS)
+                    Button {
+                        showShareSheet = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(TBTheme.deepSky)
+                    }
+                    .accessibilityLabel("Share product")
+                    #endif
+
                     Button {
                         reportListing(product: product)
                     } label: {
@@ -493,6 +541,11 @@ struct ProductDetailView: View {
                     .accessibilityLabel("Report listing")
                 }
             }
+        }
+        #endif
+        #if os(iOS)
+        .sheet(isPresented: $showShareSheet) {
+            ActivityView(items: [productShareText])
         }
         #endif
         .sheet(isPresented: $showCart) {
@@ -621,6 +674,31 @@ struct ProductDetailView: View {
                     .font(.tbCaption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var productShareText: String {
+        "\(product.name) — \(Money.format(cents: product.priceCents)) on TenBelow"
+    }
+
+    private var relatedProductsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("More from this seller")
+                .font(.tbHeadline)
+                .foregroundStyle(TBTheme.icyBlue)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(relatedProducts) { related in
+                        NavigationLink {
+                            ProductDetailView(product: related)
+                        } label: {
+                            ProductDetailRelatedCard(product: related)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
     }
@@ -995,6 +1073,35 @@ private struct ProductReviewCard: View {
     }
 }
 
+private struct ProductDetailRelatedCard: View {
+    let product: Product
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            StorefrontImageView(reference: product.primaryImageReference) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(TBTheme.skyLight.opacity(0.4))
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
+            }
+            .frame(width: 132, height: 132)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Text(product.name)
+                .font(.tbCaption.weight(.semibold))
+                .foregroundStyle(TBTheme.deepSky)
+                .lineLimit(2)
+                .frame(width: 132, alignment: .leading)
+
+            Text(Money.format(cents: product.priceCents))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.primary.opacity(0.85))
+        }
+    }
+}
+
 private struct SellerAttributionRow: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let seller: SellerProfile
@@ -1022,13 +1129,27 @@ private struct SellerAttributionRow: View {
                     }
                 }
 
-                Text("Ships in \(seller.shipsInDays.lowerBound)-\(seller.shipsInDays.upperBound) days")
-                    .font(.tbCaption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                HStack(spacing: 8) {
+                    Text("Ships in \(seller.shipsInDays.lowerBound)-\(seller.shipsInDays.upperBound) days")
+                        .font(.tbCaption)
+                        .foregroundStyle(.secondary)
+
+                    if seller.rating > 0 {
+                        Text("•")
+                            .foregroundStyle(.tertiary)
+                        Text(String(format: "%.1f★", seller.rating))
+                            .font(.tbCaption.weight(.semibold))
+                            .foregroundStyle(TBTheme.icyBlue)
+                    }
+                }
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
             }
 
             Spacer()
+
+            Text("Shop")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(TBTheme.icyBlue)
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 11, weight: .semibold))

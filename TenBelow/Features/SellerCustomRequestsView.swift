@@ -173,9 +173,12 @@ struct SellerCustomRequestDetailView: View {
     @State private var request: SellerCustomOrderRequest
     let onUpdated: (SellerCustomOrderRequest) -> Void
 
+    @EnvironmentObject private var orderStore: OrderStore
+    @EnvironmentObject private var inquiryStore: SellerInquiryStore
     @State private var isUpdating = false
     @State private var actionError: String?
     @State private var confirmDecline = false
+    @State private var showBuyerShopChat = false
 
     init(seller: SellerProfile, request: SellerCustomOrderRequest, onUpdated: @escaping (SellerCustomOrderRequest) -> Void) {
         self.seller = seller
@@ -183,17 +186,9 @@ struct SellerCustomRequestDetailView: View {
         self.onUpdated = onUpdated
     }
 
-    private var inboxThread: SellerInboxThreadEntry {
-        SellerInboxThreadEntry(
-            sellerId: seller.id,
-            buyerIdentity: "buyer:\(request.buyerEmail)",
-            buyerDisplayName: request.buyerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? request.buyerEmail
-                : request.buyerName,
-            lastMessageText: "Open thread to reply",
-            lastMessageTimestamp: "",
-            lastMessageDate: .distantPast
-        )
+    private var buyerDisplayName: String {
+        let name = request.buyerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? request.buyerEmail : name
     }
 
     var body: some View {
@@ -262,8 +257,8 @@ struct SellerCustomRequestDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                NavigationLink {
-                    SellerInboxConversationView(seller: seller, thread: inboxThread)
+                Button {
+                    showBuyerShopChat = true
                 } label: {
                     Label("Message buyer", systemImage: "bubble.left.and.bubble.right.fill")
                         .font(.tbBodyStrong)
@@ -290,6 +285,16 @@ struct SellerCustomRequestDetailView: View {
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .sheet(isPresented: $showBuyerShopChat) {
+            OrderSupportThreadView(
+                sellerId: seller.id,
+                sellerName: seller.displayName,
+                viewerRole: .seller,
+                inquiryBuyerEmail: request.buyerEmail
+            )
+            .environmentObject(orderStore)
+            .environmentObject(inquiryStore)
+        }
         .confirmationDialog(
             "Decline this request?",
             isPresented: $confirmDecline,
@@ -403,6 +408,7 @@ struct SellerCustomRequestDetailView: View {
             }
         }
     }
+
 }
 
 // MARK: - Status styling

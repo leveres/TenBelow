@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TenBelow Admin Review</title>
-    <link rel="stylesheet" href="/admin/assets/admin-review.css?v=12" />
+    <link rel="stylesheet" href="/admin/assets/admin-review.css?v=14" />
   </head>
   <body>
     <main class="app-shell">
@@ -20,7 +20,11 @@
         <div class="hero-actions">
           <label id="adminKeyField" class="field">
             <span>Admin key</span>
-            <input id="adminKey" type="password" placeholder="Optional if ADMIN_API_KEY is unset" />
+            <input id="adminKey" type="password" placeholder="Enter admin key" />
+          </label>
+          <label id="adminCodeField" class="field hidden">
+            <span>One-time code</span>
+            <input id="adminCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" />
           </label>
           <button id="loginButton" class="secondary-button" type="button">Unlock admin</button>
           <button id="logoutButton" class="secondary-button hidden" type="button">Sign out</button>
@@ -81,6 +85,14 @@
                 <span>Seller</span>
                 <select id="sellerFilter">
                   <option value="">All sellers</option>
+                </select>
+              </label>
+              <label class="field field-small">
+                <span>Listing type</span>
+                <select id="listingTypeFilter">
+                  <option value="">All listings</option>
+                  <option value="weekly_drop">Weekly Drop</option>
+                  <option value="marketplace">Marketplace</option>
                 </select>
               </label>
               <p id="sellerQueueSummary" class="seller-queue-summary">Products are grouped by seller.</p>
@@ -240,7 +252,11 @@
           <section class="audit-section">
             <div class="audit-heading">
               <p class="audit-subcopy audit-subcopy-inline">Newest events first. Includes request id, action, route, and IP.</p>
-              <button id="refreshAuditButton" class="secondary-button" type="button">Refresh audit</button>
+              <div class="exchange-actions">
+                <button id="exportAuditJsonButton" class="secondary-button" type="button">Export JSON</button>
+                <button id="exportAuditCsvButton" class="secondary-button" type="button">Export CSV</button>
+                <button id="refreshAuditButton" class="secondary-button" type="button">Refresh audit</button>
+              </div>
             </div>
             <div class="security-metrics">
               <div class="metric-card">
@@ -453,7 +469,24 @@
             </div>
           </div>
 
-          <p class="product-note"></p>
+          <div class="card-detail-stack">
+            <section class="product-detail-block drop-detail-block hidden">
+              <p class="detail-block-label">Weekly Drop copy</p>
+              <p class="drop-headline"></p>
+              <p class="drop-story"></p>
+              <p class="drop-best-use-case"></p>
+            </section>
+
+            <section class="product-detail-block rights-review-block hidden">
+              <p class="detail-block-label">Rights &amp; ownership</p>
+              <p class="rights-manual-review-flag hidden">Manual review recommended</p>
+              <p class="rights-review-reason hidden"></p>
+              <p class="rights-ownership-type hidden"></p>
+              <ul class="rights-reference-flags hidden"></ul>
+            </section>
+
+            <p class="product-note"></p>
+          </div>
         </div>
 
         <div class="card-review">
@@ -471,6 +504,6 @@
       </article>
     </template>
 
-    <script type="module" src="/admin/assets/admin-review.js?v=12"></script>
+    <script type="module" src="/admin/assets/admin-review.js?v=14"></script>
   </body>
 </html>

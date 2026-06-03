@@ -6,10 +6,13 @@ const feedbackText = document.querySelector("#feedbackText");
 const refreshButton = document.querySelector("#refreshButton");
 const refreshExchangeButton = document.querySelector("#refreshExchangeButton");
 const refreshAuditButton = document.querySelector("#refreshAuditButton");
+const exportAuditJsonButton = document.querySelector("#exportAuditJsonButton");
+const exportAuditCsvButton = document.querySelector("#exportAuditCsvButton");
 const refreshIncidentsButton = document.querySelector("#refreshIncidentsButton");
 const refreshSnapshotsButton = document.querySelector("#refreshSnapshotsButton");
 const statusFilter = document.querySelector("#statusFilter");
 const sellerFilter = document.querySelector("#sellerFilter");
+const listingTypeFilter = document.querySelector("#listingTypeFilter");
 const sellerQueueSummary = document.querySelector("#sellerQueueSummary");
 const sellerDirectoryList = document.querySelector("#sellerDirectoryList");
 const sellerDirectoryCount = document.querySelector("#sellerDirectoryCount");
@@ -67,6 +70,8 @@ const restorePageInfo = document.querySelector("#restorePageInfo");
 const auditScanMeta = document.querySelector("#auditScanMeta");
 const adminKeyField = document.querySelector("#adminKeyField");
 const adminKeyInput = document.querySelector("#adminKey");
+const adminCodeField = document.querySelector("#adminCodeField");
+const adminCodeInput = document.querySelector("#adminCode");
 const loginButton = document.querySelector("#loginButton");
 const logoutButton = document.querySelector("#logoutButton");
 const template = document.querySelector("#productCardTemplate");
@@ -90,6 +95,7 @@ let accountPage = 1;
 let auditEntriesCache = [];
 let productQueueCache = [];
 let sellerDirectoryCache = [];
+let pendingAdminChallengeId = "";
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -127,6 +133,44 @@ function setFeedback(message) {
 
 function fallbackImageURL() {
   return "https://placehold.co/800x800/eaf2ff/5e84c7?text=No+media";
+}
+
+function resolveMediaURL(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("/media/")) {
+    return `${window.location.origin}${trimmed}`;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const host = url.hostname.toLowerCase();
+    if ((host === "localhost" || host === "127.0.0.1") && url.pathname.startsWith("/media/")) {
+      return `${window.location.origin}${url.pathname}${url.search}`;
+    }
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return url.href;
+    }
+  } catch {
+    // Fall through to the relative-url handling below.
+  }
+
+  if (!trimmed.startsWith("file:")) {
+    try {
+      return new URL(trimmed, window.location.origin).href;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function productImageURLs(product) {
+  const urls = Array.isArray(product?.imageURLs)
+    ? product.imageURLs.map(resolveMediaURL).filter(Boolean)
+    : [];
+  return urls.length ? urls : [fallbackImageURL()];
 }
 
 function renderLightbox() {
@@ -195,16 +239,54 @@ function showNextLightboxImage() {
 
 function selectedFilterLabel() {
   const selected = statusFilter.options[statusFilter.selectedIndex];
-  return selected ? selected.textContent : "Submitted";
+  const statusLabel = selected ? selected.textContent : "Submitted";
+  const listingType = listingTypeFilter?.value || "";
+  if (listingType === "weekly_drop") {
+    return `${statusLabel} · Weekly Drop`;
+  }
+  if (listingType === "marketplace") {
+    return `${statusLabel} · Marketplace`;
+  }
+  return statusLabel;
+}
+
+function isWeeklyDropProduct(product) {
+  return product?.isDrop === true;
+}
+
+function hasRightsReviewData(product) {
+  const flags = Array.isArray(product?.rightsReferenceFlags) ? product.rightsReferenceFlags : [];
+  return Boolean(
+    product?.requiresManualReview ||
+    product?.reviewReason ||
+    product?.rightsOwnershipType ||
+    flags.length,
+  );
+}
+
+function populateDetailField(element, label, value, fallback = "") {
+  if (!element) return false;
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    element.classList.add("hidden");
+    element.textContent = "";
+    return false;
+  }
+  element.classList.remove("hidden");
+  element.textContent = label ? `${label}: ${trimmed}` : trimmed;
+  return true;
 }
 
 function syncAdminKeyVisibility() {
   if (isAdminAuthenticated) {
     adminKeyField.classList.add("hidden");
+    adminCodeField.classList.add("hidden");
     loginButton.classList.add("hidden");
     logoutButton.classList.remove("hidden");
   } else {
-    adminKeyField.classList.remove("hidden");
+    adminKeyField.classList.toggle("hidden", Boolean(pendingAdminChallengeId));
+    adminCodeField.classList.toggle("hidden", !pendingAdminChallengeId);
+    loginButton.textContent = pendingAdminChallengeId ? "Verify code" : "Unlock admin";
     loginButton.classList.remove("hidden");
     logoutButton.classList.add("hidden");
   }
@@ -268,8 +350,19 @@ function updateSellerFilterOptions(products) {
 
 function visibleQueueProducts(products) {
   const selectedSellerId = sellerFilter?.value || "";
-  if (!selectedSellerId) return products;
-  return products.filter((product) => productSellerId(product) === selectedSellerId);
+  const selectedListingType = listingTypeFilter?.value || "";
+  return products.filter((product) => {
+    if (selectedSellerId && productSellerId(product) !== selectedSellerId) {
+      return false;
+    }
+    if (selectedListingType === "weekly_drop" && !isWeeklyDropProduct(product)) {
+      return false;
+    }
+    if (selectedListingType === "marketplace" && isWeeklyDropProduct(product)) {
+      return false;
+    }
+    return true;
+  });
 }
 
 function groupedProductsBySeller(products) {
@@ -294,8 +387,12 @@ function updateSellerQueueSummary(visibleProducts, groups) {
 
   const sellerWord = groups.length === 1 ? "seller" : "sellers";
   const productWord = visibleProducts.length === 1 ? "product" : "products";
+  const dropCount = visibleProducts.filter((product) => isWeeklyDropProduct(product)).length;
+  const dropSuffix = dropCount
+    ? ` ${dropCount} Weekly Drop ${dropCount === 1 ? "item" : "items"}.`
+    : "";
   sellerQueueSummary.textContent = visibleProducts.length
-    ? `${visibleProducts.length} ${productWord} grouped under ${groups.length} ${sellerWord}.`
+    ? `${visibleProducts.length} ${productWord} grouped under ${groups.length} ${sellerWord}.${dropSuffix}`
     : "No products match the current seller/status filters.";
 }
 
@@ -748,14 +845,22 @@ function buildProductCard(product) {
   const productMaterial = fragment.querySelector(".product-material");
   const productSubmitted = fragment.querySelector(".product-submitted");
   const productNote = fragment.querySelector(".product-note");
+  const mediaPill = fragment.querySelector(".media-pill");
+  const dropDetailBlock = fragment.querySelector(".drop-detail-block");
+  const dropHeadline = fragment.querySelector(".drop-headline");
+  const dropStory = fragment.querySelector(".drop-story");
+  const dropBestUseCase = fragment.querySelector(".drop-best-use-case");
+  const rightsReviewBlock = fragment.querySelector(".rights-review-block");
+  const rightsManualReviewFlag = fragment.querySelector(".rights-manual-review-flag");
+  const rightsReviewReason = fragment.querySelector(".rights-review-reason");
+  const rightsOwnershipType = fragment.querySelector(".rights-ownership-type");
+  const rightsReferenceFlags = fragment.querySelector(".rights-reference-flags");
   const notesField = fragment.querySelector("textarea");
   const approveButton = fragment.querySelector(".approve-button");
   const rejectButton = fragment.querySelector(".reject-button");
   const archiveButton = fragment.querySelector(".archive-button");
 
-  const imageURLs = Array.isArray(product.imageURLs) && product.imageURLs.length
-    ? product.imageURLs
-    : [fallbackImageURL()];
+  const imageURLs = productImageURLs(product);
 
   let selectedImageIndex = 0;
   image.src = imageURLs[selectedImageIndex];
@@ -817,6 +922,58 @@ function buildProductCard(product) {
   productSubmitted.textContent = product.submittedAt
     ? dateTimeFormatter.format(new Date(product.submittedAt))
     : "Just now";
+
+  const isDrop = isWeeklyDropProduct(product);
+  if (mediaPill) {
+    mediaPill.textContent = isDrop ? "Weekly Drop" : "Marketplace review";
+    mediaPill.classList.toggle("is-weekly-drop", isDrop);
+  }
+
+  if (dropDetailBlock) {
+    if (isDrop) {
+      dropDetailBlock.classList.remove("hidden");
+      const hasHeadline = populateDetailField(dropHeadline, "Headline", product.dropHeadline);
+      const hasStory = populateDetailField(dropStory, "Story", product.dropStory);
+      const hasBestUseCase = populateDetailField(dropBestUseCase, "Best use", product.dropBestUseCase);
+      if (!hasHeadline && !hasStory && !hasBestUseCase) {
+        dropHeadline?.classList.remove("hidden");
+        if (dropHeadline) {
+          dropHeadline.textContent = "No Weekly Drop copy provided.";
+        }
+      }
+    } else {
+      dropDetailBlock.classList.add("hidden");
+    }
+  }
+
+  if (rightsReviewBlock) {
+    if (hasRightsReviewData(product)) {
+      rightsReviewBlock.classList.remove("hidden");
+      rightsManualReviewFlag?.classList.toggle("hidden", !product.requiresManualReview);
+      populateDetailField(rightsReviewReason, "Review reason", product.reviewReason);
+      populateDetailField(rightsOwnershipType, "Ownership", product.rightsOwnershipType);
+
+      const flags = Array.isArray(product.rightsReferenceFlags)
+        ? product.rightsReferenceFlags.filter((flag) => String(flag || "").trim())
+        : [];
+      if (rightsReferenceFlags) {
+        rightsReferenceFlags.replaceChildren();
+        if (flags.length) {
+          rightsReferenceFlags.classList.remove("hidden");
+          for (const flag of flags) {
+            const item = document.createElement("li");
+            item.textContent = flag;
+            rightsReferenceFlags.appendChild(item);
+          }
+        } else {
+          rightsReferenceFlags.classList.add("hidden");
+        }
+      }
+    } else {
+      rightsReviewBlock.classList.add("hidden");
+    }
+  }
+
   productNote.textContent = product.durabilityNote || "No durability note provided.";
   notesField.value = product.reviewNotes || "";
 
@@ -1517,6 +1674,50 @@ async function loadAuditLog() {
   }
 }
 
+async function exportAuditLog(format) {
+  if (!isAdminAuthenticated) {
+    setFeedback("Sign in required");
+    return;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      format,
+      limit: "1000",
+    });
+    const query = auditSearchInput?.value?.trim() || "";
+    if (query) {
+      params.set("q", query);
+    }
+
+    setFeedback(`Exporting audit ${format.toUpperCase()}...`);
+    const response = await fetch(`/admin/audit-log/export?${params.toString()}`, {
+      headers: adminHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const filenameMatch = disposition.match(/filename="([^"]+)"/);
+    const filename = filenameMatch?.[1] || `tenbelow-audit.${format}`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    await loadAuditLog();
+    setFeedback(`Audit ${format.toUpperCase()} exported`);
+  } catch (error) {
+    console.error(error);
+    setFeedback("Audit export failed");
+  }
+}
+
 async function loadSecurityMetrics() {
   if (!isAdminAuthenticated) {
     renderSecurityMetrics(null);
@@ -1807,6 +2008,11 @@ async function refreshAdminSessionState(options = {}) {
     }
     const payload = await response.json();
     isAdminAuthenticated = payload.authenticated === true;
+    if (isAdminAuthenticated) {
+      pendingAdminChallengeId = "";
+      adminKeyInput.value = "";
+      adminCodeInput.value = "";
+    }
     syncAdminKeyVisibility();
     setFeedback(isAdminAuthenticated ? "Ready" : "Sign in required");
     if (isAdminAuthenticated && loadData) {
@@ -1873,18 +2079,46 @@ async function refreshAdminSessionState(options = {}) {
 
 async function loginAdminSession() {
   try {
-    setFeedback("Signing in...");
+    const body = pendingAdminChallengeId
+      ? {
+          challengeId: pendingAdminChallengeId,
+          code: adminCodeInput.value.trim(),
+        }
+      : {
+          key: adminKeyInput.value.trim(),
+        };
+
+    setFeedback(pendingAdminChallengeId ? "Verifying code..." : "Sending admin code...");
     const response = await fetch("/admin/login", {
       method: "POST",
       headers: adminHeaders(),
-      body: JSON.stringify({ key: adminKeyInput.value.trim() }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) {
       throw new Error(await response.text());
     }
+    const payload = await response.json();
+
+    if (payload.requiresCode) {
+      pendingAdminChallengeId = payload.challengeId || "";
+      adminKeyInput.value = "";
+      adminCodeInput.value = "";
+      syncAdminKeyVisibility();
+      const devCode = payload.devCode ? ` Dev code: ${payload.devCode}` : "";
+      setFeedback(`Code sent to ${payload.deliveryTarget || "admin email"}.${devCode}`);
+      adminCodeInput.focus();
+      return;
+    }
+
+    pendingAdminChallengeId = "";
+    adminCodeInput.value = "";
     adminKeyInput.value = "";
     await refreshAdminSessionState();
   } catch (error) {
+    if (pendingAdminChallengeId) {
+      adminCodeInput.value = "";
+      adminCodeInput.focus();
+    }
     setFeedback("Admin sign-in failed");
     console.error(error);
   }
@@ -1898,6 +2132,9 @@ async function logoutAdminSession() {
     });
   } finally {
     isAdminAuthenticated = false;
+    pendingAdminChallengeId = "";
+    adminCodeInput.value = "";
+    adminKeyInput.value = "";
     incidentsPage = 1;
     restoresPage = 1;
     accountPage = 1;
@@ -1978,12 +2215,23 @@ async function archiveProduct(productId, notes, approveButton, rejectButton, arc
 
 refreshButton.addEventListener("click", () => refreshAdminSessionState());
 refreshAuditButton.addEventListener("click", () => Promise.all([loadAuditLog(), loadSecurityMetrics(), loadIncidentHistory()]));
+if (exportAuditJsonButton) {
+  exportAuditJsonButton.addEventListener("click", () => exportAuditLog("json"));
+}
+if (exportAuditCsvButton) {
+  exportAuditCsvButton.addEventListener("click", () => exportAuditLog("csv"));
+}
 refreshIncidentsButton.addEventListener("click", loadIncidentHistory);
 refreshSnapshotsButton.addEventListener("click", loadSnapshots);
 statusFilter.addEventListener("change", loadQueue);
 if (sellerFilter) {
   sellerFilter.addEventListener("change", () => {
     renderSellerDirectory(sellerDirectoryCache);
+    renderQueue(productQueueCache);
+  });
+}
+if (listingTypeFilter) {
+  listingTypeFilter.addEventListener("change", () => {
     renderQueue(productQueueCache);
   });
 }
@@ -2106,6 +2354,18 @@ if (auditNextPage) {
 }
 loginButton.addEventListener("click", loginAdminSession);
 logoutButton.addEventListener("click", logoutAdminSession);
+adminKeyInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void loginAdminSession();
+  }
+});
+adminCodeInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void loginAdminSession();
+  }
+});
 lightboxClose.addEventListener("click", closeLightbox);
 lightboxPrev.addEventListener("click", showPreviousLightboxImage);
 lightboxNext.addEventListener("click", showNextLightboxImage);
