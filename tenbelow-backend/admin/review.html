@@ -20,11 +20,7 @@
         <div class="hero-actions">
           <label id="adminKeyField" class="field">
             <span>Admin key</span>
-            <input id="adminKey" type="password" placeholder="Enter admin key" />
-          </label>
-          <label id="adminCodeField" class="field hidden">
-            <span>One-time code</span>
-            <input id="adminCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" />
+            <input id="adminKey" type="password" autocomplete="current-password" placeholder="Enter admin key" />
           </label>
           <button id="loginButton" class="secondary-button" type="button">Unlock admin</button>
           <button id="logoutButton" class="secondary-button hidden" type="button">Sign out</button>
@@ -504,6 +500,6 @@
       </article>
     </template>
 
-    <script type="module" src="/admin/assets/admin-review.js?v=14"></script>
+    <script type="module" src="/admin/assets/admin-review.js?v=15"></script>
   </body>
 </html>

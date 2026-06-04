@@ -70,8 +70,6 @@ const restorePageInfo = document.querySelector("#restorePageInfo");
 const auditScanMeta = document.querySelector("#auditScanMeta");
 const adminKeyField = document.querySelector("#adminKeyField");
 const adminKeyInput = document.querySelector("#adminKey");
-const adminCodeField = document.querySelector("#adminCodeField");
-const adminCodeInput = document.querySelector("#adminCode");
 const loginButton = document.querySelector("#loginButton");
 const logoutButton = document.querySelector("#logoutButton");
 const template = document.querySelector("#productCardTemplate");
@@ -95,7 +93,6 @@ let accountPage = 1;
 let auditEntriesCache = [];
 let productQueueCache = [];
 let sellerDirectoryCache = [];
-let pendingAdminChallengeId = "";
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -280,13 +277,10 @@ function populateDetailField(element, label, value, fallback = "") {
 function syncAdminKeyVisibility() {
   if (isAdminAuthenticated) {
     adminKeyField.classList.add("hidden");
-    adminCodeField.classList.add("hidden");
     loginButton.classList.add("hidden");
     logoutButton.classList.remove("hidden");
   } else {
-    adminKeyField.classList.toggle("hidden", Boolean(pendingAdminChallengeId));
-    adminCodeField.classList.toggle("hidden", !pendingAdminChallengeId);
-    loginButton.textContent = pendingAdminChallengeId ? "Verify code" : "Unlock admin";
+    adminKeyField.classList.remove("hidden");
     loginButton.classList.remove("hidden");
     logoutButton.classList.add("hidden");
   }
@@ -2009,9 +2003,7 @@ async function refreshAdminSessionState(options = {}) {
     const payload = await response.json();
     isAdminAuthenticated = payload.authenticated === true;
     if (isAdminAuthenticated) {
-      pendingAdminChallengeId = "";
       adminKeyInput.value = "";
-      adminCodeInput.value = "";
     }
     syncAdminKeyVisibility();
     setFeedback(isAdminAuthenticated ? "Ready" : "Sign in required");
@@ -2079,20 +2071,12 @@ async function refreshAdminSessionState(options = {}) {
 
 async function loginAdminSession() {
   try {
-    const body = pendingAdminChallengeId
-      ? {
-          challengeId: pendingAdminChallengeId,
-          code: adminCodeInput.value.trim(),
-        }
-      : {
-          key: adminKeyInput.value.trim(),
-        };
-
-    setFeedback(pendingAdminChallengeId ? "Verifying code..." : "Sending admin code...");
+    setFeedback("Signing in...");
     const response = await fetch("/admin/login", {
       method: "POST",
       headers: adminHeaders(),
-      body: JSON.stringify(body),
+      credentials: "same-origin",
+      body: JSON.stringify({ key: adminKeyInput.value.trim() }),
     });
     if (!response.ok) {
       const raw = await response.text();
@@ -2106,27 +2090,13 @@ async function loginAdminSession() {
       throw new Error(message);
     }
     const payload = await response.json();
-
-    if (payload.requiresCode) {
-      pendingAdminChallengeId = payload.challengeId || "";
-      adminKeyInput.value = "";
-      adminCodeInput.value = "";
-      syncAdminKeyVisibility();
-      const devCode = payload.devCode ? ` Dev code: ${payload.devCode}` : "";
-      setFeedback(`Code sent to ${payload.deliveryTarget || "admin email"}.${devCode}`);
-      adminCodeInput.focus();
-      return;
+    if (!payload.authenticated) {
+      throw new Error("Admin sign-in failed");
     }
 
-    pendingAdminChallengeId = "";
-    adminCodeInput.value = "";
     adminKeyInput.value = "";
     await refreshAdminSessionState();
   } catch (error) {
-    if (pendingAdminChallengeId) {
-      adminCodeInput.value = "";
-      adminCodeInput.focus();
-    }
     setFeedback(error?.message || "Admin sign-in failed");
     console.error(error);
   }
@@ -2140,8 +2110,6 @@ async function logoutAdminSession() {
     });
   } finally {
     isAdminAuthenticated = false;
-    pendingAdminChallengeId = "";
-    adminCodeInput.value = "";
     adminKeyInput.value = "";
     incidentsPage = 1;
     restoresPage = 1;
@@ -2363,12 +2331,6 @@ if (auditNextPage) {
 loginButton.addEventListener("click", loginAdminSession);
 logoutButton.addEventListener("click", logoutAdminSession);
 adminKeyInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    void loginAdminSession();
-  }
-});
-adminCodeInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     void loginAdminSession();

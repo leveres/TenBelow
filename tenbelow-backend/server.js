@@ -793,10 +793,14 @@ function pruneExpiredAdminLoginChallenges(now = Date.now()) {
   }
 }
 
+function adminLoginSigningSecret() {
+  return String(AUTH_JWT_SECRET || ADMIN_API_KEY || "").trim();
+}
+
 function adminCodeHash(challengeId, code) {
   return crypto
     .createHash("sha256")
-    .update(`${challengeId}:${String(code || "").trim()}:${ADMIN_API_KEY}`)
+    .update(`${challengeId}:${String(code || "").trim()}:${adminLoginSigningSecret()}`)
     .digest("hex");
 }
 
@@ -848,7 +852,7 @@ async function sendAdminLoginCodeEmail({ code, expiresAt }) {
       <p>Your one-time admin login code is:</p>
       <p style="font-size:28px;font-weight:700;letter-spacing:0.18em">${code}</p>
       <p>This code expires at ${escapeHtml(expiration)} and can only be used once.</p>
-      <p>If you did not request this code, rotate your admin key and review the audit log.</p>
+      <p>If you did not request this code, review the audit log and contact your operator.</p>
     `,
   });
 }
@@ -2181,6 +2185,47 @@ function transactionalEmailConfigured() {
   return Boolean(resend || smtpConfigured);
 }
 
+function emailFromUsesResendSandbox() {
+  const raw = String(EMAIL_FROM || "").trim().toLowerCase();
+  const match = raw.match(/<([^>]+)>/);
+  const address = (match?.[1] || raw).trim();
+  return address.endsWith("@resend.dev");
+}
+
+let resendProviderStatusCache = { checkedAt: 0, valid: null, detail: "" };
+
+async function getResendProviderStatus() {
+  if (!resend) {
+    return { valid: null, detail: "not_configured" };
+  }
+
+  const now = Date.now();
+  if (now - resendProviderStatusCache.checkedAt < 5 * 60 * 1000 && resendProviderStatusCache.valid !== null) {
+    return resendProviderStatusCache;
+  }
+
+  try {
+    const { error } = await resend.domains.list();
+    if (error) {
+      resendProviderStatusCache = {
+        checkedAt: now,
+        valid: false,
+        detail: error.message || error.name || "Resend API error",
+      };
+    } else {
+      resendProviderStatusCache = { checkedAt: now, valid: true, detail: "ok" };
+    }
+  } catch (err) {
+    resendProviderStatusCache = {
+      checkedAt: now,
+      valid: false,
+      detail: String(err?.message || err || "Resend API error"),
+    };
+  }
+
+  return resendProviderStatusCache;
+}
+
 function emailRecipientsList(to) {
   const entries = Array.isArray(to) ? to : [to];
   return entries
@@ -3384,27 +3429,9 @@ app.get("/admin/session", (req, res) => {
   res.json({ authenticated });
 });
 
-app.post("/admin/login", adminLoginLimiter, async (req, res) => {
+app.post("/admin/login", adminLoginLimiter, (req, res) => {
   if (!ADMIN_API_KEY) {
     return res.status(503).json({ authenticated: false, error: "Admin auth is not configured" });
-  }
-
-  const challengeId = String(req.body?.challengeId || "").trim();
-  const code = String(req.body?.code || "").trim();
-  if (challengeId || code) {
-    const result = verifyAdminLoginChallenge({ challengeId, code });
-    if (!result.ok) {
-      recordSecurityAudit(req, {
-        action: "admin_login_code_failed",
-        reason: result.reason,
-      });
-      return res.status(401).json({ authenticated: false, error: "Invalid or expired admin code" });
-    }
-
-    const sessionToken = createAdminSessionToken();
-    setAdminSessionCookie(res, sessionToken);
-    auditLog(auditContext(req, { action: "admin_login_success", method: "one_time_code" }));
-    return res.json({ authenticated: true });
   }
 
   const key = String(req.body?.key || "").trim();
@@ -3413,44 +3440,14 @@ app.post("/admin/login", adminLoginLimiter, async (req, res) => {
     return res.status(401).json({ authenticated: false, error: "Invalid admin key" });
   }
 
-  const challenge = createAdminLoginChallenge(req);
-  const canSendCode = Boolean(ADMIN_LOGIN_EMAIL && transactionalEmailConfigured());
-
-  if (canSendCode) {
-    try {
-      await sendAdminLoginCodeEmail(challenge);
-      auditLog(auditContext(req, { action: "admin_login_code_sent", deliveryTarget: maskedEmail(ADMIN_LOGIN_EMAIL) }));
-      return res.json({
-        authenticated: false,
-        requiresCode: true,
-        challengeId: challenge.challengeId,
-        deliveryTarget: maskedEmail(ADMIN_LOGIN_EMAIL),
-        expiresInSeconds: Math.floor(ADMIN_LOGIN_CODE_TTL_MS / 1000),
-      });
-    } catch (err) {
-      adminLoginChallenges.delete(challenge.challengeId);
-      console.error("admin login code email error:", err?.message || err);
-      return res.status(503).json({ authenticated: false, error: "Could not send admin login code" });
-    }
+  const sessionToken = createAdminSessionToken();
+  if (!sessionToken) {
+    return res.status(503).json({ authenticated: false, error: "Admin session signing is not configured" });
   }
 
-  if (IS_PRODUCTION) {
-    adminLoginChallenges.delete(challenge.challengeId);
-    return res.status(503).json({
-      authenticated: false,
-      error: "Admin login codes require ADMIN_LOGIN_EMAIL and RESEND_API_KEY or SMTP settings",
-    });
-  }
-
-  auditLog(auditContext(req, { action: "admin_login_code_created_dev" }));
-  return res.json({
-    authenticated: false,
-    requiresCode: true,
-    challengeId: challenge.challengeId,
-    deliveryTarget: "development console",
-    expiresInSeconds: Math.floor(ADMIN_LOGIN_CODE_TTL_MS / 1000),
-    devCode: challenge.code,
-  });
+  setAdminSessionCookie(res, sessionToken);
+  auditLog(auditContext(req, { action: "admin_login_success", method: "admin_key" }));
+  return res.json({ authenticated: true });
 });
 
 app.post("/admin/logout", (req, res) => {
@@ -7730,7 +7727,8 @@ app.delete("/drop/submission/:productId", requireAppClient, requireAuthenticated
 // Health
 // ---------------------------------------------------------------------------
 
-function checkReadiness() {
+async function checkReadiness() {
+  const resendStatus = resend ? await getResendProviderStatus() : { valid: null, detail: "not_configured" };
   const checks = {
     dataDirectoryExists: existsSync(DATA_DIRECTORY_PATH),
     dataDirectoryWritable: false,
@@ -7739,6 +7737,10 @@ function checkReadiness() {
     appApiKey: Boolean(String(process.env.APP_API_KEY || "").trim()),
     authSecret: Boolean(String(process.env.AUTH_JWT_SECRET || "").trim() || String(process.env.APP_API_KEY || "").trim()),
     email: transactionalEmailConfigured(),
+    adminLoginEmail: Boolean(ADMIN_LOGIN_EMAIL),
+    emailFromResendSandbox: emailFromUsesResendSandbox(),
+    resendApiKeyValid: resendStatus.valid,
+    ...(resendStatus.valid === false ? { resendApiKeyError: resendStatus.detail } : {}),
   };
   try {
     const probe = path.join(DATA_DIRECTORY_PATH, `.write_probe_${Date.now()}`);
@@ -7768,8 +7770,8 @@ app.get("/", (_, res) =>
 
 app.get("/health", (_, res) => res.json({ ok: true }));
 
-app.get("/ready", (_, res) => {
-  const { ok, checks } = checkReadiness();
+app.get("/ready", async (_, res) => {
+  const { ok, checks } = await checkReadiness();
   res.status(ok ? 200 : 503).json({
     ok,
     checks,
