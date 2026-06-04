@@ -191,6 +191,15 @@ struct CheckoutView: View {
                     .font(.tbCaption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                #if DEBUG
+                if !AppConstants.hasLiveCheckoutConfiguration {
+                    Text("Until Stripe is ready: Settings → Developer → turn on Testing mode to simulate checkout.")
+                        .font(.tbCaption)
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                #endif
             }
         }
         .padding(14)

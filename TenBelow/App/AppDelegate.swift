@@ -26,7 +26,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         // Simulator often fails; real devices need Push capability + signed provisioning.
+        #if DEBUG
         print("APNs registration failed: \(error.localizedDescription)")
+        #endif
     }
 
     /// Show banner/sound when a push arrives while the app is in the foreground.
@@ -60,7 +62,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 return
             }
         } catch {
+            #if DEBUG
             print("Notification authorization error: \(error.localizedDescription)")
+            #endif
         }
     }
 }

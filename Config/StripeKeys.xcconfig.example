@@ -1,0 +1,10 @@
+// Copy to StripeKeys.xcconfig (add to .gitignore) and reference from Xcode build configurations.
+// Do not commit real secret keys — only publishable keys belong in the iOS app.
+
+// --- Debug (Stripe test mode) ---
+TENBELOW_BACKEND_BASE_URL = https://tenbelow.onrender.com
+TENBELOW_STRIPE_PUBLISHABLE_KEY = pk_test_REPLACE_ME
+TENBELOW_APP_API_KEY = tb_app_client_REPLACE_ME
+
+// --- Release / TestFlight (Stripe live mode) ---
+// TENBELOW_STRIPE_PUBLISHABLE_KEY = pk_live_REPLACE_ME

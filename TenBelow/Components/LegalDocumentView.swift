@@ -39,10 +39,8 @@ enum LegalDocument: Identifiable {
 
     var subtitle: String {
         switch self {
-        case .termsOfService, .privacyPolicy, .sellerAgreement, .exchangePolicy:
+        case .termsOfService, .privacyPolicy, .dmcaPolicy, .sellerAgreement, .exchangePolicy:
             return "Effective Date: April 24, 2026"
-        case .dmcaPolicy:
-            return "In-app document coming next"
         }
     }
 
@@ -428,9 +426,70 @@ If you have questions about this Privacy Policy or TenBelow’s privacy practice
 """
         case .dmcaPolicy:
             return """
-This document will be added in a future update.
+DMCA POLICY
 
-For now, DMCA policy content can be provided here in-app once TenBelow is ready to publish the finalized policy.
+Effective Date: April 24, 2026
+
+TenBelow respects intellectual property rights and expects buyers, sellers, creators, and other users to do the same. This DMCA Policy explains how copyright owners may report allegedly infringing content and how users may respond if content is removed or restricted.
+
+TenBelow is operated by Innovative Codeworks LLC, doing business as TenBelow. This policy applies to product listings, storefront content, photos, videos, maker clips, profile text, custom request materials, messages, reviews, and any other user-provided content made available through TenBelow.
+
+1. Copyright Infringement Notices
+
+If you believe content on TenBelow infringes your copyright, you may send a written notice to TenBelow that includes:
+- your physical or electronic signature, or the signature of a person authorized to act on behalf of the copyright owner;
+- identification of the copyrighted work you claim has been infringed;
+- identification of the material you claim is infringing, including enough detail for TenBelow to locate it in the app or on the platform;
+- your name, mailing address, telephone number, and email address;
+- a statement that you have a good-faith belief that use of the material is not authorized by the copyright owner, its agent, or the law;
+- a statement that the information in your notice is accurate; and
+- a statement, under penalty of perjury, that you are the copyright owner or are authorized to act on behalf of the copyright owner.
+
+Send notices to:
+
+Innovative Codeworks LLC
+Doing Business As: TenBelow
+DMCA Agent
+admin@innovativecodeworks.com
+
+2. Action on Notices
+
+When TenBelow receives a complete and valid DMCA notice, we may remove, disable, restrict, or otherwise limit access to the reported content. We may also notify the user who submitted the content and provide information about the report.
+
+TenBelow may suspend or terminate accounts, listings, seller tools, creator tools, or other access for users who repeatedly infringe or who submit content that creates legal or operational risk for the platform.
+
+3. Counter-Notices
+
+If your content was removed or restricted and you believe the removal was a mistake or misidentification, you may send a counter-notice that includes:
+- your physical or electronic signature;
+- identification of the material removed or restricted and where it appeared before removal;
+- a statement, under penalty of perjury, that you have a good-faith belief the material was removed or restricted because of mistake or misidentification;
+- your name, mailing address, telephone number, and email address;
+- a statement that you consent to the jurisdiction of the federal district court for your judicial district, or if you are outside the United States, any judicial district where TenBelow may be found; and
+- a statement that you will accept service of process from the person who submitted the original notice or that person's agent.
+
+Send counter-notices to admin@innovativecodeworks.com.
+
+4. Repeat Infringer Policy
+
+TenBelow may, in appropriate circumstances, terminate or restrict accounts of users who repeatedly submit infringing content or repeatedly receive valid copyright complaints. TenBelow may consider all relevant facts, including the number of valid notices, the user's response, the nature of the content, and the risk to buyers, sellers, creators, rights holders, and the platform.
+
+5. Misrepresentations
+
+Submitting false, incomplete, or misleading DMCA notices or counter-notices may result in legal liability. Only submit a notice or counter-notice if you have a good-faith basis for doing so.
+
+6. Trademark and Other IP Claims
+
+This DMCA Policy addresses copyright claims. If you believe content on TenBelow infringes a trademark, patent, right of publicity, or other intellectual property right, contact admin@innovativecodeworks.com with details sufficient for review.
+
+7. Contact
+
+For copyright and intellectual property questions, contact:
+
+Innovative Codeworks LLC
+Doing Business As: TenBelow
+Founder: Steven LeVere
+admin@innovativecodeworks.com
 """
         case .sellerAgreement:
             return """

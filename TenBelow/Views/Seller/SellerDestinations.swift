@@ -3188,11 +3188,7 @@ struct EditSellerProfileView: View {
             } else {
                 StorefrontImageView(reference: draft.bannerURLString, contentMode: .fill) {
                     LinearGradient(
-                        colors: [
-                            Color(red: 0.30, green: 0.58, blue: 0.96),
-                            Color(red: 0.48, green: 0.72, blue: 0.98),
-                            Color(red: 0.83, green: 0.91, blue: 1.0)
-                        ],
+                        colors: StorefrontBrandTheme.defaultBannerColors,
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )

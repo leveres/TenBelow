@@ -237,7 +237,7 @@ enum OrdersAPI {
 
         let (data, resp) = try await URLSession.tenBelow.data(for: request)
         if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            let msg = APIErrorMessage.userFacingHTTP(data: data, statusCode: http.statusCode)
             throw NSError(domain: "OrdersAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
         }
         let decoder = JSONDecoder()
@@ -263,7 +263,7 @@ enum OrdersAPI {
         )
         let (data, resp) = try await URLSession.tenBelow.data(for: request)
         if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            let msg = APIErrorMessage.userFacingHTTP(data: data, statusCode: http.statusCode)
             throw NSError(domain: "OrdersAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
         }
         let decoder = JSONDecoder()

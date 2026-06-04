@@ -1,39 +1,32 @@
 import SwiftUI
 
-/// Deterministic accent palette per seller so storefronts feel distinct without server-side theme fields.
+/// Default storefront accent palette. Sellers use TenBelow blue until custom banner/theme fields exist.
 struct StorefrontBrandTheme {
     let accent: Color
     let accentSecondary: Color
     let bannerGradient: [Color]
     let stripeGradient: [Color]
 
+    /// Matches the seller dashboard hero card default.
+    static let defaultBannerColors: [Color] = [
+        Color(red: 0.30, green: 0.58, blue: 0.96),
+        Color(red: 0.48, green: 0.72, blue: 0.98),
+        Color(red: 0.83, green: 0.91, blue: 1.0),
+    ]
+
+    static let `default` = StorefrontBrandTheme(
+        accent: TBTheme.accent,
+        accentSecondary: TBTheme.skyBlue,
+        bannerGradient: defaultBannerColors,
+        stripeGradient: [
+            TBTheme.accent.opacity(0.85),
+            TBTheme.skyBlue.opacity(0.65),
+            TBTheme.icyBlue.opacity(0.35),
+        ]
+    )
+
     static func theme(for sellerId: String) -> StorefrontBrandTheme {
-        let hash = stableHash(sellerId)
-        let hue = Double(hash % 360) / 360.0
-        let accent = Color(hue: hue, saturation: 0.52, brightness: 0.78)
-        let accentSecondary = Color(hue: (hue + 0.08).truncatingRemainder(dividingBy: 1), saturation: 0.38, brightness: 0.92)
-        let deep = Color(hue: hue, saturation: 0.55, brightness: 0.42)
-
-        return StorefrontBrandTheme(
-            accent: accent,
-            accentSecondary: accentSecondary,
-            bannerGradient: [
-                deep.opacity(0.92),
-                accent.opacity(0.88),
-                accentSecondary.opacity(0.95),
-                Color(red: 0.96, green: 0.98, blue: 1.0),
-            ],
-            stripeGradient: [
-                accent.opacity(0.85),
-                accentSecondary.opacity(0.65),
-                TBTheme.icyBlue.opacity(0.35),
-            ]
-        )
-    }
-
-    private static func stableHash(_ value: String) -> Int {
-        value.unicodeScalars.reduce(5381) { partial, scalar in
-            ((partial << 5) &+ partial) &+ Int(scalar.value)
-        } & 0x7fffffff
+        _ = sellerId
+        return .default
     }
 }

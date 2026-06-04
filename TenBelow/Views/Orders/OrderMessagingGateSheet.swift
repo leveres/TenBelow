@@ -4,6 +4,7 @@ import SwiftUI
 struct OrderMessagingGateSheet: View {
     let sellerName: String
     @Environment(\.dismiss) private var dismiss
+    @State private var showBuyerAccountSetup = false
 
     var body: some View {
         NavigationStack {
@@ -21,6 +22,21 @@ struct OrderMessagingGateSheet: View {
                         .font(.tbBody)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        showBuyerAccountSetup = true
+                    } label: {
+                        Label("Create buyer account", systemImage: "person.crop.circle.badge.plus")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+
+                    Button("Maybe later") {
+                        dismiss()
+                    }
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
+                    .frame(maxWidth: .infinity)
                 }
                 .padding(20)
             }
@@ -32,6 +48,11 @@ struct OrderMessagingGateSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showBuyerAccountSetup) {
+                NavigationStack {
+                    BuyerAccountSetupView()
                 }
             }
         }

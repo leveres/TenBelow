@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct BuyerProfileView: View {
+    @Environment(\.openURL) private var openURL
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
     @EnvironmentObject private var orderStore: OrderStore
     @EnvironmentObject private var inquiryStore: SellerInquiryStore
@@ -43,17 +44,17 @@ struct BuyerProfileView: View {
     private var accountSubtitle: String {
         isAccountHolder
             ? "Your private space for favorites and orders — nothing here is a public storefront or profile."
-            : "Browse freely now, then create an account or sign in when you want saved details and a faster repeat checkout."
+            : "Browse freely now, then create an account or sign in when you're ready to checkout, message sellers, or keep order history."
     }
 
     private var checkoutModeTitle: String {
-        isAccountHolder ? "Account checkout enabled" : "Guest checkout active"
+        isAccountHolder ? "Account checkout enabled" : "Browsing as guest"
     }
 
     private var checkoutModeDescription: String {
         isAccountHolder
             ? "Purchases stay attached to \(buyerEmail.isEmpty ? "your TenBelow buyer account" : buyerEmail)."
-            : "Your order history stays private, but checkout details are not saved for next time."
+            : "Create a buyer account before checkout so orders, messages, and delivery updates stay with you."
     }
 
     private var storefrontProducts: [Product] {
@@ -180,6 +181,14 @@ struct BuyerProfileView: View {
                                 Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                             }
                             .buttonStyle(SecondaryCTAButtonStyle())
+
+                            Button {
+                                requestAccountDeletion()
+                            } label: {
+                                Label("Request account deletion", systemImage: "trash")
+                            }
+                            .buttonStyle(SecondaryCTAButtonStyle())
+                            .tint(.red)
                         }
                     }
                 }
@@ -366,6 +375,12 @@ struct BuyerProfileView: View {
         buyerEmail = ""
         buyerCheckoutPreference = "guest"
         pendingLaunchTab = 0
+    }
+
+    private func requestAccountDeletion() {
+        if let url = AppConstants.accountDeletionMailtoURL(accountType: "Buyer", email: buyerEmail) {
+            openURL(url)
+        }
     }
 }
 

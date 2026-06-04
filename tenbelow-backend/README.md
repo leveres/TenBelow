@@ -36,10 +36,16 @@ Recommended settings:
 - `STRIPE_SECRET_KEY=sk_test_...` or `sk_live_...`
 - `STRIPE_WEBHOOK_SECRET=whsec_...`
 
-Optional but recommended:
+Optional but recommended (required in production for buyer signup / OTP):
 
 - `RESEND_API_KEY=re_...`
 - `EMAIL_FROM=TenBelow <orders@yourdomain.com>`
+
+Setup guide (Render + Resend): `../../docs/email-setup.md`
+
+```bash
+node scripts/print-email-checklist.mjs
+```
 - Apple Push Notifications for iPhone lock-screen/banner alerts:
   - `APNS_KEY_ID=...`
   - `APNS_TEAM_ID=...`

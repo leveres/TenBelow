@@ -29,7 +29,7 @@ enum SellerInquiryAPI {
 
     private static func decode<T: Decodable>(_ type: T.Type, data: Data, resp: URLResponse) throws -> T {
         if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            let msg = String(data: data, encoding: .utf8) ?? "Server error"
+            let msg = APIErrorMessage.userFacingHTTP(data: data, statusCode: http.statusCode)
             throw NSError(domain: "SellerInquiryAPI", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: msg])
         }
         let decoder = JSONDecoder()

@@ -65,6 +65,21 @@ enum MarketplaceAuthSession {
         return sellerBearerToken() != nil
     }
 
+    nonisolated static var hasActiveBuyerSession: Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "buyerAccountCreated") else { return false }
+        let email = defaults.string(forKey: "buyerEmail")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !email.isEmpty else { return false }
+        let token = KeychainTokenStore.string(for: buyerTokenKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !token.isEmpty
+    }
+
+    nonisolated static var hasAuthenticatedSession: Bool {
+        currentBearerToken() != nil
+    }
+
     nonisolated private static func sellerBearerToken() -> String? {
         migrateTokensToKeychainIfNeeded()
         let token = KeychainTokenStore.string(for: sellerTokenKey)?
@@ -137,8 +152,10 @@ enum MarketplaceAuthSession {
         let buyerAccountCreated = defaults.bool(forKey: "buyerAccountCreated")
         let sellerAccountCreated = defaults.bool(forKey: "sellerAccountCreated")
 
-        if buyerAccountCreated, !buyerEmail.isEmpty, !buyerFullName.isEmpty {
-            await ensureBuyerAccount(fullName: buyerFullName, email: buyerEmail)
+        if buyerAccountCreated, !buyerEmail.isEmpty {
+            if !buyerFullName.isEmpty {
+                await ensureBuyerAccount(fullName: buyerFullName, email: buyerEmail)
+            }
             await refreshBuyerToken(email: buyerEmail)
         } else {
             clearBuyerSession()
@@ -257,9 +274,9 @@ private struct EmptyResponse: Decodable {
 }
 
 private enum KeychainTokenStore {
-    private static let service = "com.tenbelow.auth"
+    private nonisolated static let service = "com.tenbelow.auth"
 
-    static func string(for key: String) -> String? {
+    nonisolated static func string(for key: String) -> String? {
         #if canImport(Security)
         var query = baseQuery(for: key)
         query[kSecReturnData as String] = true
@@ -278,7 +295,7 @@ private enum KeychainTokenStore {
         #endif
     }
 
-    static func set(_ value: String, for key: String) {
+    nonisolated static func set(_ value: String, for key: String) {
         #if canImport(Security)
         guard let data = value.data(using: .utf8) else { return }
         var query = baseQuery(for: key)
@@ -297,7 +314,7 @@ private enum KeychainTokenStore {
         #endif
     }
 
-    static func delete(key: String) {
+    nonisolated static func delete(key: String) {
         #if canImport(Security)
         SecItemDelete(baseQuery(for: key) as CFDictionary)
         #else
@@ -306,7 +323,7 @@ private enum KeychainTokenStore {
     }
 
     #if canImport(Security)
-    private static func baseQuery(for key: String) -> [String: Any] {
+    private nonisolated static func baseQuery(for key: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

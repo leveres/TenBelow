@@ -71,7 +71,7 @@ struct ShopView: View {
         NavigationStack {
             ZStack(alignment: .topTrailing) {
                 VStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
                         SnowfallTitleContainer(
                             cornerRadius: 26,
                             horizontalPadding: 12,
@@ -83,8 +83,8 @@ struct ShopView: View {
                             Image("ShopTitle")
                                 .resizable()
                                 .scaledToFit()
-                                .frame(height: 154)
-                                .padding(.bottom, TopLevelHeaderMetrics.titleArtBottomTuck + 6)
+                                .frame(height: 142)
+                                .padding(.bottom, TopLevelHeaderMetrics.titleArtBottomTuck + 2)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -99,10 +99,10 @@ struct ShopView: View {
                                 )
                             )
                             .shadow(color: .white.opacity(0.45), radius: 1, y: 1)
-                            .padding(.bottom, 8)
+                            .padding(.bottom, 4)
                     }
                     .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
-                    .padding(.top, TopLevelHeaderMetrics.shopTopInset - 2)
+                    .padding(.top, TopLevelHeaderMetrics.shopTopInset)
                     .padding(.bottom, TopLevelHeaderMetrics.shopBottomInset)
                     .padding(.horizontal, TopLevelHeaderMetrics.shopOuterHorizontalInset)
 
@@ -112,8 +112,8 @@ struct ShopView: View {
                         categories: tbCategories,
                         selected: $selectedCategory
                     )
-                    .padding(.top, TopLevelHeaderMetrics.shopFilterTopInset - 2)
-                    .padding(.bottom, 4)
+                    .padding(.top, TopLevelHeaderMetrics.shopFilterTopInset)
+                    .padding(.bottom, 2)
 
                     sortAndFilterBar
 
@@ -259,7 +259,7 @@ struct ShopView: View {
                 .strokeBorder(.white.opacity(0.52), lineWidth: 0.9)
         )
         .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
-        .padding(.bottom, 4)
+        .padding(.bottom, 2)
         .background(TBTheme.cloudWhite)
         .zIndex(1)
     }
@@ -311,7 +311,7 @@ struct ShopView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
-        .padding(.bottom, 4)
+        .padding(.bottom, 2)
         .background(TBTheme.cloudWhite)
     }
 
@@ -356,7 +356,7 @@ struct ShopView: View {
             }
             .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
         }
-        .padding(.bottom, 4)
+        .padding(.bottom, 2)
         .background(TBTheme.cloudWhite)
     }
 
@@ -420,7 +420,7 @@ struct ShopView: View {
             profilesByID: sellerProfilesByID
         )
 
-        var highlighted = ShopBrowseFilters.applyHighlight(
+        let highlighted = ShopBrowseFilters.applyHighlight(
             filtered,
             highlight: selectedHighlight,
             favoriteProductIDs: buyerEngagement.favoriteProductIDs

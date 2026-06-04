@@ -63,10 +63,6 @@ struct PublicSellerProfileView: View {
         }
     }
 
-    private var featuredProducts: [Product] {
-        Array(sellerProducts.prefix(3))
-    }
-
     private var resolvedSeller: SellerProfile {
         let resolved = resolvedSellerProfile(
             sellerId: seller.id,
@@ -102,6 +98,7 @@ struct PublicSellerProfileView: View {
         // When opened from Shop (hidden root bar), ensure standard navigation chrome returns.
         .toolbar(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
         #endif
         .sheet(isPresented: $showMessagingGate) {
             OrderMessagingGateSheet(sellerName: resolvedSeller.displayName)
@@ -155,12 +152,16 @@ struct PublicSellerProfileView: View {
 
     private var bannerHeader: some View {
         ZStack(alignment: .bottom) {
-            bannerBackground
-                .frame(height: 118)
-                .clipped()
-
-            brandStripe
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            LinearGradient(
+                colors: [
+                    .clear,
+                    Color.black.opacity(0.22),
+                    Color.black.opacity(0.52),
+                ],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
 
             HStack(alignment: .bottom, spacing: TBTheme.spacingLG) {
                 profileAvatar
@@ -203,112 +204,23 @@ struct PublicSellerProfileView: View {
             .padding(.horizontal, TBTheme.spacingLG)
             .padding(.bottom, 8)
         }
+        .frame(height: 118)
+        .background {
+            bannerBackground
+                .ignoresSafeArea(edges: .top)
+        }
         .padding(.bottom, 6)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(resolvedSeller.displayName), \(resolvedSeller.handle), \(sellerProducts.count) products, \(formattedLikes) likes")
     }
 
-    private var brandStripe: some View {
-        LinearGradient(
-            colors: brandTheme.stripeGradient,
-            startPoint: .leading,
-            endPoint: .trailing
-        )
-        .frame(height: 5)
-        .shadow(color: brandTheme.accent.opacity(0.25), radius: 6, y: 2)
-    }
-
     private var bannerBackground: some View {
-        ZStack {
-            StorefrontImageView(reference: resolvedSeller.bannerURL?.absoluteString, contentMode: .fill) {
-                LinearGradient(
-                    colors: brandTheme.bannerGradient,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-
+        StorefrontImageView(reference: resolvedSeller.bannerURL?.absoluteString, contentMode: .fill) {
             LinearGradient(
-                colors: [
-                    brandTheme.accent.opacity(0.22),
-                    .clear,
-                    Color.black.opacity(0.18)
-                ],
+                colors: brandTheme.bannerGradient,
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-        }
-    }
-
-    private var storefrontTrustRow: some View {
-        HStack(spacing: 0) {
-            trustMetric(title: "Rating", value: String(format: "%.1f", resolvedSeller.rating), icon: "star.fill")
-            trustMetricDivider
-            trustMetric(title: "Orders", value: "\(resolvedSeller.orderCount)", icon: "bag.fill")
-            trustMetricDivider
-            trustMetric(title: "Products", value: "\(sellerProducts.count)", icon: "cube.fill")
-            trustMetricDivider
-            trustMetric(title: "Likes", value: formattedLikes, icon: "heart.fill")
-        }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 10)
-        .background(.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(brandTheme.accent.opacity(0.18), lineWidth: 1)
-        )
-        .shadow(color: brandTheme.accent.opacity(0.08), radius: 10, y: 4)
-    }
-
-    private var trustMetricDivider: some View {
-        Rectangle()
-            .fill(Color.black.opacity(0.06))
-            .frame(width: 1, height: 34)
-    }
-
-    private func trustMetric(title: String, value: String, icon: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(brandTheme.accent)
-            Text(value)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(TBTheme.deepSky)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var featuredProductsSection: some View {
-        Group {
-            if featuredProducts.count >= 2 {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Featured")
-                            .font(.tbHeadline)
-                            .foregroundStyle(TBTheme.deepSky)
-                        Spacer()
-                        Text("Newest picks")
-                            .font(.tbMeta)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(featuredProducts) { product in
-                                NavigationLink {
-                                    ProductDetailView(product: product)
-                                } label: {
-                                    SellerFeaturedProductCard(product: product, theme: brandTheme)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -425,12 +337,12 @@ struct PublicSellerProfileView: View {
                     .padding(.vertical, TBTheme.spacingMD)
             } else {
                 GeometryReader { geo in
-                    let gridColumnSpacing: CGFloat = 12
-                    let gridRowSpacing: CGFloat = 10
-                    let sectionStackSpacing: CGFloat = 10
+                    let gridColumnSpacing: CGFloat = 10
+                    let gridRowSpacing: CGFloat = 8
+                    let sectionStackSpacing: CGFloat = totalProductPages > 1 ? 8 : 0
                     let tileWidth = max((geo.size.width - gridColumnSpacing) / 2, 0)
-                    let artworkHeight = min(max(tileWidth * 0.72, 96), 128)
-                    let rowCellHeight = artworkHeight + 58
+                    let artworkHeight = min(max(tileWidth * 0.58, 82), 104)
+                    let rowCellHeight = artworkHeight + 66
 
                     VStack(spacing: sectionStackSpacing) {
                         LazyVGrid(
@@ -451,52 +363,54 @@ struct PublicSellerProfileView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                        HStack(spacing: 10) {
-                            Button {
-                                currentProductPage = max(currentProductPage - 1, 0)
-                            } label: {
-                                paginationArrow(systemName: "chevron.left")
-                            }
-                            .disabled(currentProductPage == 0)
-
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    ForEach(0..<totalProductPages, id: \.self) { page in
-                                        Button {
-                                            currentProductPage = page
-                                        } label: {
-                                            Text("\(page + 1)")
-                                                .font(.tbMeta)
-                                                .foregroundStyle(page == currentProductPage ? .white : .primary.opacity(0.72))
-                                                .frame(width: 30, height: 30)
-                                                .background(
-                                                    Group {
-                                                        if page == currentProductPage {
-                                                            Circle()
-                                                                .fill(TBTheme.deepSky.opacity(0.9))
-                                                        } else {
-                                                            Circle()
-                                                                .fill(.white.opacity(0.92))
-                                                                .overlay(
-                                                                    Circle()
-                                                                        .stroke(Color.black.opacity(0.05), lineWidth: 1)
-                                                                )
-                                                        }
-                                                    }
-                                                )
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
+                        if totalProductPages > 1 {
+                            HStack(spacing: 10) {
+                                Button {
+                                    currentProductPage = max(currentProductPage - 1, 0)
+                                } label: {
+                                    paginationArrow(systemName: "chevron.left")
                                 }
-                                .padding(.horizontal, 2)
-                            }
+                                .disabled(currentProductPage == 0)
 
-                            Button {
-                                currentProductPage = min(currentProductPage + 1, totalProductPages - 1)
-                            } label: {
-                                paginationArrow(systemName: "chevron.right")
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(0..<totalProductPages, id: \.self) { page in
+                                            Button {
+                                                currentProductPage = page
+                                            } label: {
+                                                Text("\(page + 1)")
+                                                    .font(.tbMeta)
+                                                    .foregroundStyle(page == currentProductPage ? .white : .primary.opacity(0.72))
+                                                    .frame(width: 30, height: 30)
+                                                    .background(
+                                                        Group {
+                                                            if page == currentProductPage {
+                                                                Circle()
+                                                                    .fill(TBTheme.deepSky.opacity(0.9))
+                                                            } else {
+                                                                Circle()
+                                                                    .fill(.white.opacity(0.92))
+                                                                    .overlay(
+                                                                        Circle()
+                                                                            .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                                                                    )
+                                                            }
+                                                        }
+                                                    )
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                    .padding(.horizontal, 2)
+                                }
+
+                                Button {
+                                    currentProductPage = min(currentProductPage + 1, totalProductPages - 1)
+                                } label: {
+                                    paginationArrow(systemName: "chevron.right")
+                                }
+                                .disabled(currentProductPage >= totalProductPages - 1)
                             }
-                            .disabled(currentProductPage >= totalProductPages - 1)
                         }
                     }
                 }
@@ -509,10 +423,10 @@ struct PublicSellerProfileView: View {
 
     private func gridSectionHeight(for productCount: Int) -> CGFloat {
         let rowCount = max(1, Int(ceil(Double(productCount) / 2.0)))
-        let rowHeight: CGFloat = 186
-        let rowSpacing: CGFloat = 10
-        let paginationHeight: CGFloat = 40
-        let stackSpacing: CGFloat = 10
+        let rowHeight: CGFloat = 170
+        let rowSpacing: CGFloat = 8
+        let paginationHeight: CGFloat = totalProductPages > 1 ? 40 : 0
+        let stackSpacing: CGFloat = totalProductPages > 1 ? 8 : 0
         return (CGFloat(rowCount) * rowHeight)
             + (CGFloat(max(0, rowCount - 1)) * rowSpacing)
             + paginationHeight
@@ -541,11 +455,11 @@ struct PublicSellerProfileView: View {
                     .font(.system(size: 24))
                     .foregroundStyle(TBTheme.skyBlue.opacity(0.5))
 
-                Text("Storefront updating")
+                Text("No products yet")
                     .font(.tbBodyStrong)
                     .foregroundStyle(TBTheme.deepSky)
 
-                Text("This seller does not have live products available right now. Check back soon.")
+                Text("This seller hasn't listed any live products yet. Check back soon for new items.")
                     .font(.tbCaption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -760,34 +674,25 @@ struct PublicSellerProfileView: View {
     // MARK: - Content
 
     private var loadedContent: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                bannerHeader
-                    .padding(.top, -16)
+        VStack(spacing: 0) {
+            bannerHeader
 
-                VStack(spacing: 8) {
-                    storefrontTrustRow
+            VStack(spacing: 8) {
+                badgeRow
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                    badgeRow
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                aboutCard
 
-                    aboutCard
+                actionSection
 
-                    actionSection
-
-                    featuredProductsSection
-
-                    productsSection
-                        .padding(.top, 4)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-                .padding(.horizontal, TBTheme.spacingLG)
-                .padding(.top, 0)
-                .padding(.bottom, max(geometry.safeAreaInsets.bottom + 2, 4))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                productsSection
+                    .padding(.top, 4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+            .padding(.horizontal, TBTheme.spacingLG)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -832,50 +737,6 @@ private struct AboutBadgePill: View {
     }
 }
 
-// MARK: - Featured Product Card
-
-private struct FeaturedProductCard: View {
-    let product: Product
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
-            Group {
-                StorefrontImageView(reference: product.primaryImageReference) {
-                    RoundedRectangle(cornerRadius: TBTheme.radiusMD)
-                        .fill(Color.secondary.opacity(0.12))
-                        .overlay {
-                            Image(systemName: "photo")
-                                .foregroundStyle(.secondary)
-                        }
-                }
-            }
-            .frame(width: 150, height: 120)
-            .clipped()
-            .cornerRadius(TBTheme.radiusMD)
-
-            Text(product.name)
-                .font(.tbProductTitleSM)
-                .tbProductNameTitleStyle()
-                .lineLimit(2)
-
-            Text(Money.format(cents: product.priceCents))
-                .font(.tbProductPriceSM)
-                .foregroundStyle(.primary.opacity(0.82))
-        }
-        .frame(width: 150)
-        .padding(TBTheme.spacingSM)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: TBTheme.radiusLG))
-        .overlay(
-            RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                .strokeBorder(TBTheme.skyBlue.opacity(0.10), lineWidth: 1)
-        )
-        .shadow(color: TBTheme.deepSky.opacity(0.04), radius: 6, y: 2)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(product.name), \(Money.format(cents: product.priceCents)), featured product")
-        .accessibilityHint("Opens product details.")
-    }
-}
-
 // MARK: - Seller Profile Product Tile
 
 private struct SellerProfileProductTile: View {
@@ -916,6 +777,7 @@ private struct SellerProfileProductTile: View {
                     .font(.tbProductTitleSM)
                     .tbProductNameTitleStyle()
                     .lineLimit(2)
+                    .minimumScaleFactor(0.88)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -934,10 +796,11 @@ private struct SellerProfileProductTile: View {
                     }
                 }
             }
-            .padding(9)
+            .padding(8)
             .frame(
                 maxWidth: .infinity,
                 minHeight: rowHeight ?? (dynamicTypeSize.isAccessibilitySize ? 118 : 102),
+                maxHeight: rowHeight,
                 alignment: .topLeading
             )
             .background(
@@ -1102,36 +965,6 @@ private struct SellerProfileProductTile: View {
             parts.append("Preview")
         }
         return parts.joined(separator: ", ")
-    }
-}
-
-private struct SellerFeaturedProductCard: View {
-    let product: Product
-    let theme: StorefrontBrandTheme
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            StorefrontImageView(reference: product.primaryImageReference) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(theme.accentSecondary.opacity(0.35))
-            }
-            .frame(width: 148, height: 112)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(theme.accent.opacity(0.2), lineWidth: 1)
-            )
-
-            Text(product.name)
-                .font(.tbCaption.weight(.semibold))
-                .foregroundStyle(TBTheme.deepSky)
-                .lineLimit(2)
-                .frame(width: 148, alignment: .leading)
-
-            Text(Money.format(cents: product.priceCents))
-                .font(.caption.weight(.bold))
-                .foregroundStyle(theme.accent)
-        }
     }
 }
 

@@ -54,6 +54,7 @@ struct RolePickerView: View {
     @State private var isRequestingSellerReset = false
     @State private var isResettingSellerPassword = false
     @FocusState private var focusedSellerField: SellerAccountFieldFocus?
+    @FocusState private var focusedBuyerField: BuyerAccountFieldFocus?
 
     init(startInSellerAccount: Bool = false, sellerEntryMode: SellerAccountEntryMode = .create) {
         startsInSellerAccount = startInSellerAccount
@@ -68,6 +69,8 @@ struct RolePickerView: View {
             Group {
                 if step == .sellerAccount {
                     sellerAccountScreen
+                } else if step == .buyerAccount {
+                    buyerAccountScreen
                 } else {
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 0) {
@@ -81,9 +84,7 @@ struct RolePickerView: View {
                                     roleSelectionContent
                                 case .buyerChoice:
                                     buyerChoiceContent
-                                case .buyerAccount:
-                                    buyerAccountContent
-                                case .sellerAccount:
+                                case .buyerAccount, .sellerAccount:
                                     EmptyView()
                                 }
                             }
@@ -182,7 +183,7 @@ struct RolePickerView: View {
                 icon: "bag",
                 eyebrow: "Fastest start",
                 title: "Continue as Guest",
-                description: "Browse products, add items to cart, and check out quickly without creating an account."
+                description: "Browse products and save ideas now. Create a buyer account when you're ready to checkout or message a seller."
             ) {
                 completeBuyerFlow(preference: .guest)
             }
@@ -210,8 +211,20 @@ struct RolePickerView: View {
                 subtitle: "Set up a simple account now so your orders and preferences stay with you."
             ) {
                 VStack(spacing: 12) {
-                    formField(title: "Full Name", text: $buyerNameInput, prompt: "Your name", keyboard: .default)
-                    formField(title: "Email", text: $buyerEmailInput, prompt: "you@example.com", keyboard: .emailAddress)
+                    buyerFormField(
+                        title: "Full Name",
+                        text: $buyerNameInput,
+                        prompt: "Your name",
+                        keyboard: .default,
+                        focus: .name
+                    )
+                    buyerFormField(
+                        title: "Email",
+                        text: $buyerEmailInput,
+                        prompt: "you@example.com",
+                        keyboard: .emailAddress,
+                        focus: .email
+                    )
                 }
             }
 
@@ -236,7 +249,13 @@ struct RolePickerView: View {
                     subtitle: "Enter the 6-digit code sent to \(buyerVerificationDeliveryTarget.isEmpty ? "your email" : buyerVerificationDeliveryTarget)."
                 ) {
                     VStack(spacing: 12) {
-                        formField(title: "Verification Code", text: $buyerVerificationCode, prompt: "123456", keyboard: .numberPad)
+                        buyerFormField(
+                            title: "Verification Code",
+                            text: $buyerVerificationCode,
+                            prompt: "123456",
+                            keyboard: .numberPad,
+                            focus: .verificationCode
+                        )
 
                         Button {
                             Task { await verifyBuyerEmailCode() }
@@ -387,6 +406,41 @@ struct RolePickerView: View {
             }
         }
         .padding(.horizontal, 6)
+    }
+
+    private var buyerAccountScreen: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 22)
+
+                    header
+
+                    buyerAccountContent
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+
+                    Spacer(minLength: 28)
+                }
+                .padding(.horizontal, 0)
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDisabled(focusedBuyerField == nil)
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: focusedBuyerField) { _, field in
+                guard let field else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        proxy.scrollTo(field, anchor: buyerFieldScrollAnchor(for: field))
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            dismissBuyerKeyboard()
+        }
     }
 
     private var sellerAccountScreen: some View {
@@ -1521,6 +1575,99 @@ struct RolePickerView: View {
         #endif
     }
 
+    private func buyerFormField(
+        title: String,
+        text: Binding<String>,
+        prompt: String,
+        keyboard: UIKeyboardType,
+        focus: BuyerAccountFieldFocus
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(TBTheme.deepSky)
+
+            TextField(prompt, text: text)
+                .textInputAutocapitalization(focus == .name ? .words : .never)
+                .autocorrectionDisabled()
+                .keyboardType(keyboard)
+                .focused($focusedBuyerField, equals: focus)
+                .submitLabel(focus == .verificationCode ? .done : .next)
+                .onSubmit {
+                    advanceBuyerField(from: focus)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            .white.opacity(0.50),
+                                            .white.opacity(0.16),
+                                            TBTheme.skyLight.opacity(0.10)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.94),
+                                    .white.opacity(0.42),
+                                    TBTheme.skyBlue.opacity(0.16)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+        }
+        .id(focus)
+    }
+
+    private func buyerFieldScrollAnchor(for field: BuyerAccountFieldFocus) -> UnitPoint {
+        switch field {
+        case .verificationCode:
+            return UnitPoint(x: 0.5, y: 0.82)
+        case .email:
+            return UnitPoint(x: 0.5, y: 0.62)
+        case .name:
+            return UnitPoint(x: 0.5, y: 0.48)
+        }
+    }
+
+    private func advanceBuyerField(from field: BuyerAccountFieldFocus) {
+        switch field {
+        case .name:
+            focusedBuyerField = .email
+        case .email:
+            if buyerVerificationChallengeId.isEmpty {
+                dismissBuyerKeyboard()
+            } else {
+                focusedBuyerField = .verificationCode
+            }
+        case .verificationCode:
+            dismissBuyerKeyboard()
+        }
+    }
+
+    private func dismissBuyerKeyboard() {
+        focusedBuyerField = nil
+        #if os(iOS)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
+    }
+
     private func formField(title: String, text: Binding<String>, prompt: String, keyboard: UIKeyboardType, autocapitalize: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
@@ -1977,6 +2124,12 @@ private enum RolePickerStep {
 private enum BuyerCheckoutPreference: String {
     case guest
     case account
+}
+
+private enum BuyerAccountFieldFocus: Hashable {
+    case name
+    case email
+    case verificationCode
 }
 
 private enum SellerAccountFieldFocus: Hashable {

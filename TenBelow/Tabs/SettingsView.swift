@@ -6,6 +6,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.openURL) private var openURL
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
     @AppStorage("userRole") private var userRole = ""
     @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
@@ -36,6 +37,9 @@ struct SettingsView: View {
 
                     sellerAccountSection(rowHeight: metrics.rowHeight, footerFontSize: metrics.footerFontSize)
                     accountSection(rowHeight: metrics.rowHeight)
+                    #if DEBUG
+                    developerSection(rowHeight: metrics.rowHeight)
+                    #endif
                     legalSection(rowHeight: metrics.compactRowHeight)
 
                     Spacer(minLength: 0)
@@ -96,6 +100,14 @@ struct SettingsView: View {
                     action: signOutSeller
                 )
 
+                settingsButtonRow(
+                    title: "Request seller account deletion",
+                    systemImage: "trash",
+                    isDestructive: true,
+                    rowHeight: rowHeight,
+                    action: requestSellerAccountDeletion
+                )
+
                 Text("Seller sign-out only removes this device's seller session. Your shop stays on TenBelow.")
                     .font(.system(size: footerFontSize, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -145,6 +157,16 @@ struct SettingsView: View {
             }
         }
     }
+
+    #if DEBUG
+    private func developerSection(rowHeight: CGFloat) -> some View {
+        settingsSection("Developer") {
+            settingsNavigationRow(title: "Stripe & checkout tools", systemImage: "hammer", rowHeight: rowHeight) {
+                DeveloperSettingsView()
+            }
+        }
+    }
+    #endif
 
     private func legalSection(rowHeight: CGFloat) -> some View {
         settingsSection("Legal") {
@@ -266,6 +288,13 @@ struct SettingsView: View {
         sellerAccountCreated = false
         sellerPreviewMode = false
         switchAppMode(to: "buyer", launchTab: 0)
+    }
+
+    private func requestSellerAccountDeletion() {
+        let email = sellerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = AppConstants.accountDeletionMailtoURL(accountType: "Seller", email: email) {
+            openURL(url)
+        }
     }
 
     private func switchAppMode(to role: String, launchTab: Int) {

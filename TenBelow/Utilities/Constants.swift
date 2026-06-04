@@ -210,6 +210,23 @@ enum AppConstants {
         return components.url
     }
 
+    /// In-app account deletion initiation for App Store review while automated deletion is being built.
+    static func accountDeletionMailtoURL(accountType: String, email: String?) -> URL? {
+        let trimmedEmail = email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var body = "Account type: \(accountType)\n"
+        if !trimmedEmail.isEmpty {
+            body += "Account email: \(trimmedEmail)\n"
+        }
+        body += "\nPlease delete my TenBelow account and associated personal data, except where TenBelow must retain records for legal, fraud-prevention, tax, payment, or order-support obligations.\n"
+
+        guard var components = URLComponents(string: "mailto:\(supportEmail)") else { return nil }
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "TenBelow account deletion request"),
+            URLQueryItem(name: "body", value: body),
+        ]
+        return components.url
+    }
+
     /// Pre-filled exchange request. No backend is required; your team handles the thread in your inbox.
     static func exchangeRequestMailtoURL(orderId: String, buyerEmail: String?) -> URL? {
         let subject = "TenBelow exchange request — \(orderId)"
@@ -250,9 +267,9 @@ enum TopLevelHeaderMetrics {
         homeBottomInset + homeFloatingTabBarClearance + max(safeAreaBottom, 0)
     }
     static let shopOuterHorizontalInset: CGFloat = 4
-    static let shopTopInset: CGFloat = -14
-    static let shopBottomInset: CGFloat = 0
-    static let shopFilterTopInset: CGFloat = -2
+    static let shopTopInset: CGFloat = -22
+    static let shopBottomInset: CGFloat = -4
+    static let shopFilterTopInset: CGFloat = -8
     static let shopFilterBottomInset: CGFloat = 4
     static let dropTopInset: CGFloat = 0
     static let dropBottomInset: CGFloat = 16

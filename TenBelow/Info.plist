@@ -22,6 +22,8 @@
 	<string>public.app-category.shopping</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>TenBelow uses your photo library so sellers can choose product photos and videos for listings and drops.</string>
 	<key>NSUserNotificationsUsageDescription</key>

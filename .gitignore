@@ -1,2 +1,5 @@
 ._*
 tenbelow-backend/.env
+Config/StripeKeys.xcconfig
+*.xcuserstate
+xcuserdata/

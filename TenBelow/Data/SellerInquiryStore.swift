@@ -27,17 +27,29 @@ final class SellerInquiryStore: ObservableObject {
 
     func fetchThread(sellerId: String, buyerEmail: String? = nil) async -> [OrderSupportMessage] {
         inquiryError = nil
+
+        guard MarketplaceAuthSession.hasAuthenticatedSession else {
+            inquiryError = "Sign in to your account to send and receive messages."
+            return cachedInquiryMessages(sellerId: sellerId, buyerEmail: buyerEmail)
+        }
+
+        await MarketplaceAuthSession.syncAfterIdentityChange()
+
         do {
             return try await SellerInquiryAPI.fetchThread(sellerId: sellerId, buyerEmail: buyerEmail)
         } catch {
-            inquiryError = error.localizedDescription
+            inquiryError = APIErrorMessage.userFacing(error)
             if let buyerEmail, !buyerEmail.isEmpty {
                 return sellerThreads.first(where: {
                     $0.sellerId == sellerId && $0.buyerEmail.lowercased() == buyerEmail.lowercased()
                 })?.messages ?? []
             }
-            return buyerThreads.first(where: { $0.sellerId == sellerId })?.messages ?? []
+            return cachedInquiryMessages(sellerId: sellerId, buyerEmail: buyerEmail)
         }
+    }
+
+    private func cachedInquiryMessages(sellerId: String, buyerEmail: String?) -> [OrderSupportMessage] {
+        thread(for: sellerId, buyerEmail: buyerEmail)?.messages ?? []
     }
 
     func sendMessage(
@@ -47,6 +59,14 @@ final class SellerInquiryStore: ObservableObject {
         buyerEmail: String? = nil
     ) async -> [OrderSupportMessage] {
         inquiryError = nil
+
+        guard MarketplaceAuthSession.hasAuthenticatedSession else {
+            inquiryError = "Sign in to your account to send and receive messages."
+            return cachedInquiryMessages(sellerId: sellerId, buyerEmail: buyerEmail)
+        }
+
+        await MarketplaceAuthSession.syncAfterIdentityChange()
+
         do {
             let messages = try await SellerInquiryAPI.sendMessage(
                 sellerId: sellerId,
@@ -57,8 +77,8 @@ final class SellerInquiryStore: ObservableObject {
             await refreshCachedThread(sellerId: sellerId, buyerEmail: buyerEmail, messages: messages)
             return messages
         } catch {
-            inquiryError = error.localizedDescription
-            return []
+            inquiryError = APIErrorMessage.userFacing(error)
+            return cachedInquiryMessages(sellerId: sellerId, buyerEmail: buyerEmail)
         }
     }
 

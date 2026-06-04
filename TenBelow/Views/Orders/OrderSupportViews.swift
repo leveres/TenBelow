@@ -119,6 +119,9 @@ struct OrderSupportThreadView: View {
             }
             .task(id: threadTaskKey) {
                 isLoading = true
+                orderStore.orderSupportError = nil
+                inquiryStore.inquiryError = nil
+                await MarketplaceAuthSession.syncAfterIdentityChange()
                 messages = await loadMessages()
                 isLoading = false
             }

@@ -21,99 +21,112 @@ struct BuyerAccountSetupView: View {
     @State private var errorMessage: String?
     @State private var isCreatingAccount = false
     @State private var isVerifyingEmail = false
+    @FocusState private var focusedField: BuyerSetupFieldFocus?
 
     var body: some View {
-        ScrollView {
-            GlassCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Create your buyer account")
-                        .font(.tbSectionTitle)
-                        .foregroundStyle(TBTheme.deepSky)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                GlassCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Create your buyer account")
+                            .font(.tbSectionTitle)
+                            .foregroundStyle(TBTheme.deepSky)
 
-                    Text("Save your name and email so checkout and orders stay with you.")
-                        .font(.tbBody)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    labeledField(title: "Full name") {
-                        TextField("Your name", text: $nameInput)
-                            .textContentType(.name)
-                            .textInputAutocapitalization(.words)
-                            .autocorrectionDisabled(false)
-                            .padding(12)
-                            .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-
-                    labeledField(title: "Email") {
-                        TextField("you@example.com", text: $emailInput)
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .padding(12)
-                            .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-
-                    labeledField(title: "Password") {
-                        SecureField("At least 8 characters", text: $passwordInput)
-                            .textContentType(.newPassword)
-                            .padding(12)
-                            .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-
-                    if let errorMessage {
-                        Text(errorMessage)
+                        Text("Save your name and email so checkout and orders stay with you.")
                             .font(.tbBody)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+
+                        setupField(title: "Full name", id: .name) {
+                            TextField("Your name", text: $nameInput)
+                                .textContentType(.name)
+                                .textInputAutocapitalization(.words)
+                                .autocorrectionDisabled(false)
+                        }
+
+                        setupField(title: "Email", id: .email) {
+                            TextField("you@example.com", text: $emailInput)
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+
+                        setupField(title: "Password", id: .password) {
+                            SecureField("At least 8 characters", text: $passwordInput)
+                                .textContentType(.newPassword)
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.tbBody)
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        if verificationChallengeId.isEmpty {
+                            Button {
+                                Task { await saveAccount() }
+                            } label: {
+                                if isCreatingAccount {
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity)
+                                } else {
+                                    Label("Create buyer account", systemImage: "person.crop.circle.badge.checkmark")
+                                        .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+                            .disabled(isCreatingAccount)
+                        } else {
+                            setupField(title: "Verification code", id: .verificationCode) {
+                                TextField("123456", text: $verificationCode)
+                                    .keyboardType(.numberPad)
+                            }
+
+                            Button {
+                                Task { await verifyEmail() }
+                            } label: {
+                                if isVerifyingEmail {
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity)
+                                } else {
+                                    Label("Verify email", systemImage: "checkmark.shield")
+                                        .frame(maxWidth: .infinity)
+                                }
+                            }
+                            .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
+                            .disabled(isVerifyingEmail || verificationCode.count < 6)
+
+                            Button("Send a new code") {
+                                Task { await resendCode() }
+                            }
+                            .font(.tbBodyStrong)
+                            .foregroundStyle(TBTheme.deepSky)
+                        }
                     }
-
-                    if verificationChallengeId.isEmpty {
-                        Button {
-                            Task { await saveAccount() }
-                        } label: {
-                            if isCreatingAccount {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Label("Create buyer account", systemImage: "person.crop.circle.badge.checkmark")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
-                        .disabled(isCreatingAccount)
-                    } else {
-                        labeledField(title: "Verification code") {
-                            TextField("123456", text: $verificationCode)
-                                .keyboardType(.numberPad)
-                                .padding(12)
-                                .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
-
-                        Button {
-                            Task { await verifyEmail() }
-                        } label: {
-                            if isVerifyingEmail {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Label("Verify email", systemImage: "checkmark.shield")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
-                        .disabled(isVerifyingEmail || verificationCode.count < 6)
-
-                        Button("Send a new code") {
-                            Task { await resendCode() }
-                        }
-                        .font(.tbBodyStrong)
-                        .foregroundStyle(TBTheme.deepSky)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDisabled(focusedField == nil)
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: focusedField) { _, field in
+                guard let field else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        proxy.scrollTo(field, anchor: setupFieldScrollAnchor(for: field))
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            focusedField = nil
+            #if os(iOS)
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            #endif
         }
         .background(TBTheme.cloudWhite.ignoresSafeArea())
         .navigationTitle("Buyer account")
@@ -137,12 +150,31 @@ struct BuyerAccountSetupView: View {
         }
     }
 
-    private func labeledField<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func setupField<Content: View>(
+        title: String,
+        id: BuyerSetupFieldFocus,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.tbCaption)
                 .foregroundStyle(.secondary)
             content()
+                .focused($focusedField, equals: id)
+                .padding(12)
+                .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .id(id)
+    }
+
+    private func setupFieldScrollAnchor(for field: BuyerSetupFieldFocus) -> UnitPoint {
+        switch field {
+        case .verificationCode, .password:
+            return UnitPoint(x: 0.5, y: 0.82)
+        case .email:
+            return UnitPoint(x: 0.5, y: 0.62)
+        case .name:
+            return UnitPoint(x: 0.5, y: 0.48)
         }
     }
 
@@ -248,4 +280,11 @@ struct BuyerAccountSetupView: View {
         let pattern = #"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$"#
         return email.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
+}
+
+private enum BuyerSetupFieldFocus: Hashable {
+    case name
+    case email
+    case password
+    case verificationCode
 }

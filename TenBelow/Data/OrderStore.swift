@@ -392,10 +392,6 @@ final class OrderStore: ObservableObject {
     ) -> OrderStatus {
         guard !shipments.isEmpty else { return current }
 
-        let deliveredCount = shipments.filter { $0.status == .delivered }.count
-        let shippedCount = shipments.filter { $0.status == .shipped }.count
-        let preparingCount = shipments.filter { $0.status == .preparing }.count
-
         let cancelledCount = shipments.filter { $0.status == .cancelled }.count
         if cancelledCount == shipments.count {
             return .cancelled
@@ -473,19 +469,38 @@ final class OrderStore: ObservableObject {
 
     func fetchSupportThread(orderId: String, sellerId: String) async -> [OrderSupportMessage] {
         orderSupportError = nil
+        let localMessages = localSupportMessages(orderId: orderId, sellerId: sellerId)
+
+        guard MarketplaceAuthSession.hasAuthenticatedSession else {
+            orderSupportError = messagingAuthHint
+            return localMessages
+        }
+
+        await MarketplaceAuthSession.syncAfterIdentityChange()
+
+        guard MarketplaceAuthSession.hasAuthenticatedSession else {
+            orderSupportError = messagingAuthHint
+            return localMessages
+        }
+
         do {
             return try await OrdersAPI.fetchSupportThread(orderId: orderId, sellerId: sellerId)
         } catch {
-            orderSupportError = error.localizedDescription
-            if let order = order(withId: orderId) {
-                return order.orderMessages.filter { $0.sellerId == sellerId }
-            }
-            return []
+            orderSupportError = APIErrorMessage.userFacing(error)
+            return localMessages
         }
     }
 
     func sendSupportMessage(orderId: String, sellerId: String, text: String, senderName: String? = nil) async -> [OrderSupportMessage] {
         orderSupportError = nil
+
+        guard MarketplaceAuthSession.hasAuthenticatedSession else {
+            orderSupportError = messagingAuthHint
+            return localSupportMessages(orderId: orderId, sellerId: sellerId)
+        }
+
+        await MarketplaceAuthSession.syncAfterIdentityChange()
+
         do {
             let response = try await OrdersAPI.sendSupportMessage(
                 orderId: orderId,
@@ -498,9 +513,24 @@ final class OrderStore: ObservableObject {
             }
             return response.messages
         } catch {
-            orderSupportError = error.localizedDescription
-            return []
+            orderSupportError = APIErrorMessage.userFacing(error)
+            return localSupportMessages(orderId: orderId, sellerId: sellerId)
         }
+    }
+
+    private var messagingAuthHint: String {
+        let role = UserDefaults.standard.string(forKey: "userRole") ?? ""
+        if role == "seller" {
+            return "Sign in as your seller account to send and receive order messages."
+        }
+        return "Sign in with your buyer account to send and receive order messages."
+    }
+
+    private func localSupportMessages(orderId: String, sellerId: String) -> [OrderSupportMessage] {
+        guard let order = order(withId: orderId) else { return [] }
+        return order.orderMessages
+            .filter { $0.sellerId == sellerId }
+            .sorted { $0.createdAt < $1.createdAt }
     }
 
     private func persist() {

@@ -21,10 +21,12 @@ struct CartView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
     @State private var phase: CheckoutPhase = .cart
     @State private var receiptItems: [CartItem] = []
     @State private var cartUpdateMessage: String?
     @State private var presentedLegal: LegalDocument?
+    @State private var showBuyerAccountSetup = false
 
     private var minimumOrderCents: Int {
         AppConstants.minimumOrderCents
@@ -73,6 +75,12 @@ struct CartView: View {
             return true
         }
         return false
+    }
+
+    private var canProceedToCheckout: Bool {
+        cart.subtotalCents >= minimumOrderCents
+            && buyerAccountCreated
+            && MarketplaceAuthSession.hasAuthenticatedSession
     }
 
     private func sellerDisplayName(for sellerId: String) -> String {
@@ -166,6 +174,11 @@ struct CartView: View {
             }
             .sheet(item: $presentedLegal) { document in
                 LegalDocumentSheet(document: document)
+            }
+            .sheet(isPresented: $showBuyerAccountSetup) {
+                NavigationStack {
+                    BuyerAccountSetupView()
+                }
             }
             .background(
                 LinearGradient(
@@ -354,10 +367,18 @@ struct CartView: View {
                     .padding(.horizontal)
                 }
 
+                if !buyerAccountCreated || !MarketplaceAuthSession.hasAuthenticatedSession {
+                    accountRequiredNotice
+                }
+
                 Button {
                     #if os(iOS)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     #endif
+                    guard canProceedToCheckout else {
+                        showBuyerAccountSetup = true
+                        return
+                    }
                     phase = .checkout
                 } label: {
                     HStack {
@@ -379,6 +400,41 @@ struct CartView: View {
             }
             .padding(.top, TBTheme.spacingMD)
         }
+    }
+
+    private var accountRequiredNotice: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "person.crop.circle.badge.checkmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(TBTheme.icyBlue)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Create a buyer account to checkout")
+                        .font(.tbBodyStrong)
+                        .foregroundStyle(TBTheme.deepSky)
+                    Text("TestFlight checkout and order support require a verified buyer account so purchases, messages, and delivery updates stay attached to you.")
+                        .font(.tbCaption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Button {
+                showBuyerAccountSetup = true
+            } label: {
+                Label("Create buyer account", systemImage: "arrow.right.circle")
+            }
+            .buttonStyle(SecondaryCTAButtonStyle())
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
+        )
+        .padding(.horizontal)
     }
 
     private func row(_ label: String, value: String, valueColor: Color = .primary) -> some View {
