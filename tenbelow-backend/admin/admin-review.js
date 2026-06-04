@@ -2095,7 +2095,15 @@ async function loginAdminSession() {
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      throw new Error(await response.text());
+      const raw = await response.text();
+      let message = "Admin sign-in failed";
+      try {
+        const errPayload = JSON.parse(raw);
+        message = errPayload.error || message;
+      } catch {
+        if (raw) message = raw;
+      }
+      throw new Error(message);
     }
     const payload = await response.json();
 
@@ -2119,7 +2127,7 @@ async function loginAdminSession() {
       adminCodeInput.value = "";
       adminCodeInput.focus();
     }
-    setFeedback("Admin sign-in failed");
+    setFeedback(error?.message || "Admin sign-in failed");
     console.error(error);
   }
 }

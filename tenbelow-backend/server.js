@@ -93,7 +93,7 @@ const SELLER_SUBSCRIPTION_PRODUCT_ID =
   process.env.SELLER_SUBSCRIPTION_PRODUCT_ID || "com.innovativecodeworks.com.TenBelow.seller.monthly";
 const APP_API_KEY = process.env.APP_API_KEY || "";
 const AUTH_JWT_SECRET = process.env.AUTH_JWT_SECRET || APP_API_KEY || "";
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || "";
+const ADMIN_API_KEY = String(process.env.ADMIN_API_KEY || "").trim();
 const ADMIN_SESSION_COOKIE_NAME = "tb_admin_session";
 const LEGACY_ADMIN_COOKIE_NAME = "tb_admin_auth";
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
