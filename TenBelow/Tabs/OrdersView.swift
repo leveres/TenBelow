@@ -75,11 +75,6 @@ private enum OrderDateFilter: String, CaseIterable, Identifiable {
 }
 
 struct OrdersView: View {
-    private enum PlaceholderSeller {
-        static let id = "SELL-01"
-        static let name = "FilamentFox"
-    }
-
     private enum HeroMetrics {
         static let titleImageHeight: CGFloat = 88
         static let titleImageScale: CGFloat = 1.22
@@ -104,10 +99,13 @@ struct OrdersView: View {
         userRole == "seller" ? .seller : .buyer
     }
 
-    /// In seller mode with no registered seller, status uses a placeholder seller id.
-    private var effectiveSellerId: String {
-        if !sellerId.isEmpty { return sellerId }
-        return PlaceholderSeller.id
+    private var hasRegisteredSeller: Bool {
+        !sellerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var effectiveSellerId: String? {
+        guard mode == .seller, hasRegisteredSeller else { return nil }
+        return sellerId
     }
 
     var body: some View {
@@ -185,7 +183,7 @@ struct OrdersView: View {
                             OrderDetailView(
                                 orderId: order.id,
                                 mode: mode,
-                                currentSellerId: mode == .seller ? effectiveSellerId : nil
+                                currentSellerId: effectiveSellerId
                             )
                         } label: {
                             OrderRowCard(order: order, products: localProducts.products)
@@ -235,20 +233,10 @@ struct OrdersView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
 
-                #if DEBUG
-                if mode == .seller, sellerId.isEmpty {
-                    Text("Preview mode: \(PlaceholderSeller.name) (\(PlaceholderSeller.id))")
-                        .font(.tbCaption)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-                #endif
-
                 OrdersStatusBar(
                     orders: statusBarOrders,
                     mode: mode,
-                    sellerId: mode == .seller ? effectiveSellerId : nil,
+                    sellerId: effectiveSellerId,
                     selectedFilter: $selectedFilter
                 )
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -315,6 +303,7 @@ struct OrdersView: View {
         switch mode {
         case .buyer: return orderStore.orders
         case .seller:
+            guard let effectiveSellerId else { return [] }
             return orderStore.orders.filter { $0.shipments.contains { $0.sellerId == effectiveSellerId } }
         }
     }
@@ -332,12 +321,8 @@ struct OrdersView: View {
             return "Your orders will appear here with live status updates."
         }
 
-        if sellerId.isEmpty {
-            #if DEBUG
-            return "Showing demo data. Add your Seller ID in Settings to view live orders."
-            #else
-            return "Enter your Seller ID in Settings to load orders for your store."
-            #endif
+        if !hasRegisteredSeller {
+            return "Create or sign in to your seller account from the app start screen to load orders for your store."
         }
 
         return "Orders from your store will appear here."
@@ -374,6 +359,7 @@ struct OrdersView: View {
         case .buyer:
             return order.status == .shipped || order.status == .delivered
         case .seller:
+            guard let effectiveSellerId else { return false }
             let myShipments = order.shipments.filter { $0.sellerId == effectiveSellerId }
             guard !myShipments.isEmpty else { return false }
             return myShipments.allSatisfy { $0.status == .shipped || $0.status == .delivered }
@@ -399,6 +385,7 @@ struct OrdersView: View {
                 ?? order.shipments.compactMap(\.shippedAt).max()
                 ?? order.createdAt
         case .seller:
+            guard let effectiveSellerId else { return order.createdAt }
             let myShipments = order.shipments.filter { $0.sellerId == effectiveSellerId }
             return myShipments.compactMap(\.deliveredAt).max()
                 ?? myShipments.compactMap(\.shippedAt).max()
@@ -415,7 +402,7 @@ struct OrdersView: View {
         case .buyer:
             await orderStore.refreshBuyerOrders(email: buyerEmail)
         case .seller:
-            guard !sellerId.isEmpty else { return }
+            guard hasRegisteredSeller else { return }
             await orderStore.refreshSellerOrders(sellerId: sellerId)
         }
     }

@@ -24,10 +24,10 @@ enum AppConstants {
 
     // MARK: - Marketplace / Reporting
 
-    static let reportListingEmail = "report@tenbelow.com"
+    static let reportListingEmail = "admin@innovativecodeworks.com"
 
     /// Buyer support — exchange requests and general help (opens Mail via `mailto:`).
-    static let supportEmail = "support@tenbelow.com"
+    static let supportEmail = "admin@innovativecodeworks.com"
 
     // MARK: - Legal (web mirrors)
 

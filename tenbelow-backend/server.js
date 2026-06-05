@@ -98,8 +98,6 @@ const ADMIN_SESSION_COOKIE_NAME = "tb_admin_session";
 const LEGACY_ADMIN_COOKIE_NAME = "tb_admin_auth";
 const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const ADMIN_SESSION_TTL_SECONDS = Math.floor(ADMIN_SESSION_TTL_MS / 1000);
-const ADMIN_LOGIN_CODE_TTL_MS = 1000 * 60 * 10;
-const ADMIN_LOGIN_CODE_MAX_ATTEMPTS = 5;
 const EMAIL_OTP_TTL_MS = 1000 * 60 * 10;
 const EMAIL_OTP_MAX_ATTEMPTS = 5;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -268,7 +266,6 @@ const MANAGED_DATA_TARGETS = Object.freeze({
 const DOCUMENT_MEMORY_CACHE = new Map();
 let processedWebhookEventIds = new Set();
 const securityAlertEscalationState = new Map();
-const adminLoginChallenges = new Map();
 const emailOtpChallenges = new Map();
 
 function ensureJSONFile(targetURL, { seedCandidates = [], fallbackValue }) {
@@ -785,43 +782,6 @@ function createAdminSessionToken() {
   );
 }
 
-function pruneExpiredAdminLoginChallenges(now = Date.now()) {
-  for (const [challengeId, challenge] of adminLoginChallenges.entries()) {
-    if (!challenge?.expiresAt || challenge.expiresAt <= now) {
-      adminLoginChallenges.delete(challengeId);
-    }
-  }
-}
-
-function adminLoginSigningSecret() {
-  return String(AUTH_JWT_SECRET || ADMIN_API_KEY || "").trim();
-}
-
-function adminCodeHash(challengeId, code) {
-  return crypto
-    .createHash("sha256")
-    .update(`${challengeId}:${String(code || "").trim()}:${adminLoginSigningSecret()}`)
-    .digest("hex");
-}
-
-function createAdminLoginChallenge(req) {
-  pruneExpiredAdminLoginChallenges();
-
-  const challengeId = crypto.randomUUID();
-  const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
-  const expiresAt = Date.now() + ADMIN_LOGIN_CODE_TTL_MS;
-
-  adminLoginChallenges.set(challengeId, {
-    codeHash: adminCodeHash(challengeId, code),
-    expiresAt,
-    attempts: 0,
-    clientIp: clientIp(req),
-    userAgent: String(req.headers["user-agent"] || "").slice(0, 240),
-  });
-
-  return { challengeId, code, expiresAt };
-}
-
 function maskedEmail(value = "") {
   const [localPart = "", domain = ""] = String(value || "").split("@");
   if (!localPart || !domain) return "";
@@ -829,59 +789,6 @@ function maskedEmail(value = "") {
     ? `${localPart[0] || ""}*`
     : `${localPart.slice(0, 2)}***`;
   return `${visibleLocal}@${domain}`;
-}
-
-async function sendAdminLoginCodeEmail({ code, expiresAt }) {
-  if (!ADMIN_LOGIN_EMAIL) {
-    throw new Error("ADMIN_LOGIN_EMAIL is not configured");
-  }
-  if (!transactionalEmailConfigured()) {
-    throw new Error("Admin login codes require RESEND_API_KEY or SMTP settings");
-  }
-
-  const expiration = new Date(expiresAt).toLocaleString("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-
-  await sendTransactionalEmail({
-    to: ADMIN_LOGIN_EMAIL,
-    subject: "Your TenBelow admin login code",
-    html: `
-      <h2>TenBelow admin login</h2>
-      <p>Your one-time admin login code is:</p>
-      <p style="font-size:28px;font-weight:700;letter-spacing:0.18em">${code}</p>
-      <p>This code expires at ${escapeHtml(expiration)} and can only be used once.</p>
-      <p>If you did not request this code, review the audit log and contact your operator.</p>
-    `,
-  });
-}
-
-function verifyAdminLoginChallenge({ challengeId, code }) {
-  pruneExpiredAdminLoginChallenges();
-
-  const normalizedChallengeId = String(challengeId || "").trim();
-  const normalizedCode = String(code || "").replace(/\D/g, "");
-  const challenge = adminLoginChallenges.get(normalizedChallengeId);
-
-  if (!challenge || !normalizedCode) {
-    return { ok: false, reason: "missing_or_expired_code" };
-  }
-
-  challenge.attempts += 1;
-  if (challenge.attempts > ADMIN_LOGIN_CODE_MAX_ATTEMPTS) {
-    adminLoginChallenges.delete(normalizedChallengeId);
-    return { ok: false, reason: "too_many_attempts" };
-  }
-
-  const expectedHash = challenge.codeHash;
-  const actualHash = adminCodeHash(normalizedChallengeId, normalizedCode);
-  if (!constantTimeEquals(actualHash, expectedHash)) {
-    return { ok: false, reason: "invalid_code" };
-  }
-
-  adminLoginChallenges.delete(normalizedChallengeId);
-  return { ok: true };
 }
 
 function pruneExpiredEmailOtpChallenges(now = Date.now()) {

@@ -170,9 +170,17 @@ struct BuyerProfileView: View {
                                 Text("Support")
                                     .font(.tbBodyStrong)
                                     .foregroundStyle(TBTheme.deepSky)
-                                Text("support@tenbelow.com")
-                                    .font(.tbBody)
-                                    .foregroundStyle(.secondary)
+                                Button {
+                                    if let url = URL(string: "mailto:\(AppConstants.supportEmail)") {
+                                        openURL(url)
+                                    }
+                                } label: {
+                                    Text(AppConstants.supportEmail)
+                                        .font(.tbBody)
+                                        .foregroundStyle(TBTheme.icyBlue)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
                             }
 
                             Button {

@@ -160,7 +160,7 @@ struct AddProductView: View {
                     .keyboardType(.decimalPad)
 
                 if premiumListingBlocked {
-                    Text("Listings over \(Money.format(cents: premiumListingThresholdCents - 1)) require seller verification before they can be submitted.")
+                    Text("Prices of \(Money.format(cents: premiumListingThresholdCents)) and above require seller verification. Lower the price to \(Money.format(cents: premiumListingThresholdCents - 1)) or below to submit now.")
                         .font(.tbCaption)
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
@@ -405,7 +405,7 @@ struct AddProductView: View {
 
             Text(
                 premiumListingBlocked
-                    ? "Earn verification to unlock premium-priced marketplace listings."
+                    ? "Submit is disabled until the price is \(Money.format(cents: premiumListingThresholdCents - 1)) or below, or your shop earns verification."
                     : "This editor saves your listing locally and submits it to TenBelow for marketplace review."
             )
                 .font(.tbCaption)
