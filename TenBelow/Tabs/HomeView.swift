@@ -37,12 +37,12 @@ struct HomeView: View {
         static let pageInset = TBTheme.spacingXL
         // Give section titles a little more breathing room above cards/banners.
         static let titleToContent = TBTheme.spacingSM + 4
-        /// Slightly larger mark; paired with tighter snowfall padding so layout below doesn’t shift.
-        static let logoImageHeight: CGFloat = 166
-        static let logoVisualScale: CGFloat = 1.045
-        static let logoTopOffset: CGFloat = -18
-        static let logoSnowfallVerticalPadding: CGFloat = 2
-        static let logoToDealSpacing: CGFloat = 4
+        /// Hero mark size; paired with tighter snowfall padding so layout below doesn’t shift too far.
+        static let logoImageHeight: CGFloat = 198
+        static let logoVisualScale: CGFloat = 1.08
+        static let logoTopOffset: CGFloat = -22
+        static let logoSnowfallVerticalPadding: CGFloat = 1
+        static let logoToDealSpacing: CGFloat = 2
         /// Clear separation so the favorites strip (and its pill title) never visually collides with the deal hero.
         static let dealToFavoritesSpacing: CGFloat = 24
         /// Gap between Fresh favorites and Maker spotlight (fixed — not device-dependent).
@@ -90,8 +90,8 @@ struct HomeView: View {
         static func resolved(for availableHeight: CGFloat) -> HomeLayoutProfile {
             if availableHeight < 700 {
                 return HomeLayoutProfile(
-                    logoImageHeight: 122,
-                    logoTopOffset: -9,
+                    logoImageHeight: 142,
+                    logoTopOffset: -11,
                     logoToDealSpacing: 1,
                     dealToFavoritesSpacing: 18,
                     favoritesTitleTopInset: 5,
@@ -108,8 +108,8 @@ struct HomeView: View {
 
             if availableHeight < 760 {
                 return HomeLayoutProfile(
-                    logoImageHeight: 138,
-                    logoTopOffset: -11,
+                    logoImageHeight: 162,
+                    logoTopOffset: -14,
                     logoToDealSpacing: 2,
                     dealToFavoritesSpacing: 20,
                     favoritesTitleTopInset: 6,
@@ -126,9 +126,9 @@ struct HomeView: View {
 
             if availableHeight < 850 {
                 return HomeLayoutProfile(
-                    logoImageHeight: 158,
-                    logoTopOffset: -15,
-                    logoToDealSpacing: 3,
+                    logoImageHeight: 184,
+                    logoTopOffset: -18,
+                    logoToDealSpacing: 2,
                     dealToFavoritesSpacing: 24,
                     favoritesTitleTopInset: 10,
                     favoritesTitleVisualDrop: 5,
