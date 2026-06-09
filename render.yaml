@@ -20,6 +20,24 @@ services:
         sync: false
       - key: EMAIL_FROM
         value: TenBelow <noreply@tenbelow.com>
+      - key: DATABASE_URL
+        sync: false
+      - key: PG_READS
+        value: "0"
+      - key: S3_MEDIA_BUCKET
+        sync: false
+      - key: S3_MEDIA_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: "true"
+      - key: PUBLIC_MEDIA_BASE_URL
+        sync: false
       - key: SELLER_SUBSCRIPTION_PRODUCT_ID
         value: com.innovativecodeworks.com.TenBelow.seller.monthly
     disks:

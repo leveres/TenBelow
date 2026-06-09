@@ -44,7 +44,12 @@ import {
   dataFileURL,
   ensureDirectory,
 } from "./storagePaths.js";
-import { ensureSchema, isPgEnabled, loadAllDocumentsInto, upsertDocumentRow } from "./db/pgDocuments.mjs";
+import { ensureSchema, getPool, isPgEnabled, loadAllDocumentsInto, upsertDocumentRow } from "./db/pgDocuments.mjs";
+import {
+  ensureRelationalSchema,
+  recordSellerMediaUpload,
+  upsertRelationalForManagedDocument,
+} from "./db/pgRelational.mjs";
 import { storeMediaBytes } from "./mediaObjectStorage.js";
 import {
   MEDIA_SIZE_LIMITS,
@@ -484,13 +489,71 @@ function normalizeMembership(membership = {}) {
   return {
     productId: membership.productId || SELLER_SUBSCRIPTION_PRODUCT_ID,
     hasActiveSubscription: membership.hasActiveSubscription === true,
-    expiresAt: membership.expiresAt || null,
-    lastSyncedAt: membership.lastSyncedAt || null,
+    expiresAt: asISODateOrNull(membership.expiresAt),
+    lastSyncedAt: asISODateOrNull(membership.lastSyncedAt),
     source: membership.source || "app_store",
     originalTransactionId: membership.originalTransactionId || null,
     transactionId: membership.transactionId || null,
     stripeSubscriptionId: membership.stripeSubscriptionId || null,
     stripeCustomerId: membership.stripeCustomerId || null,
+  };
+}
+
+function asISODateOrNull(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return null;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+function normalizeFoundingCreatorFields(record = {}) {
+  const creatorBadge = String(record.creatorBadge || "Founding Creator").trim() || "Founding Creator";
+  const startsAt = asISODateOrNull(record.foundingCreatorAccessStartsAt);
+  const endsAt = asISODateOrNull(record.foundingCreatorAccessEndsAt);
+  const isFoundingCreator = record.isFoundingCreator === true;
+  return {
+    isFoundingCreator,
+    foundingCreatorAccessStartsAt: startsAt,
+    foundingCreatorAccessEndsAt: endsAt,
+    creatorBadge,
+  };
+}
+
+function foundingCreatorStatus(record = {}, now = new Date()) {
+  const founding = normalizeFoundingCreatorFields(record);
+  const nowTs = now.getTime();
+  const startsAtTs = founding.foundingCreatorAccessStartsAt
+    ? new Date(founding.foundingCreatorAccessStartsAt).getTime()
+    : null;
+  const endsAtTs = founding.foundingCreatorAccessEndsAt
+    ? new Date(founding.foundingCreatorAccessEndsAt).getTime()
+    : null;
+
+  const hasStarted = startsAtTs == null || nowTs >= startsAtTs;
+  const hasNotEnded = endsAtTs != null && nowTs <= endsAtTs;
+  const hasComplimentaryAccess = founding.isFoundingCreator && hasStarted && hasNotEnded;
+
+  return {
+    ...founding,
+    hasComplimentaryAccess,
+  };
+}
+
+function effectiveSellerMembershipStatus(record = {}, now = new Date()) {
+  const membership = normalizeMembership(record.membership);
+  const founding = foundingCreatorStatus(record, now);
+  const hasActiveSubscription = membership.hasActiveSubscription === true || founding.hasComplimentaryAccess;
+  const membershipStatus = founding.hasComplimentaryAccess
+    ? "complimentary"
+    : membership.hasActiveSubscription
+      ? "active"
+      : "expired";
+  return {
+    membership,
+    founding,
+    hasActiveSubscription,
+    membershipStatus,
   };
 }
 
@@ -1074,6 +1137,9 @@ function writeManagedJSON(key, payload) {
   if (isPgEnabled()) {
     void upsertDocumentRow(key, payload).catch((err) =>
       console.error("Postgres upsert failed:", key, err.message)
+    );
+    void upsertRelationalForManagedDocument(key, payload).catch((err) =>
+      console.error("Postgres relational upsert failed:", key, err.message)
     );
   }
 }
@@ -1756,6 +1822,8 @@ function normalizeSellerPublicProfile(profile = {}, sellerId = "", businessName 
 }
 
 function normalizeSellerRecord(record = {}, sellerId = "") {
+  const founding = normalizeFoundingCreatorFields(record);
+  const effectiveMembership = effectiveSellerMembershipStatus(record);
   return {
     stripeAccountId: record.stripeAccountId || "",
     email: record.email || "",
@@ -1773,6 +1841,11 @@ function normalizeSellerRecord(record = {}, sellerId = "") {
     },
     sellerPoliciesAcknowledged: record.sellerPoliciesAcknowledged === true,
     membership: normalizeMembership(record.membership),
+    isFoundingCreator: founding.isFoundingCreator,
+    foundingCreatorAccessStartsAt: founding.foundingCreatorAccessStartsAt,
+    foundingCreatorAccessEndsAt: founding.foundingCreatorAccessEndsAt,
+    creatorBadge: founding.creatorBadge,
+    membershipStatus: effectiveMembership.membershipStatus,
     profile: normalizeSellerPublicProfile(record.profile, sellerId, record.businessName),
   };
 }
@@ -1782,6 +1855,7 @@ function isStripeConnectConfigured() {
 }
 
 function stripePendingSellerStatus(sellerId, seller = {}) {
+  const membership = effectiveSellerMembershipStatus(seller);
   return {
     sellerId,
     stripeAccountId: seller.stripeAccountId || "",
@@ -1792,9 +1866,15 @@ function stripePendingSellerStatus(sellerId, seller = {}) {
     payoutSetupPending: true,
     payoutSetupActionRequired: true,
     payoutSetupMessage: STRIPE_CONNECT_SETUP_MESSAGE,
-    hasActiveSubscription: seller.membership?.hasActiveSubscription === true,
-    subscriptionExpiresAt: seller.membership?.expiresAt || null,
-    subscriptionProductId: seller.membership?.productId || SELLER_SUBSCRIPTION_PRODUCT_ID,
+    hasActiveSubscription: membership.hasActiveSubscription,
+    hasPaidSubscription: membership.membership.hasActiveSubscription,
+    subscriptionExpiresAt: membership.membership.expiresAt || null,
+    subscriptionProductId: membership.membership.productId || SELLER_SUBSCRIPTION_PRODUCT_ID,
+    membershipStatus: membership.membershipStatus,
+    isFoundingCreator: membership.founding.isFoundingCreator,
+    foundingCreatorAccessStartsAt: membership.founding.foundingCreatorAccessStartsAt,
+    foundingCreatorAccessEndsAt: membership.founding.foundingCreatorAccessEndsAt,
+    creatorBadge: membership.founding.creatorBadge,
   };
 }
 
@@ -1991,15 +2071,21 @@ function isAllowedCustomOrderReference(ref, sellerId) {
 }
 
 function sellerMembershipResponse(sellerId, seller) {
-  const membership = normalizeMembership(seller?.membership);
+  const membership = effectiveSellerMembershipStatus(seller);
   return {
     sellerId,
-    requiresSubscription: true,
+    requiresSubscription: membership.membershipStatus !== "complimentary",
     hasActiveSubscription: membership.hasActiveSubscription,
-    productId: membership.productId,
-    source: membership.source,
-    expiresAt: membership.expiresAt,
-    lastSyncedAt: membership.lastSyncedAt,
+    hasPaidSubscription: membership.membership.hasActiveSubscription,
+    productId: membership.membership.productId,
+    source: membership.membership.source,
+    expiresAt: membership.membership.expiresAt,
+    lastSyncedAt: membership.membership.lastSyncedAt,
+    membershipStatus: membership.membershipStatus,
+    isFoundingCreator: membership.founding.isFoundingCreator,
+    foundingCreatorAccessStartsAt: membership.founding.foundingCreatorAccessStartsAt,
+    foundingCreatorAccessEndsAt: membership.founding.foundingCreatorAccessEndsAt,
+    creatorBadge: membership.founding.creatorBadge,
   };
 }
 
@@ -5290,6 +5376,7 @@ app.get("/seller-onboarding-status/:sellerId", requireAppClient, requireAuthenti
     const sellers = loadSellersFile();
     const seller = sellers[requestedSellerId];
     if (!seller) return res.status(404).json({ error: "Seller not found" });
+    const membership = effectiveSellerMembershipStatus(seller);
     if (!isStripeConnectConfigured() || !seller.stripeAccountId) {
       return res.json(stripePendingSellerStatus(requestedSellerId, seller));
     }
@@ -5304,9 +5391,15 @@ app.get("/seller-onboarding-status/:sellerId", requireAppClient, requireAuthenti
       payoutSetupPending: false,
       payoutSetupActionRequired: !(account.charges_enabled && account.payouts_enabled && account.details_submitted),
       payoutSetupMessage: null,
-      hasActiveSubscription: seller.membership.hasActiveSubscription,
-      subscriptionExpiresAt: seller.membership.expiresAt,
-      subscriptionProductId: seller.membership.productId,
+      hasActiveSubscription: membership.hasActiveSubscription,
+      hasPaidSubscription: membership.membership.hasActiveSubscription,
+      subscriptionExpiresAt: membership.membership.expiresAt,
+      subscriptionProductId: membership.membership.productId,
+      membershipStatus: membership.membershipStatus,
+      isFoundingCreator: membership.founding.isFoundingCreator,
+      foundingCreatorAccessStartsAt: membership.founding.foundingCreatorAccessStartsAt,
+      foundingCreatorAccessEndsAt: membership.founding.foundingCreatorAccessEndsAt,
+      creatorBadge: membership.founding.creatorBadge,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -5520,6 +5613,26 @@ app.post(
         buffer: body,
         contentType: mediaValidation.contentType,
       });
+      const storageProvider = String(process.env.S3_MEDIA_BUCKET || "").trim() ? "object_storage" : "local_disk";
+      if (isPgEnabled()) {
+        void recordSellerMediaUpload({
+          id: `custom-order-ref:${assetId}`,
+          sellerId,
+          productId: null,
+          mediaKind: "custom-order-reference",
+          url,
+          storageProvider,
+          source: "custom_order_reference_upload",
+          payload: {
+            sellerId,
+            mediaKind: "custom-order-reference",
+            relativeKey,
+            url,
+          },
+        }).catch((err) => {
+          console.error("seller_media relational upsert failed (custom-order-reference):", err.message || err);
+        });
+      }
 
       res.json({ url });
     } catch (err) {
@@ -6050,6 +6163,11 @@ app.get("/admin/sellers", adminMutationLimiter, requireAdmin, async (req, res) =
         totalProducts: sellerProducts.length,
         totalValueCents: sellerProducts.reduce((sum, product) => sum + asFiniteNumber(product.priceCents, 0), 0),
         latestSubmittedAt: latestSubmittedAt ? new Date(latestSubmittedAt).toISOString() : null,
+        membershipStatus: effectiveSellerMembershipStatus(sellers[profile.id] || {}).membershipStatus,
+        isFoundingCreator: sellers[profile.id]?.isFoundingCreator === true,
+        foundingCreatorAccessStartsAt: sellers[profile.id]?.foundingCreatorAccessStartsAt || null,
+        foundingCreatorAccessEndsAt: sellers[profile.id]?.foundingCreatorAccessEndsAt || null,
+        creatorBadge: sellers[profile.id]?.creatorBadge || "Founding Creator",
       };
     }).sort((lhs, rhs) => {
       const lhsTime = new Date(lhs.latestSubmittedAt || 0).getTime();
@@ -6062,6 +6180,76 @@ app.get("/admin/sellers", adminMutationLimiter, requireAdmin, async (req, res) =
     res.json({ sellers: directory });
   } catch (err) {
     console.error("admin sellers directory error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/admin/sellers/:sellerId/founding", adminMutationLimiter, requireAdmin, async (req, res) => {
+  try {
+    const sellerId = String(req.params.sellerId || "").trim();
+    if (!sellerId) return res.status(400).json({ error: "sellerId is required" });
+
+    const sellers = loadSellersFile();
+    const seller = sellers[sellerId];
+    if (!seller) return res.status(404).json({ error: "Seller not found" });
+    return res.json({
+      sellerId,
+      ...sellerMembershipResponse(sellerId, seller),
+    });
+  } catch (err) {
+    console.error("admin seller founding status error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/admin/sellers/:sellerId/founding", adminMutationLimiter, requireAdmin, express.json({ limit: "256kb" }), async (req, res) => {
+  try {
+    const sellerId = String(req.params.sellerId || "").trim();
+    if (!sellerId) return res.status(400).json({ error: "sellerId is required" });
+
+    const sellers = loadSellersFile();
+    const seller = sellers[sellerId];
+    if (!seller) return res.status(404).json({ error: "Seller not found" });
+
+    const body = req.body || {};
+    const normalizedStart = body.foundingCreatorAccessStartsAt === null
+      ? null
+      : asISODateOrNull(body.foundingCreatorAccessStartsAt);
+    const normalizedEnd = body.foundingCreatorAccessEndsAt === null
+      ? null
+      : asISODateOrNull(body.foundingCreatorAccessEndsAt);
+    if (body.foundingCreatorAccessStartsAt && !normalizedStart) {
+      return res.status(400).json({ error: "foundingCreatorAccessStartsAt must be an ISO-8601 timestamp" });
+    }
+    if (body.foundingCreatorAccessEndsAt && !normalizedEnd) {
+      return res.status(400).json({ error: "foundingCreatorAccessEndsAt must be an ISO-8601 timestamp" });
+    }
+    if (normalizedStart && normalizedEnd && new Date(normalizedEnd).getTime() < new Date(normalizedStart).getTime()) {
+      return res.status(400).json({ error: "foundingCreatorAccessEndsAt must be after foundingCreatorAccessStartsAt" });
+    }
+
+    seller.isFoundingCreator = body.isFoundingCreator === true;
+    seller.foundingCreatorAccessStartsAt = normalizedStart;
+    seller.foundingCreatorAccessEndsAt = normalizedEnd;
+    seller.creatorBadge = String(body.creatorBadge || seller.creatorBadge || "Founding Creator").trim() || "Founding Creator";
+    sellers[sellerId] = normalizeSellerRecord(seller, sellerId);
+    saveSellersFile(sellers);
+
+    auditLog(auditContext(req, {
+      action: "admin_seller_founding_updated",
+      sellerId,
+      isFoundingCreator: sellers[sellerId].isFoundingCreator === true,
+      foundingCreatorAccessStartsAt: sellers[sellerId].foundingCreatorAccessStartsAt,
+      foundingCreatorAccessEndsAt: sellers[sellerId].foundingCreatorAccessEndsAt,
+      creatorBadge: sellers[sellerId].creatorBadge,
+    }));
+
+    return res.json({
+      sellerId,
+      ...sellerMembershipResponse(sellerId, sellers[sellerId]),
+    });
+  } catch (err) {
+    console.error("admin seller founding update error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -6268,6 +6456,126 @@ app.delete("/admin/accounts/:kind/:accountId", adminMutationLimiter, requireAdmi
   } catch (err) {
     console.error("admin account delete error:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+async function pgTableCount(pool, tableName) {
+  const { rows } = await pool.query(`SELECT COUNT(*)::int AS count FROM ${tableName}`);
+  return rows?.[0]?.count ?? 0;
+}
+
+function expectedSupportMessageCount() {
+  const orders = loadOrdersFile();
+  const fromOrders = orders.reduce((sum, order) => {
+    const supportRequests = Array.isArray(order?.supportRequests) ? order.supportRequests.length : 0;
+    const orderMessages = Array.isArray(order?.orderMessages) ? order.orderMessages.length : 0;
+    return sum + supportRequests + orderMessages;
+  }, 0);
+
+  const customOrderRequests = loadCustomOrderRequestsFile();
+  const sellerInquiries = loadSellerInquiriesFile();
+  const fromCustomRequests = customOrderRequests.length;
+  const fromInquiries = sellerInquiries.reduce((sum, thread) => {
+    const messages = Array.isArray(thread?.messages) ? thread.messages.length : 0;
+    return sum + (messages || 1);
+  }, 0);
+
+  return fromOrders + fromCustomRequests + fromInquiries;
+}
+
+function expectedSellerMediaMinimumCount(catalogProducts = [], sellers = {}) {
+  const fromProducts = catalogProducts.reduce((sum, product) => {
+    const images = Array.isArray(product?.imageURLs) ? product.imageURLs.filter(Boolean).length : 0;
+    const demo = product?.demoVideoURL ? 1 : 0;
+    const preview = product?.productionPreviewURL ? 1 : 0;
+    return sum + images + demo + preview;
+  }, 0);
+
+  const fromSellerProfiles = Object.values(sellers).reduce((sum, seller) => {
+    const avatar = seller?.profile?.avatarURL ? 1 : 0;
+    const banner = seller?.profile?.bannerURL ? 1 : 0;
+    return sum + avatar + banner;
+  }, 0);
+
+  return fromProducts + fromSellerProfiles;
+}
+
+app.get("/admin/pg-relational-health", adminMutationLimiter, requireAdmin, async (req, res) => {
+  if (!isPgEnabled()) {
+    return res.status(503).json({
+      ok: false,
+      error: "DATABASE_URL is not configured",
+    });
+  }
+
+  try {
+    await ensureSchema();
+    await ensureRelationalSchema();
+    const pool = getPool();
+    if (!pool) {
+      return res.status(503).json({ ok: false, error: "Postgres pool unavailable" });
+    }
+
+    const sellers = loadSellersFile();
+    const buyers = loadBuyersFile();
+    const orders = loadOrdersFile();
+    const drops = loadDropsFile();
+    const exchanges = loadExchangeRequestsFile();
+    const reviews = loadProductReviewsFile();
+    const catalog = await fetchCatalog();
+    const products = Array.isArray(catalog?.products) ? catalog.products : [];
+
+    const expected = {
+      sellers: Object.keys(sellers).length,
+      creator_programs: Object.keys(sellers).length,
+      buyers: Object.keys(buyers).length,
+      products: products.length,
+      orders: orders.length,
+      weekly_drops: Object.keys(drops).length,
+      exchanges: exchanges.length,
+      reviews: reviews.length,
+      support_messages: expectedSupportMessageCount(),
+      seller_media_minimum: expectedSellerMediaMinimumCount(products, sellers),
+    };
+
+    const actual = {
+      tb_documents: await pgTableCount(pool, "tb_documents"),
+      sellers: await pgTableCount(pool, "sellers"),
+      creator_programs: await pgTableCount(pool, "creator_programs"),
+      buyers: await pgTableCount(pool, "buyers"),
+      products: await pgTableCount(pool, "products"),
+      orders: await pgTableCount(pool, "orders"),
+      weekly_drops: await pgTableCount(pool, "weekly_drops"),
+      exchanges: await pgTableCount(pool, "exchanges"),
+      reviews: await pgTableCount(pool, "reviews"),
+      support_messages: await pgTableCount(pool, "support_messages"),
+      seller_media: await pgTableCount(pool, "seller_media"),
+    };
+
+    const checks = {
+      sellers: actual.sellers === expected.sellers,
+      creator_programs: actual.creator_programs === expected.creator_programs,
+      buyers: actual.buyers === expected.buyers,
+      products: actual.products === expected.products,
+      orders: actual.orders === expected.orders,
+      weekly_drops: actual.weekly_drops === expected.weekly_drops,
+      exchanges: actual.exchanges === expected.exchanges,
+      reviews: actual.reviews === expected.reviews,
+      support_messages: actual.support_messages === expected.support_messages,
+      seller_media_minimum: actual.seller_media >= expected.seller_media_minimum,
+    };
+
+    const ok = Object.values(checks).every(Boolean);
+    return res.status(ok ? 200 : 503).json({
+      ok,
+      checks,
+      expected,
+      actual,
+      note: "seller_media is validated as a minimum because runtime uploads can exceed base catalog/profile references.",
+    });
+  } catch (err) {
+    console.error("admin pg relational health error:", err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -6575,12 +6883,95 @@ app.put(
       });
       const version = Date.now();
       const withQuery = url.includes("?") ? `${url}&v=${version}` : `${url}?v=${version}`;
+      const storageProvider = String(process.env.S3_MEDIA_BUCKET || "").trim() ? "object_storage" : "local_disk";
+      if (isPgEnabled()) {
+        void recordSellerMediaUpload({
+          id: `${productId}:${mediaKind}:${slot}`,
+          sellerId,
+          productId,
+          mediaKind,
+          url: withQuery,
+          storageProvider,
+          source: "seller_media_upload",
+          payload: {
+            sellerId,
+            productId,
+            mediaKind,
+            slot,
+            relativeKey,
+            url: withQuery,
+          },
+        }).catch((err) => {
+          console.error("seller_media relational upsert failed:", err.message || err);
+        });
+      }
 
       res.json({
         url: withQuery,
       });
     } catch (err) {
       console.error("seller-media upload error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+app.put(
+  "/admin/media/marketing/:assetId/:mediaKind",
+  adminMutationLimiter,
+  requireAdmin,
+  mediaUploadLimiter,
+  express.raw({ type: "*/*", limit: sellerMediaRawLimit }),
+  async (req, res) => {
+    try {
+      const assetId = sanitizePathSegment(req.params.assetId, "asset");
+      const requestedKind = String(req.params.mediaKind || "").trim().toLowerCase();
+      const mediaKind = requestedKind === "video" ? "demo-video" : "image";
+      const extension = sanitizeFileExtension(req.headers["x-file-extension"], mediaKind === "image" ? "jpg" : "mp4");
+      const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
+      const mediaValidation = validateSellerMediaUpload({
+        buffer: req.body,
+        contentType,
+        fileExtension: extension,
+        mediaKind,
+      });
+      if (!mediaValidation.ok) {
+        return res.status(400).json({ error: mediaValidation.error });
+      }
+
+      const filename = `marketing-${mediaKind}.${mediaValidation.extension}`;
+      const relativeKey = `marketing-assets/${assetId}/${filename}`;
+      const { url } = await storeMediaBytes({
+        relativeKey,
+        buffer: req.body,
+        contentType: mediaValidation.contentType,
+      });
+      const version = Date.now();
+      const withQuery = url.includes("?") ? `${url}&v=${version}` : `${url}?v=${version}`;
+      const storageProvider = String(process.env.S3_MEDIA_BUCKET || "").trim() ? "object_storage" : "local_disk";
+      if (isPgEnabled()) {
+        void recordSellerMediaUpload({
+          id: `marketing:${assetId}:${requestedKind || "image"}`,
+          sellerId: null,
+          productId: null,
+          mediaKind: requestedKind === "video" ? "marketing-video" : "marketing-image",
+          url: withQuery,
+          storageProvider,
+          source: "marketing_asset_upload",
+          payload: {
+            assetId,
+            relativeKey,
+            mediaKind: requestedKind,
+            url: withQuery,
+          },
+        }).catch((err) => {
+          console.error("seller_media relational upsert failed (marketing):", err.message || err);
+        });
+      }
+
+      res.json({ url: withQuery });
+    } catch (err) {
+      console.error("marketing asset upload error:", err);
       res.status(500).json({ error: err.message });
     }
   }
@@ -7143,7 +7534,7 @@ app.post("/drop/submit", requireAppClient, requireAuthenticatedSeller, async (re
 
     const catalog = await fetchCatalog();
 
-    if (!normalizeMembership(sellers[sellerId].membership).hasActiveSubscription) {
+    if (!effectiveSellerMembershipStatus(sellers[sellerId]).hasActiveSubscription) {
       return res.status(403).json({
         error: "An active seller membership is required before submitting Weekly Drop products.",
       });
@@ -7299,7 +7690,7 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
 
     const catalog = await fetchCatalog();
 
-    if (!normalizeMembership(sellers[sellerId].membership).hasActiveSubscription) {
+    if (!effectiveSellerMembershipStatus(sellers[sellerId]).hasActiveSubscription) {
       return res.status(403).json({
         error: "An active seller membership is required before submitting Weekly Drop products.",
       });
@@ -7697,6 +8088,7 @@ async function startServer() {
   if (isPgEnabled()) {
     try {
       await ensureSchema();
+      await ensureRelationalSchema();
       if (process.env.PG_READS === "1") {
         DOCUMENT_MEMORY_CACHE.clear();
         await loadAllDocumentsInto(DOCUMENT_MEMORY_CACHE);

@@ -7,6 +7,10 @@
     "dev": "node --watch server.js",
     "check": "node --check server.js",
     "migrate:json-to-pg": "node scripts/migrate-json-to-pg.mjs",
+    "migrate:json-to-pg-relational": "node scripts/migrate-json-to-pg-relational.mjs",
+    "verify:pg-relational": "node scripts/verify-pg-relational.mjs",
+    "smoke:core": "node scripts/smoke-core-endpoints.mjs",
+    "release:checklist": "node scripts/release-checklist.mjs",
     "load-test:catalog": "node scripts/load-test-catalog.mjs"
   },
   "dependencies": {
