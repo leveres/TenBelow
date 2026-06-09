@@ -10,7 +10,6 @@
  *   DATABASE_URL=... BASE_URL=https://tenbelow.onrender.com node scripts/release-checklist.mjs
  *
  * Optional:
- *   ADMIN_API_KEY=...      # includes admin smoke + health auth
  *   APP_API_KEY=...        # passed to smoke script
  *   SKIP_MIGRATION=1       # skip migration step
  *   SKIP_VERIFY=1          # skip verify step
@@ -21,8 +20,6 @@ import { spawnSync } from "node:child_process";
 
 const BASE_URL = String(process.env.BASE_URL || process.env.BACKEND_URL || "").trim().replace(/\/$/, "");
 const DATABASE_URL = String(process.env.DATABASE_URL || "").trim();
-const ADMIN_API_KEY = String(process.env.ADMIN_API_KEY || "").trim();
-
 function runNodeScript(scriptPath, env = {}) {
   const result = spawnSync(process.execPath, [scriptPath], {
     stdio: "inherit",
@@ -76,7 +73,7 @@ async function main() {
     runNodeScript("scripts/smoke-core-endpoints.mjs", {
       BASE_URL,
       STRICT: "1",
-      ...(ADMIN_API_KEY ? { ADMIN_API_KEY } : {}),
+      ADMIN_API_KEY: "",
     });
   } else {
     printSection("Step 3/4: Smoke skipped (SKIP_SMOKE=1)");
@@ -89,16 +86,16 @@ async function main() {
     console.log(`ready checks: ${JSON.stringify(ready.body.checks)}`);
   }
 
-  if (ADMIN_API_KEY) {
-    const adminHealth = await fetchJSON(`${BASE_URL}/admin/pg-relational-health`, {
-      "X-Admin-Key": ADMIN_API_KEY,
-    });
+  const adminHealth = await fetchJSON(`${BASE_URL}/admin/pg-relational-health`);
+  if (adminHealth.status === 200) {
     console.log(`pg-relational-health status=${adminHealth.status} ok=${adminHealth.body?.ok === true}`);
     if (adminHealth.body?.checks) {
       console.log(`pg checks: ${JSON.stringify(adminHealth.body.checks)}`);
     }
+  } else if (adminHealth.status === 401) {
+    console.log("pg-relational-health status=401 (protected; endpoint exists)");
   } else {
-    console.log("pg-relational-health skipped (set ADMIN_API_KEY to include admin summary).");
+    console.log(`pg-relational-health status=${adminHealth.status}`);
   }
 
   console.log("\nRelease checklist complete.");

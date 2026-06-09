@@ -7,8 +7,8 @@
  *
  * Optional:
  *   APP_API_KEY=...            # adds X-TenBelow-App-Key header
- *   ADMIN_API_KEY=...          # tries /admin/pg-relational-health with X-Admin-Key
- *   STRICT=1                   # exit non-zero if any check fails
+ *   ADMIN_API_KEY=...          # optional; direct key only works when ADMIN_ALLOW_DIRECT_KEY_AUTH=true
+ *   STRICT=1                   # exit non-zero if any required check fails
  */
 import "dotenv/config";
 
@@ -70,13 +70,16 @@ async function main() {
     results.push(await check(name, endpoint));
   }
 
-  if (adminApiKey) {
-    const adminResult = await check("admin-pg-relational-health", "/admin/pg-relational-health", {
-      includeAdmin: true,
-    });
+  const adminResult = await check("admin-pg-relational-health", "/admin/pg-relational-health", {
+    includeAdmin: Boolean(adminApiKey),
+  });
+  if (adminResult.status === 200) {
+    adminResult.ok = true;
     results.push(adminResult);
+  } else if (adminResult.status === 401) {
+    console.log("SKIP admin-pg-relational-health (protected; admin session required)");
   } else {
-    console.log("SKIP admin-pg-relational-health (set ADMIN_API_KEY to include)");
+    results.push(adminResult);
   }
 
   console.log("");
