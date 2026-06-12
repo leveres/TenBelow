@@ -204,6 +204,27 @@ enum OrdersAPI {
         return try decodeOrderResponse(data: data, resp: resp)
     }
 
+    static func uploadSupportEvidence(
+        orderId: String,
+        requestId: String,
+        data: Data,
+        contentType: String,
+        fileExtension: String,
+        proofType: String
+    ) async throws -> Order {
+        let url = baseURL.appendingPathComponent("orders/\(orderId)/support-requests/\(requestId)/evidence")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue(fileExtension, forHTTPHeaderField: "X-File-Extension")
+        request.setValue(proofType, forHTTPHeaderField: "X-Proof-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+        request.httpBody = data
+        let (responseData, resp) = try await URLSession.tenBelow.data(for: request)
+        return try decodeOrderResponse(data: responseData, resp: resp)
+    }
+
     static func updateSupportRequest(
         orderId: String,
         requestId: String,

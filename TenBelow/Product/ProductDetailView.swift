@@ -1018,7 +1018,7 @@ private struct ProductRatingSheet: View {
                 Spacer()
             }
             .padding(20)
-            .background(TBTheme.cloudWhite.ignoresSafeArea())
+            .background(TBFrostBackground())
             .navigationTitle("Product Rating")
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)

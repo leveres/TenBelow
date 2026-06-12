@@ -60,6 +60,20 @@ struct BuyerLoginResponse: Decodable {
     let fullName: String?
 }
 
+struct GuestCheckoutSessionResponse: Decodable {
+    let token: String
+    let role: String
+    let buyerEmail: String
+    let checkoutMode: String?
+}
+
+struct BuyerAccountAPIError: LocalizedError {
+    let code: String?
+    let message: String
+
+    var errorDescription: String? { message }
+}
+
 struct BuyerAccountUpdateResponse: Decodable {
     let ok: Bool
     let email: String
@@ -141,6 +155,24 @@ enum BuyerAccountAPI {
         return try JSONDecoder().decode(BuyerLoginResponse.self, from: data)
     }
 
+    static func issueGuestCheckoutSession(email: String, fullName: String) async throws -> GuestCheckoutSessionResponse {
+        let url = CheckoutAPI.baseURL.appendingPathComponent("auth/guest-checkout-session")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        request.httpBody = try JSONEncoder().encode(
+            BuyerAccountCreateRequest(email: email, fullName: fullName, password: nil)
+        )
+
+        let (data, response) = try await URLSession.tenBelow.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw apiError(from: data, statusCode: http.statusCode)
+        }
+
+        return try JSONDecoder().decode(GuestCheckoutSessionResponse.self, from: data)
+    }
+
     static func updateAccount(newEmail: String?, newPassword: String?) async throws -> BuyerAccountUpdateResponse {
         let url = CheckoutAPI.baseURL.appendingPathComponent("auth/buyer-account-update")
         var request = URLRequest(url: url)
@@ -160,14 +192,16 @@ enum BuyerAccountAPI {
         return try JSONDecoder().decode(BuyerAccountUpdateResponse.self, from: data)
     }
 
-    private static func apiError(from data: Data, statusCode: Int) -> NSError {
-        let message = (try? JSONDecoder().decode(ServerErrorResponse.self, from: data).error)
+    private static func apiError(from data: Data, statusCode: Int) -> BuyerAccountAPIError {
+        let decoded = try? JSONDecoder().decode(ServerErrorResponse.self, from: data)
+        let message = decoded?.error
             ?? String(data: data, encoding: .utf8)
             ?? "Server error"
-        return NSError(domain: "BuyerAccountAPI", code: statusCode, userInfo: [NSLocalizedDescriptionKey: message])
+        return BuyerAccountAPIError(code: decoded?.code, message: message)
     }
 }
 
 private struct ServerErrorResponse: Decodable {
     let error: String
+    let code: String?
 }

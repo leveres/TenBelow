@@ -22,6 +22,8 @@ struct ProductCard: View {
     var seller: SellerProfile? = nil
     var allProducts: [Product] = []
     var style: ProductCardStyle = .standard
+    /// Blue theme trim + soft glow, matching the Orders cards. Opt-in per grid.
+    var showsAccentBorder: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -94,8 +96,15 @@ struct ProductCard: View {
             }
         )
         .overlay(
-            RoundedRectangle(cornerRadius: TBTheme.radiusLG)
-                .strokeBorder(cardBorderColor, lineWidth: style == .blended ? 0.8 : 0)
+            Group {
+                if showsAccentBorder {
+                    RoundedRectangle(cornerRadius: TBTheme.radiusLG)
+                        .strokeBorder(accentBorderGradient, lineWidth: accentBorderLineWidth)
+                } else {
+                    RoundedRectangle(cornerRadius: TBTheme.radiusLG)
+                        .strokeBorder(cardBorderColor, lineWidth: style == .blended ? 0.8 : 0)
+                }
+            }
         )
         .cornerRadius(TBTheme.radiusLG)
         .shadow(color: primaryShadowColor, radius: primaryShadowRadius, x: 0, y: primaryShadowYOffset)
@@ -158,7 +167,7 @@ struct ProductCard: View {
                 Text(product.name)
                     .font(titleFont)
                     .tracking(-0.2)
-                    .tbProductNameTitleStyle()
+                    .foregroundStyle(Color(red: 26 / 255, green: 61 / 255, blue: 107 / 255))
                     .lineLimit(titleLineLimit)
                     .minimumScaleFactor(titleMinimumScaleFactor)
                     .multilineTextAlignment(.leading)
@@ -169,7 +178,7 @@ struct ProductCard: View {
                     Text(product.name)
                         .font(titleFont)
                         .tracking(-0.2)
-                        .tbProductNameTitleStyle()
+                        .foregroundStyle(Color(red: 26 / 255, green: 61 / 255, blue: 107 / 255))
                         .lineLimit(titleLineLimit)
                         .minimumScaleFactor(titleMinimumScaleFactor)
                         .multilineTextAlignment(.leading)
@@ -282,9 +291,18 @@ struct ProductCard: View {
                             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                         if seller.showsVerifiedBadge {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(verifiedSealFont)
-                                .foregroundStyle(TBTheme.accent)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 20, height: 20)
+                                .background(
+                                    Color(red: 42 / 255, green: 109 / 255, blue: 181 / 255),
+                                    in: Circle()
+                                )
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(.white.opacity(0.92), lineWidth: 1.5)
+                                )
                                 .layoutPriority(1)
                         }
                     }
@@ -379,12 +397,24 @@ struct ProductCard: View {
         style == .blended ? .white.opacity(0.55) : .clear
     }
 
+    private var accentBorderLineWidth: CGFloat {
+        switch style {
+        case .compact: return 1.1
+        case .blended: return 1.0
+        case .standard: return 1.3
+        }
+    }
+
+    private var accentBorderGradient: LinearGradient {
+        TBTheme.frostEdge
+    }
+
     private var primaryShadowColor: Color {
         switch style {
         case .blended:
             return TBTheme.deepSky.opacity(0.03)
         case .standard, .compact:
-            return TBTheme.deepSky.opacity(0.1)
+            return TBTheme.deepSky.opacity(showsAccentBorder ? 0.13 : 0.1)
         }
     }
 
@@ -538,8 +568,8 @@ struct ProductCard: View {
     private var priceRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(Money.format(cents: product.priceCents))
-                .font(style == .compact ? .system(size: 13, weight: .bold, design: .rounded) : .tbBodyStrong)
-                .foregroundStyle(TBTheme.deepSky)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color(red: 74 / 255, green: 127 / 255, blue: 170 / 255))
 
             if let previousPriceCents = product.previousPriceCents, previousPriceCents > product.priceCents {
                 Text(Money.format(cents: previousPriceCents))

@@ -8,7 +8,7 @@ import SwiftUI
 struct NotificationsHubView: View {
     var body: some View {
         NotificationActivityView()
-            .background(TBTheme.cloudWhite.ignoresSafeArea())
+            .background(TBFrostBackground())
             .navigationTitle("Favorites & notifications")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

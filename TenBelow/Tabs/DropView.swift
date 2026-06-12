@@ -309,7 +309,7 @@ struct DropView: View {
                     buyerInactiveDropContent
                 }
             }
-            .background(TBTheme.cloudWhite)
+            .background(TBFrostBackground())
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .navigationTitle("")
             #if os(iOS) || os(visionOS)

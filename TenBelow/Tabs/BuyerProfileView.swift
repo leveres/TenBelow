@@ -205,7 +205,7 @@ struct BuyerProfileView: View {
             .padding(.bottom, 24)
         }
         .frame(maxWidth: .infinity)
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Account")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

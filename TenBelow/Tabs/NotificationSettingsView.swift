@@ -23,7 +23,7 @@ struct NotificationSettingsView: View {
             .padding(.top, 6)
             .padding(.bottom, 24)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .task {
             await refreshExternalAlertStatus()
         }

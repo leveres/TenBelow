@@ -267,10 +267,19 @@ enum TopLevelHeaderMetrics {
         homeBottomInset + homeFloatingTabBarClearance + max(safeAreaBottom, 0)
     }
     static let shopOuterHorizontalInset: CGFloat = 4
-    static let shopTopInset: CGFloat = -22
-    static let shopBottomInset: CGFloat = -4
-    static let shopFilterTopInset: CGFloat = -8
-    static let shopFilterBottomInset: CGFloat = 4
+    static let shopTopInset: CGFloat = -20
+    static let shopBottomInset: CGFloat = 0
+    static let shopTitleImageHeight: CGFloat = 126
+    static let shopTitleScale: CGFloat = 1.08
+    static let shopTitleBottomTuck: CGFloat = -22
+    static let shopFilterRowSpacing: CGFloat = 3
+    static let shopGridTopInset: CGFloat = 6
+    static let shopGridSpacing: CGFloat = 12
+    static let shopScrollBottomInset: CGFloat = 16
+
+    static func shopScrollBottomPadding(safeAreaBottom: CGFloat) -> CGFloat {
+        shopScrollBottomInset + homeFloatingTabBarClearance + max(safeAreaBottom, 0)
+    }
     static let dropTopInset: CGFloat = 0
     static let dropBottomInset: CGFloat = 16
     static let dropSellerHeaderBottomInset: CGFloat = 8

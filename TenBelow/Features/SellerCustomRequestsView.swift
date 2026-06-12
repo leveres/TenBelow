@@ -41,7 +41,7 @@ struct SellerCustomRequestsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Custom requests")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -280,7 +280,7 @@ struct SellerCustomRequestDetailView: View {
             .padding(.horizontal, TBTheme.spacingLG)
             .padding(.vertical, 16)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Request")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

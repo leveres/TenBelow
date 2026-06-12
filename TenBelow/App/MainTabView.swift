@@ -148,7 +148,7 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             HomeView()
                 .tag(MainTab.home)
-                .tabItem { Label("Home", systemImage: "house") }
+                .tabItem { Label("Home", systemImage: "house.fill") }
 
             Group {
                 if userRole == "seller" {
@@ -162,9 +162,9 @@ struct MainTabView: View {
             .tag(MainTab.store)
             .tabItem {
                 if userRole == "seller" {
-                    Label("Store", systemImage: "storefront")
+                    Label("Store", systemImage: "storefront.fill")
                 } else {
-                    Label("Shop", systemImage: "square.grid.2x2")
+                    Label("Shop", systemImage: "storefront.fill")
                 }
             }
 
@@ -176,12 +176,12 @@ struct MainTabView: View {
                 OrdersView()
             }
                 .tag(MainTab.orders)
-                .tabItem { Label("Orders", systemImage: "shippingbox") }
+                .tabItem { Label("Orders", systemImage: "shippingbox.fill") }
                 .badge(ordersTabBadge)
 
             SettingsView()
                 .tag(MainTab.settings)
-                .tabItem { Label("Settings", systemImage: "gear") }
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .badge(settingsTabBadge)
         }
         .tint(tabBarTint)
@@ -192,13 +192,11 @@ struct MainTabView: View {
     }
 
     private var dropTabSymbolName: String {
-        isWeeklyDropLive ? "flame.fill" : "flame"
+        "arrow.down.circle.fill"
     }
 
     private var tabBarTint: Color {
-        selectedTab == .drop && isWeeklyDropLive
-            ? Color(red: 0.98, green: 0.36, blue: 0.10)
-            : TBTheme.icyBlue
+        Color(red: 42 / 255, green: 109 / 255, blue: 181 / 255)
     }
 
     private var notificationAudienceLabel: String {

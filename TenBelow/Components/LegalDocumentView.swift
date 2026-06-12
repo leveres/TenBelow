@@ -876,7 +876,7 @@ struct LegalDocumentView: View {
             .padding(.bottom, 24)
         }
         .accessibilityIdentifier("legal.document.\(document.id)")
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle(document.title)
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

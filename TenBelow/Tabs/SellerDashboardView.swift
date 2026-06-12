@@ -99,7 +99,7 @@ struct SellerDashboardView: View {
         .padding(.top, 10)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $showAddProductFlow) {
             SellerProductsView(
@@ -627,7 +627,7 @@ private struct PayoutSettingsViewDraft: View {
             .padding(.top, 12)
             .padding(.bottom, 28)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Payouts")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -1037,7 +1037,7 @@ private struct SellerStoresDirectoryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

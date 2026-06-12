@@ -14,7 +14,7 @@ struct CategoryFilterBar: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 ForEach(categories) { category in
                     Button {
                         #if os(iOS)
@@ -32,7 +32,7 @@ struct CategoryFilterBar: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
         }
     }
 }

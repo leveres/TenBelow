@@ -18,6 +18,7 @@ struct PublicSellerProfileView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
     @State private var currentProductPage = 0
+    @State private var selectedProduct: Product?
     @State private var showMessagingGate = false
     @State private var activeShopChat: ShopChatSheetItem?
     @State private var pendingExternalWebsiteURL: URL?
@@ -122,6 +123,9 @@ struct PublicSellerProfileView: View {
         #endif
         .onChange(of: sellerProducts.count) { _, _ in
             currentProductPage = min(currentProductPage, max(totalProductPages - 1, 0))
+        }
+        .navigationDestination(item: $selectedProduct) { product in
+            ProductDetailView(product: product)
         }
         .confirmationDialog(
             "Open seller website?",
@@ -357,11 +361,12 @@ struct PublicSellerProfileView: View {
                                     product: product,
                                     isDraftPreview: previewDraftIDs.contains(product.id),
                                     rowHeight: rowCellHeight,
-                                    artworkHeight: artworkHeight
+                                    artworkHeight: artworkHeight,
+                                    onSelect: { selectedProduct = product }
                                 )
                             }
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .frame(maxWidth: .infinity, alignment: .top)
 
                         if totalProductPages > 1 {
                             HStack(spacing: 10) {
@@ -418,7 +423,7 @@ struct PublicSellerProfileView: View {
                 .animation(.easeInOut(duration: 0.2), value: currentProductPage)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func gridSectionHeight(for productCount: Int) -> CGFloat {
@@ -505,6 +510,7 @@ struct PublicSellerProfileView: View {
             actionButtonRow(showIcons: true)
             actionButtonRow(showIcons: false)
         }
+        .zIndex(1)
     }
 
     private func actionButtonRow(showIcons: Bool) -> some View {
@@ -638,6 +644,7 @@ struct PublicSellerProfileView: View {
         .shadow(color: TBTheme.deepSky.opacity(0.10), radius: 2, y: 1)
         .shadow(color: .black.opacity(0.08), radius: 12, y: 5)
         .shadow(color: .white.opacity(0.45), radius: 1, y: -1)
+        .contentShape(Capsule(style: .continuous))
     }
 
     private var sellerShareText: String {
@@ -674,25 +681,26 @@ struct PublicSellerProfileView: View {
     // MARK: - Content
 
     private var loadedContent: some View {
-        VStack(spacing: 0) {
-            bannerHeader
+        ScrollView {
+            VStack(spacing: 0) {
+                bannerHeader
 
-            VStack(spacing: 8) {
-                badgeRow
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(spacing: 8) {
+                    badgeRow
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                aboutCard
+                    aboutCard
 
-                actionSection
+                    actionSection
 
-                productsSection
-                    .padding(.top, 4)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    productsSection
+                        .padding(.top, 4)
+                }
+                .padding(.horizontal, TBTheme.spacingLG)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, TBTheme.spacingLG)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .scrollBounceBehavior(.basedOnSize)
     }
 }
 
@@ -746,11 +754,10 @@ private struct SellerProfileProductTile: View {
     /// When set, tile fills a grid row of this height (public profile stretch layout).
     var rowHeight: CGFloat?
     var artworkHeight: CGFloat = 62
+    let onSelect: () -> Void
 
     var body: some View {
-        NavigationLink {
-            ProductDetailView(product: product)
-        } label: {
+        Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack(alignment: .topLeading) {
                     productArtwork
@@ -818,10 +825,12 @@ private struct SellerProfileProductTile: View {
                     .stroke(Color.black.opacity(0.045), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.035), radius: 10, y: 4)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tileAccessibilityLabel)
         .accessibilityHint("Opens product details.")
+        .accessibilityAddTraits(.isButton)
     }
 
     @ViewBuilder

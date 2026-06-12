@@ -16,7 +16,7 @@ struct SellOnTenBelowLandingView: View {
             }
             .padding(TBTheme.spacingLG)
         }
-        .background(TBTheme.cloudWhite)
+        .background(TBFrostBackground())
         .navigationTitle("Sell on TenBelow")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

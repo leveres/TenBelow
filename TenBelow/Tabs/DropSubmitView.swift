@@ -189,7 +189,7 @@ struct DropSubmitView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(TBTheme.cloudWhite.ignoresSafeArea())
+            .background(TBFrostBackground())
 
             if viewModel.isSubmitting && viewModel.editorContext == nil {
                 AppOperationOverlay(
@@ -756,7 +756,7 @@ private struct WeeklyDropEditorView: View {
             .padding(.top, 18)
             .padding(.bottom, 28)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle(context.mode.title)
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

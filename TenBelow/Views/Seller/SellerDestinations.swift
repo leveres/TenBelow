@@ -95,7 +95,7 @@ struct AddProductView: View {
             }
             .padding(TBTheme.spacingLG)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle(title)
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -957,7 +957,7 @@ struct SellerProductsView: View {
         .onChange(of: catalog.contentRevision) { _, _ in
             applyApprovedCatalogProductsToDrafts()
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("My Products")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -2137,7 +2137,7 @@ struct SellerReviewsView: View {
             .padding(.top, TBTheme.spacingMD)
             .padding(.bottom, TBTheme.spacingXL)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Reviews")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -2412,7 +2412,7 @@ struct ShippingSettingsView: View {
             .padding(.top, TBTheme.spacingMD)
             .padding(.bottom, 120)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Shipping Settings")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -2492,7 +2492,7 @@ struct SellerPoliciesView: View {
             .padding(.top, TBTheme.spacingMD)
             .padding(.bottom, 120)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Policies")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -2574,7 +2574,7 @@ struct SupportView: View {
             .padding(.top, TBTheme.spacingMD)
             .padding(.bottom, TBTheme.spacingXL)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Support")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -2751,7 +2751,7 @@ struct PayoutSettingsView: View {
             .padding(.top, TBTheme.spacingMD)
             .padding(.bottom, 120)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Payout")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -3003,7 +3003,7 @@ struct EditSellerProfileView: View {
             .padding(.top, TBTheme.spacingMD)
             .padding(.bottom, 120)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Edit Profile")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

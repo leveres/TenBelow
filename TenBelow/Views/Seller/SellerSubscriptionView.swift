@@ -27,7 +27,7 @@ struct SellerSubscriptionView: View {
                 }
                 .padding(TBTheme.spacingLG)
             }
-            .background(TBTheme.cloudWhite.ignoresSafeArea())
+            .background(TBFrostBackground())
             .navigationTitle("Seller Membership")
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)

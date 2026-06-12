@@ -160,7 +160,7 @@ struct HomeView: View {
         }
     }
 
-    /// Compact frost capsule for home section headings (keeps copy readable without a full-width title bar).
+    /// Compact frost capsule for home section headings.
     private struct HomeSectionTitlePill: View {
         enum Style {
             /// Default strip titles (e.g. Fresh favorites).
@@ -202,16 +202,20 @@ struct HomeView: View {
             }
         }
 
+        private var iconName: String {
+            title.localizedCaseInsensitiveContains("maker") ? "flashlight.on.fill" : "snowflake"
+        }
+
         var body: some View {
-            Text(title)
-                .font(titleFont)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [TBTheme.deepSky, TBTheme.icyBlue],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
+            HStack(spacing: 6) {
+                Image(systemName: iconName)
+                    .font(.system(size: style == .spotlight ? 12 : 10, weight: .semibold))
+                    .foregroundStyle(TBTheme.frostGlow)
+
+                Text(title)
+                    .font(titleFont)
+                    .foregroundStyle(TBTheme.icyBlue)
+            }
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, verticalPadding)
                 .background(
@@ -219,8 +223,9 @@ struct HomeView: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(0.94),
-                                    TBTheme.skyLight.opacity(0.62)
+                                    Color.white.opacity(0.78),
+                                    TBTheme.skyLight.opacity(0.42),
+                                    TBTheme.frostGlow.opacity(0.16)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -229,7 +234,7 @@ struct HomeView: View {
                 )
                 .overlay(
                     Capsule(style: .continuous)
-                        .strokeBorder(TBTheme.skyBlue.opacity(0.3), lineWidth: strokeWidth)
+                        .strokeBorder(TBTheme.frostEdge, lineWidth: strokeWidth)
                 )
                 .shadow(color: TBTheme.deepSky.opacity(0.06), radius: style == .spotlight ? 3 : 2, y: style == .spotlight ? 2 : 1)
                 .accessibilityAddTraits(.isHeader)
@@ -614,7 +619,7 @@ struct HomeView: View {
 
     private func freshFavoritesSection(cardWidth: CGFloat, pageInset: CGFloat, layout: HomeLayoutProfile) -> some View {
         return VStack(alignment: .leading, spacing: HomeMetrics.favoritesTitleToCardsSpacing) {
-            HomeSectionTitlePill(title: "Fresh favorites")
+            HomeSectionTitlePill(title: "Fresh Favorites")
                 .padding(.top, layout.favoritesTitleTopInset + layout.favoritesTitleVisualDrop)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -628,9 +633,30 @@ struct HomeView: View {
                                 remoteProfiles: catalog.sellerProfiles
                             ),
                             allProducts: freshFavoritesCatalog,
-                            style: .blended
+                            style: .blended,
+                            showsAccentBorder: true
                         )
                         .frame(width: cardWidth)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: TBTheme.radiusLG, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.6), lineWidth: 1)
+                                .shadow(color: TBTheme.deepSky.opacity(0.08), radius: 5, x: 0, y: 2)
+                        )
+                        .overlay(alignment: .topLeading) {
+                            if product.id == freshFavoritesDisplayProducts.first?.id {
+                                Text("❄️ New Drop")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(TBTheme.deepSky)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(TBTheme.skyLight.opacity(0.88), in: Capsule(style: .continuous))
+                                    .overlay(
+                                        Capsule(style: .continuous)
+                                            .strokeBorder(Color.white.opacity(0.62), lineWidth: 1)
+                                    )
+                                    .padding(8)
+                            }
+                        }
                     }
                 }
                 .padding(.trailing, pageInset)
@@ -647,7 +673,7 @@ struct HomeView: View {
 
     private func makerSpotlightSection(_ creator: SellerProfile, layout: HomeLayoutProfile) -> some View {
         return VStack(alignment: .leading, spacing: layout.spotlightTitleToCard) {
-            HomeSectionTitlePill(title: "Maker spotlight")
+            HomeSectionTitlePill(title: "Maker Spotlight")
 
             CreatorSpotlightCard(
                 creator: creator,
@@ -661,7 +687,6 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    @ViewBuilder
     private func homeScrollContent(
         contentWidth: CGFloat,
         pageInset: CGFloat,
@@ -671,7 +696,7 @@ struct HomeView: View {
         let dealBannerHeight = HomeMetrics.dealBannerHeight(for: contentWidth)
         let favoriteCardWidth = HomeMetrics.freshFavoriteCardWidth(for: contentWidth)
 
-        VStack(alignment: .leading, spacing: 0) {
+        return VStack(alignment: .leading, spacing: 0) {
             SnowfallTitleContainer(
                 cornerRadius: 30,
                 horizontalPadding: TBTheme.spacingLG + 2,
@@ -743,7 +768,7 @@ struct HomeView: View {
                     .padding(.bottom, bottomClearance)
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
                 .clipped()
-                .background(TBTheme.cloudWhite)
+                .background(TBFrostBackground())
             }
             .task {
                 await refreshLiveDropIfNeeded()
@@ -1012,7 +1037,7 @@ private struct DealOfDayBanner: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: TBTheme.radiusLG, style: .continuous)
-                .strokeBorder(.white.opacity(0.14), lineWidth: 0.9)
+                .strokeBorder(TBTheme.frostEdgeOnDark, lineWidth: 1.1)
                 .allowsHitTesting(false)
         )
         .clipShape(RoundedRectangle(cornerRadius: TBTheme.radiusLG, style: .continuous))
@@ -1094,40 +1119,28 @@ private struct CreatorSpotlightCard: View {
                 RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                     .fill(.ultraThinMaterial)
                 RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                TBTheme.skyBlue.opacity(0.22),
-                                TBTheme.deepSky.opacity(0.12),
-                                TBTheme.icyBlue.opacity(0.08)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(Color.white.opacity(0.30))
                 RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [.white.opacity(0.35), .clear],
-                            startPoint: .top,
-                            endPoint: .center
+                            colors: [
+                                .white.opacity(0.42),
+                                TBTheme.skyLight.opacity(0.14),
+                                .white.opacity(0.04)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
                     )
             }
         }
         .overlay(
             RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.white.opacity(0.55), TBTheme.skyBlue.opacity(0.35)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: isAccessibilityLayout ? 1 : 0.75
-                )
+                .strokeBorder(Color.white.opacity(0.82), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
-        .shadow(color: TBTheme.deepSky.opacity(0.06), radius: isAccessibilityLayout ? 8 : 5, y: isAccessibilityLayout ? 3 : 2)
+        .shadow(color: TBTheme.deepSky.opacity(0.10), radius: 14, x: 0, y: 7)
+        .shadow(color: Color.white.opacity(0.26), radius: 1, x: 0, y: -1)
     }
 
     private var metadataText: String {
@@ -1268,5 +1281,6 @@ private struct CreatorSpotlightCard: View {
     }
 
 }
+
 
 

@@ -24,7 +24,7 @@ struct ReportListingFallbackSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 16) {
                 Text("Mail is unavailable. You can still report this listing by copying the details below and emailing \(AppConstants.reportListingEmail), or sharing them in another app.")
                     .font(.tbBody)
                     .foregroundStyle(.secondary)
@@ -43,12 +43,12 @@ struct ReportListingFallbackSheet: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
                     }
-                    .frame(minHeight: 120, maxHeight: 220)
+                    .frame(minHeight: 100, maxHeight: 180)
                     .padding(12)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
 
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
                     if let mailURL {
                         Button {
                             PlatformURLOpener.open(mailURL, onSuccess: { dismiss() }, onFailure: { })
@@ -79,7 +79,10 @@ struct ReportListingFallbackSheet: View {
                     .buttonStyle(.bordered)
                 }
             }
-            .padding()
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle("Report listing")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -88,6 +91,8 @@ struct ReportListingFallbackSheet: View {
                 }
             }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private func copyToPasteboard(_ string: String) {

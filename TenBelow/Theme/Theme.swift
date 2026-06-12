@@ -24,6 +24,8 @@ enum TBTheme {
     static let subtleGray   = Color(red: 0.94, green: 0.95, blue: 0.97)   // #F0F3F7
     static let icyBlue      = Color(red: 0.30, green: 0.52, blue: 0.90)   // #4D85E6 — frost price tint
     static let frostGlow    = Color(red: 0.55, green: 0.78, blue: 1.0)    // #8CC7FF — subtle glow
+    /// Top tone of the app-wide frost screen gradient; use for sticky chrome that must blend with it.
+    static let frostScreenTop = Color(red: 231 / 255, green: 241 / 255, blue: 255 / 255) // #E7F1FF
 
     // MARK: - Gradients
 
@@ -65,6 +67,29 @@ enum TBTheme {
 
     static let dropBannerGradient = LinearGradient(
         colors: [deepSky, skyBlue],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    /// Soft blue trim with a white light-catch — shared frost-edge border for cards on light backgrounds.
+    static let frostEdge = LinearGradient(
+        colors: [
+            skyBlue.opacity(0.50),
+            .white.opacity(0.65),
+            skyBlue.opacity(0.28),
+            deepSky.opacity(0.30)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    /// Frost-edge variant for dark/blue surfaces (e.g. Deal of the Day banner) — white-leaning light catch.
+    static let frostEdgeOnDark = LinearGradient(
+        colors: [
+            .white.opacity(0.55),
+            .white.opacity(0.18),
+            .white.opacity(0.38)
+        ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
@@ -398,5 +423,72 @@ extension View {
             .foregroundStyle(TBTheme.productNameTitleGradient)
             .shadow(color: TBTheme.deepSky.opacity(0.45), radius: 0, x: 0, y: 1)
             .shadow(color: Color.black.opacity(0.10), radius: 0, x: 0, y: 1.5)
+    }
+}
+
+// MARK: - Frosted screen background
+
+/// App-wide frosted screen background: ice-blue gradient (#E7F1FF → #F7FAFF)
+/// with a faint tiled snowflake texture. Decorative only — never intercepts
+/// touches and is hidden from accessibility.
+struct TBFrostBackground: View {
+    private static let iceBottom = Color(red: 247 / 255, green: 250 / 255, blue: 255 / 255) // #F7FAFF
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [TBTheme.frostScreenTop, Self.iceBottom],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            SnowflakeCrystalPattern()
+                .opacity(0.08)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Static tiled snowflake texture drawn in a single Canvas pass.
+private struct SnowflakeCrystalPattern: View {
+    var body: some View {
+        Canvas { context, size in
+            guard let flake = context.resolveSymbol(id: 0) else { return }
+            let tile: CGFloat = 78
+            let flakeSize = CGSize(width: 22, height: 22)
+            var row = 0
+            var y: CGFloat = tile / 2
+            while y < size.height + tile {
+                // Stagger alternating rows for a natural crystal scatter.
+                let xOffset: CGFloat = row.isMultiple(of: 2) ? tile / 2 : 0
+                var x: CGFloat = xOffset
+                while x < size.width + tile {
+                    var flakeContext = context
+                    // Slight per-tile rotation keeps the pattern from feeling like a grid.
+                    let rotation = Angle.degrees(Double((row + Int(x / tile)) % 4) * 22.5)
+                    flakeContext.translateBy(x: x, y: y)
+                    flakeContext.rotate(by: rotation)
+                    flakeContext.draw(
+                        flake,
+                        in: CGRect(
+                            x: -flakeSize.width / 2,
+                            y: -flakeSize.height / 2,
+                            width: flakeSize.width,
+                            height: flakeSize.height
+                        )
+                    )
+                    x += tile
+                }
+                y += tile
+                row += 1
+            }
+        } symbols: {
+            Image(systemName: "snowflake")
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(TBTheme.deepSky)
+                .tag(0)
+        }
     }
 }

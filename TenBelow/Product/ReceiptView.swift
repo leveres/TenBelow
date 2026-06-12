@@ -101,7 +101,7 @@ struct ReceiptView: View {
             }
             .padding(.top, TBTheme.spacingLG)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .sheet(isPresented: $showExchangePolicyBrowser) {
             LegalDocumentSheet(document: .exchangePolicy)
         }

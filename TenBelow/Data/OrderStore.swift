@@ -425,13 +425,14 @@ final class OrderStore: ObservableObject {
         return current
     }
 
+    @discardableResult
     func createSupportRequest(
         orderId: String,
         type: OrderSupportRequestType,
         sellerId: String,
         shipmentId: String,
         reason: String
-    ) async {
+    ) async -> String? {
         orderSupportError = nil
         do {
             let updated = try await OrdersAPI.createSupportRequest(
@@ -442,8 +443,12 @@ final class OrderStore: ObservableObject {
                 reason: reason
             )
             upsertOrder(updated)
+            return updated.supportRequests
+                .filter { $0.type == type && $0.sellerId == sellerId && $0.status == .pending }
+                .max(by: { $0.createdAt < $1.createdAt })?.id
         } catch {
             orderSupportError = error.localizedDescription
+            return nil
         }
     }
 

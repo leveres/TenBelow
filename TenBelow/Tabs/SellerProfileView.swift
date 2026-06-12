@@ -120,7 +120,7 @@ struct SellerProfileView: View {
                 }
                 .padding()
             }
-            .background(TBTheme.cloudWhite)
+            .background(TBFrostBackground())
 
             if isShowingOperationOverlay {
                 AppOperationOverlay(

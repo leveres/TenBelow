@@ -258,7 +258,7 @@ final class ExchangeRequestViewModel: ObservableObject {
         guard let selectedItem, let selectedReasonCode else { return }
 
         isSubmitting = true
-        submitProgress = 0
+        submitProgress = 1
         errorMessage = nil
         defer { isSubmitting = false }
 
@@ -269,11 +269,7 @@ final class ExchangeRequestViewModel: ObservableObject {
                 reasonCode: selectedReasonCode,
                 buyerExplanation: trimmedExplanation,
                 assets: draftAssets,
-                progress: { [weak self] value in
-                    Task { @MainActor in
-                        self?.submitProgress = value
-                    }
-                }
+                progress: { _ in }
             )
             submittedRequest = request
             eligibilityResult = ExchangeEligibilityResult(

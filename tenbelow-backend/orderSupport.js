@@ -8,6 +8,16 @@ const SUPPORT_REQUEST_STATUSES = new Set(["pending", "approved", "denied", "with
 export function normalizeSupportRequest(record = {}) {
   const type = String(record.type || "").trim().toLowerCase();
   const status = String(record.status || "pending").trim().toLowerCase();
+  const evidenceAssets = Array.isArray(record.evidenceAssets)
+    ? record.evidenceAssets
+        .filter((asset) => asset && typeof asset.id === "string" && typeof asset.url === "string")
+        .map((asset) => ({
+          id: String(asset.id),
+          type: String(asset.type || "image").trim().toLowerCase() === "video" ? "video" : "image",
+          url: String(asset.url),
+          uploadedAt: asset.uploadedAt || new Date().toISOString(),
+        }))
+    : [];
   return {
     id: String(record.id || "").trim(),
     type: SUPPORT_REQUEST_TYPES.has(type) ? type : "cancel",
@@ -17,6 +27,7 @@ export function normalizeSupportRequest(record = {}) {
     reason: String(record.reason || "").trim(),
     requestedBy: String(record.requestedBy || "buyer").trim().toLowerCase() === "seller" ? "seller" : "buyer",
     resolutionNote: String(record.resolutionNote || "").trim() || null,
+    evidenceAssets,
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: record.updatedAt || record.createdAt || new Date().toISOString(),
   };

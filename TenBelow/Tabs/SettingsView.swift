@@ -48,9 +48,9 @@ struct SettingsView: View {
                 .padding(.top, metrics.topPadding)
                 .padding(.bottom, metrics.bottomPadding)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-                .background(TBTheme.cloudWhite)
+                .background(TBFrostBackground())
             }
-            .background(TBTheme.cloudWhite)
+            .background(TBFrostBackground())
             .navigationTitle("")
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)

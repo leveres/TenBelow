@@ -86,7 +86,7 @@ struct BuyerAccountSecurityView: View {
             .padding(.horizontal, 16)
             .padding(.top, 12)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Email & Password")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

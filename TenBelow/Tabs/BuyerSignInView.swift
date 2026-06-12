@@ -71,7 +71,7 @@ struct BuyerSignInView: View {
             .padding(.horizontal, 16)
             .padding(.top, 12)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Sign in")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

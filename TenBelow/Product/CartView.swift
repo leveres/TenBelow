@@ -79,8 +79,6 @@ struct CartView: View {
 
     private var canProceedToCheckout: Bool {
         cart.subtotalCents >= minimumOrderCents
-            && buyerAccountCreated
-            && MarketplaceAuthSession.hasAuthenticatedSession
     }
 
     private func sellerDisplayName(for sellerId: String) -> String {
@@ -367,18 +365,15 @@ struct CartView: View {
                     .padding(.horizontal)
                 }
 
-                if !buyerAccountCreated || !MarketplaceAuthSession.hasAuthenticatedSession {
-                    accountRequiredNotice
+                if !buyerAccountCreated {
+                    guestCheckoutNotice
                 }
 
                 Button {
                     #if os(iOS)
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     #endif
-                    guard canProceedToCheckout else {
-                        showBuyerAccountSetup = true
-                        return
-                    }
+                    guard canProceedToCheckout else { return }
                     phase = .checkout
                 } label: {
                     HStack {
@@ -402,18 +397,18 @@ struct CartView: View {
         }
     }
 
-    private var accountRequiredNotice: some View {
+    private var guestCheckoutNotice: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "person.crop.circle.badge.checkmark")
+                Image(systemName: "bag.badge.plus")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(TBTheme.icyBlue)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Create a buyer account to checkout")
+                    Text("Checkout as guest")
                         .font(.tbBodyStrong)
                         .foregroundStyle(TBTheme.deepSky)
-                    Text("TestFlight checkout and order support require a verified buyer account so purchases, messages, and delivery updates stay attached to you.")
+                    Text("Enter your email and shipping details on the next screen. Create a buyer account anytime for faster reordering and order support.")
                         .font(.tbCaption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

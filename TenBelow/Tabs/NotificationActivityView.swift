@@ -68,7 +68,7 @@ struct NotificationActivityView: View {
             .padding(.top, 6)
             .padding(.bottom, 24)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationDestination(item: $selectedDestination) { destination in
             switch destination {
             case .product(let product):

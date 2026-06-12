@@ -136,6 +136,50 @@ enum MarketplaceAuthSession {
         }
     }
 
+    /// Ensures a buyer JWT exists for checkout. Signed-in buyers refresh their session; guests receive a checkout-only session.
+    static func ensureCheckoutSession(email: String, fullName: String) async throws {
+        guard AppConstants.isBackendConfigured else {
+            throw CheckoutAPIError(code: "configuration_error", message: AppConstants.checkoutSetupMessage)
+        }
+
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmedName = fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedEmail.isEmpty, trimmedName.count >= 2 else {
+            throw CheckoutAPIError(code: "invalid_checkout_identity", message: "Enter your name and a valid email to continue.")
+        }
+
+        let defaults = UserDefaults.standard
+        let buyerAccountCreated = defaults.bool(forKey: "buyerAccountCreated")
+        let storedEmail = defaults.string(forKey: "buyerEmail")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+
+        if buyerAccountCreated, !storedEmail.isEmpty {
+            guard storedEmail == normalizedEmail else {
+                throw CheckoutAPIError(
+                    code: "buyer_email_mismatch",
+                    message: "Checkout email must match your signed-in buyer account."
+                )
+            }
+            await syncAfterIdentityChange()
+            guard hasActiveBuyerSession else {
+                throw CheckoutAPIError(
+                    code: "buyer_session_unavailable",
+                    message: "Sign in to your buyer account before checking out."
+                )
+            }
+            return
+        }
+
+        let response = try await BuyerAccountAPI.issueGuestCheckoutSession(
+            email: normalizedEmail,
+            fullName: trimmedName
+        )
+        storeBuyerSessionToken(response.token)
+        defaults.set(normalizedEmail, forKey: "buyerEmail")
+        defaults.set(trimmedName, forKey: "buyerFullName")
+    }
+
     static func syncAfterIdentityChange() async {
         let defaults = UserDefaults.standard
         let role = defaults.string(forKey: "userRole") ?? ""
@@ -157,6 +201,10 @@ enum MarketplaceAuthSession {
                 await ensureBuyerAccount(fullName: buyerFullName, email: buyerEmail)
             }
             await refreshBuyerToken(email: buyerEmail)
+        } else if role == "buyer",
+                  !buyerEmail.isEmpty,
+                  !(KeychainTokenStore.string(for: buyerTokenKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Preserve guest checkout JWTs until the buyer creates a full account.
         } else {
             clearBuyerSession()
         }

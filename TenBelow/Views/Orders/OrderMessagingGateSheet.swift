@@ -40,7 +40,7 @@ struct OrderMessagingGateSheet: View {
                 }
                 .padding(20)
             }
-            .background(TBTheme.cloudWhite.ignoresSafeArea())
+            .background(TBFrostBackground())
             .navigationTitle("Message seller")
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)

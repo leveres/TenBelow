@@ -54,7 +54,23 @@ struct TenBelowApp: App {
             StripeAPI.defaultPublishableKey = AppConstants.stripePublishableKey
         }
         #if os(iOS)
-        UITabBar.appearance().unselectedItemTintColor = UIColor.systemGray
+        let selectedTabColor = UIColor(red: 42 / 255, green: 109 / 255, blue: 181 / 255, alpha: 1.0)
+        let unselectedTabColor = UIColor(red: 155 / 255, green: 181 / 255, blue: 204 / 255, alpha: 1.0)
+        let tabBarAppearance = UITabBarAppearance()
+        tabBarAppearance.configureWithDefaultBackground()
+        func applyTabColors(_ appearance: UITabBarItemAppearance) {
+            appearance.selected.iconColor = selectedTabColor
+            appearance.selected.titleTextAttributes = [.foregroundColor: selectedTabColor]
+            appearance.normal.iconColor = unselectedTabColor
+            appearance.normal.titleTextAttributes = [.foregroundColor: unselectedTabColor]
+        }
+        applyTabColors(tabBarAppearance.stackedLayoutAppearance)
+        applyTabColors(tabBarAppearance.inlineLayoutAppearance)
+        applyTabColors(tabBarAppearance.compactInlineLayoutAppearance)
+        UITabBar.appearance().standardAppearance = tabBarAppearance
+        UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
+        UITabBar.appearance().tintColor = selectedTabColor
+        UITabBar.appearance().unselectedItemTintColor = unselectedTabColor
 
         // Frost-themed navigation bar titles
         let frostColor = UIColor(red: 0.30, green: 0.52, blue: 0.90, alpha: 1.0)

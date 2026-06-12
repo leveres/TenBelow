@@ -2991,6 +2991,60 @@ app.post("/auth/buyer-session", authLimiter, requireAppClient, (req, res) => {
   }
 });
 
+app.post("/auth/guest-checkout-session", authLimiter, requireAppClient, (req, res) => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const fullName = String(req.body?.fullName || "").trim();
+    if (!email || !fullName) {
+      return res.status(400).json({ error: "buyer email and fullName are required" });
+    }
+    if (!isValidBuyerEmail(email)) {
+      return res.status(400).json({ error: "Enter a valid email address" });
+    }
+
+    const buyers = loadBuyersFile();
+    const existing = buyers[email];
+    if (existing?.passwordHash && existing.emailVerified === true) {
+      return res.status(403).json({
+        code: "buyer_account_exists",
+        error: "An account already exists for this email. Sign in to checkout.",
+      });
+    }
+
+    buyers[email] = normalizeBuyerRecord(
+      {
+        ...existing,
+        email,
+        fullName,
+        emailVerified: true,
+        emailVerifiedAt: existing?.emailVerifiedAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      email
+    );
+    saveBuyersFile(buyers);
+
+    const token = issueUserSessionToken({
+      role: "buyer",
+      buyerEmail: email,
+    });
+
+    recordSecurityAudit(req, {
+      action: "guest_checkout_session_issued",
+      email: maskedEmail(email),
+    });
+
+    res.json({
+      token,
+      role: "buyer",
+      buyerEmail: email,
+      checkoutMode: "guest",
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/auth/buyer-login", authLimiter, requireAppClient, (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();
@@ -4776,6 +4830,93 @@ app.patch(
       respondWithParticipantOrder(res, nextOrder, req.auth);
     } catch (err) {
       console.error("support request update error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+app.post(
+  "/orders/:orderId/support-requests/:requestId/evidence",
+  requireAppClient,
+  requireAuthenticatedUser,
+  mediaUploadLimiter,
+  express.raw({ type: "*/*", limit: exchangeProofRawLimit }),
+  async (req, res) => {
+    try {
+      const orderId = String(req.params.orderId || "").trim();
+      const requestId = String(req.params.requestId || "").trim();
+
+      const order = findOrderForParticipant(orderId, req.auth);
+      if (!order) return res.status(404).json({ error: "Order not found" });
+
+      const requestIndex = order.supportRequests.findIndex((entry) => entry.id === requestId);
+      if (requestIndex < 0) return res.status(404).json({ error: "Support request not found" });
+
+      const supportRequest = order.supportRequests[requestIndex];
+
+      if (req.auth.role === "buyer" && !buyerOwnsOrder(order, req.auth)) {
+        return res.status(403).json({ error: "Evidence upload denied" });
+      }
+      if (req.auth.role === "seller" && req.auth.sellerId !== supportRequest.sellerId) {
+        return res.status(403).json({ error: "Evidence upload denied" });
+      }
+      if (supportRequest.type !== "refund") {
+        return res.status(400).json({ error: "Evidence uploads are only allowed for refund requests" });
+      }
+      if ((supportRequest.evidenceAssets || []).length >= 3) {
+        return res.status(400).json({ error: "You can attach up to 3 evidence files." });
+      }
+
+      const proofType = String(req.headers["x-proof-type"] || "image").trim().toLowerCase() === "video" ? "video" : "image";
+      const contentType = String(req.headers["content-type"] || "").trim().toLowerCase();
+      const fileExtension = sanitizeFileExtension(req.headers["x-file-extension"], proofType === "video" ? "mp4" : "jpg");
+      const body = req.body;
+
+      const mediaValidation = validateExchangeProofUpload({
+        buffer: body,
+        contentType,
+        fileExtension,
+        proofType,
+      });
+      if (!mediaValidation.ok) {
+        return res.status(400).json({ error: mediaValidation.error });
+      }
+
+      const assetId = crypto.randomUUID();
+      const relativeKey = `orders/${orderId}/support-evidence/${requestId}/${assetId}.${mediaValidation.extension}`;
+      const { url: publicURL } = await storeMediaBytes({
+        relativeKey,
+        buffer: body,
+        contentType: mediaValidation.contentType,
+      });
+
+      const asset = {
+        id: assetId,
+        type: proofType,
+        url: publicURL,
+        uploadedAt: new Date().toISOString(),
+      };
+
+      order.supportRequests[requestIndex] = normalizeSupportRequest({
+        ...supportRequest,
+        evidenceAssets: [...(supportRequest.evidenceAssets || []), asset],
+        updatedAt: new Date().toISOString(),
+      });
+      const updatedOrder = saveHydratedOrder(order);
+
+      auditLog(
+        auditContext(req, {
+          action: "order_support_evidence_uploaded",
+          orderId,
+          requestId,
+          proofType,
+          sellerId: supportRequest.sellerId,
+        })
+      );
+
+      respondWithParticipantOrder(res, updatedOrder, req.auth);
+    } catch (err) {
+      console.error("support evidence upload error:", err);
       res.status(500).json({ error: err.message });
     }
   }

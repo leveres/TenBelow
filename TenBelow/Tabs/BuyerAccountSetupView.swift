@@ -128,7 +128,7 @@ struct BuyerAccountSetupView: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             #endif
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Buyer account")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

@@ -541,13 +541,28 @@ struct CheckoutView: View {
 
         isSubmitting = true
 
-        let signedInBuyerEmail = buyerEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !signedInBuyerEmail.isEmpty, signedInBuyerEmail == trimmedEmail else {
-            errorMessage = "Checkout email must match your signed-in buyer account."
+        do {
+            try await MarketplaceAuthSession.ensureCheckoutSession(
+                email: trimmedEmail,
+                fullName: trimmedName
+            )
+        } catch let apiError as BuyerAccountAPIError where apiError.code == "buyer_account_exists" {
+            errorMessage = apiError.message
+            isSubmitting = false
+            return
+        } catch let apiError as BuyerAccountAPIError {
+            errorMessage = friendlyGuestCheckoutErrorMessage(apiError.message)
+            isSubmitting = false
+            return
+        } catch let checkoutError as CheckoutAPIError {
+            errorMessage = checkoutError.message
+            isSubmitting = false
+            return
+        } catch {
+            errorMessage = friendlyCheckoutErrorMessage(for: error)
             isSubmitting = false
             return
         }
-        await MarketplaceAuthSession.syncAfterIdentityChange()
 
         let req = CreatePaymentIntentRequest(
             email: trimmedEmail,
@@ -664,6 +679,16 @@ struct CheckoutView: View {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     #endif
+
+    private func friendlyGuestCheckoutErrorMessage(_ message: String) -> String {
+        let lowered = message.lowercased()
+        if lowered.contains("cannot post /auth/guest-checkout-session")
+            || lowered.contains("<!doctype html>")
+            || lowered.contains("<html") {
+            return "Guest checkout is not live on the server yet. Deploy the latest TenBelow backend to Render, wait for the deploy to finish, then try again."
+        }
+        return message
+    }
 
     private func friendlyCheckoutErrorMessage(for error: Error) -> String {
         if let urlError = error as? URLError {

@@ -139,7 +139,7 @@ private struct ExchangeIntroView: View {
             }
             .padding(16)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Exchange")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -256,7 +256,7 @@ private struct ExchangeReasonView: View {
             }
             .padding(16)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Reason")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -340,7 +340,7 @@ private struct ExchangeProofUploadView: View {
             }
             .padding(16)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Proof")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -403,6 +403,7 @@ private struct ExchangeReviewSubmitView: View {
                 if viewModel.isSubmitting {
                     ProgressView(value: viewModel.submitProgress)
                         .tint(TBTheme.icyBlue)
+                        .animation(nil, value: viewModel.isSubmitting)
                     Text("Uploading proof and submitting your request...")
                         .font(.tbCaption)
                         .foregroundStyle(.secondary)
@@ -428,7 +429,7 @@ private struct ExchangeReviewSubmitView: View {
             }
             .padding(16)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Review")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -491,7 +492,7 @@ private struct ExchangeSubmittedConfirmationView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Submitted")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -624,7 +625,7 @@ private struct ExchangeStatusContainer: View {
             }
             .padding(16)
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Exchange Status")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)

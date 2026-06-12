@@ -30,6 +30,15 @@ enum OrderSupportRequestStatus: String, Codable {
     }
 }
 
+struct SupportEvidenceAsset: Identifiable, Codable, Hashable {
+    let id: String
+    var type: String
+    var url: String
+    var uploadedAt: Date
+
+    var isVideo: Bool { type == "video" }
+}
+
 struct OrderSupportRequest: Identifiable, Codable, Hashable {
     let id: String
     var type: OrderSupportRequestType
@@ -39,6 +48,7 @@ struct OrderSupportRequest: Identifiable, Codable, Hashable {
     var reason: String
     var requestedBy: String
     var resolutionNote: String?
+    var evidenceAssets: [SupportEvidenceAsset]?
     var createdAt: Date
     var updatedAt: Date
 }

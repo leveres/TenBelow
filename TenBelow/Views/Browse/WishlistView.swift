@@ -43,7 +43,8 @@ struct WishlistView: View {
                                 product: product,
                                 seller: sellerProfilesByID[product.sellerId],
                                 allProducts: storefrontProducts,
-                                style: .compact
+                                style: .compact,
+                                showsAccentBorder: true
                             )
                         }
                     }
@@ -52,7 +53,7 @@ struct WishlistView: View {
                 }
             }
         }
-        .background(TBTheme.cloudWhite.ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Wishlist")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.large)

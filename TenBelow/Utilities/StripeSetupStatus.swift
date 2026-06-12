@@ -103,10 +103,10 @@ enum StripeSetupStatus {
     }
 
     private static var buyerAccountDetail: String {
-        if MarketplaceAuthSession.hasAuthenticatedSession {
-            return "Buyer JWT present — checkout email must match saved buyer email."
+        if MarketplaceAuthSession.hasActiveBuyerSession {
+            return "Signed-in buyer — checkout email must match your account."
         }
-        return "Create a buyer account (not guest) before live checkout."
+        return "Guest checkout works with email and shipping details at payment time."
     }
 
     private static var testingModeDetail: String {

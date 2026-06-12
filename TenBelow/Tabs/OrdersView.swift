@@ -65,9 +65,15 @@ private enum OrderDateFilter: String, CaseIterable, Identifiable {
         }
     }
 
+    func includes(_ date: Date, calendar: Calendar = .current, now: Date = .now) -> Bool {
+        guard let interval = dateInterval(calendar: calendar, now: now) else { return true }
+        return date >= interval.start && date < interval.end
+    }
+
     private func daysBack(_ days: Int, calendar: Calendar, now: Date) -> DateInterval? {
-        let end = now.addingTimeInterval(1)
-        guard let start = calendar.date(byAdding: .day, value: -days, to: now) else {
+        let todayStart = calendar.startOfDay(for: now)
+        guard let start = calendar.date(byAdding: .day, value: -days, to: todayStart),
+              let end = calendar.date(byAdding: .day, value: 1, to: todayStart) else {
             return nil
         }
         return DateInterval(start: start, end: end)
@@ -76,13 +82,17 @@ private enum OrderDateFilter: String, CaseIterable, Identifiable {
 
 struct OrdersView: View {
     private enum HeroMetrics {
-        static let titleImageHeight: CGFloat = 88
-        static let titleImageScale: CGFloat = 1.22
-        static let snowfallCornerRadius: CGFloat = 18
-        static let snowfallHorizontalPadding: CGFloat = 10
-        static let snowfallVerticalPadding: CGFloat = 8
-        static let snowfallFlakeCount: Int = 56
-        static let headerSpacing: CGFloat = 3
+        static let titleImageHeight: CGFloat = 56
+        static let titleImageScale: CGFloat = 1.45
+        static let snowfallCornerRadius: CGFloat = 12
+        static let snowfallHorizontalPadding: CGFloat = 8
+        static let snowfallVerticalPadding: CGFloat = 2
+        static let snowfallFlakeCount: Int = 30
+        static let headerSpacing: CGFloat = 0
+        static let sectionSpacing: CGFloat = 4
+        static let dateFilterChipWidth: CGFloat = 132
+        static let dateFilterChipHeight: CGFloat = 26
+        static let dateFilterClearButtonWidth: CGFloat = 22
     }
 
     @EnvironmentObject private var orderStore: OrderStore
@@ -94,9 +104,19 @@ struct OrdersView: View {
     @State private var selectedDateFilter: OrderDateFilter = .allTime
     @State private var lastOrdersRefresh = Date.distantPast
 
+#if os(iOS)
+    private enum Haptics {
+        static let selection = UIImpactFeedbackGenerator(style: .light)
+    }
+#endif
+
     /// Mode is driven by role picked at app start — no segmented control.
     private var mode: OrdersMode {
         userRole == "seller" ? .seller : .buyer
+    }
+
+    private var productsById: [String: Product] {
+        Dictionary(uniqueKeysWithValues: localProducts.products.map { ($0.id, $0) })
     }
 
     private var hasRegisteredSeller: Bool {
@@ -109,22 +129,33 @@ struct OrdersView: View {
     }
 
     var body: some View {
+        let statusOrders = baseOrders
+        let visibleOrders = filteredOrders
+
         Group {
-            if orderStore.isRefreshing, filteredOrders.isEmpty {
+            if orderStore.isRefreshing, visibleOrders.isEmpty {
                 loadingState
-            } else if filteredOrders.isEmpty {
-                emptyState
+            } else if visibleOrders.isEmpty {
+                emptyState(statusBarOrders: statusOrders)
             } else {
-                ordersList
+                ordersList(statusBarOrders: statusOrders, visibleOrders: visibleOrders)
             }
         }
-        .background(Color.blue.opacity(0.03).ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task(id: "\(mode.rawValue)|\(buyerEmail)|\(sellerId)") {
             await refreshOrders()
+        }
+        .onChange(of: selectedFilter) { _, newFilter in
+            guard newFilter != .completed, selectedDateFilter != .allTime else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                selectedDateFilter = .allTime
+            }
         }
     }
 
@@ -145,9 +176,9 @@ struct OrdersView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var emptyState: some View {
+    private func emptyState(statusBarOrders: [Order]) -> some View {
         VStack(spacing: 0) {
-            ordersHeaderBlock(statusBarOrders: baseOrders)
+            ordersHeaderBlock(statusBarOrders: statusBarOrders)
 
             ScrollView {
                 VStack(spacing: 10) {
@@ -172,13 +203,13 @@ struct OrdersView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var ordersList: some View {
+    private func ordersList(statusBarOrders: [Order], visibleOrders: [Order]) -> some View {
         VStack(spacing: 0) {
-            ordersHeaderBlock(statusBarOrders: baseOrders)
+            ordersHeaderBlock(statusBarOrders: statusBarOrders)
 
             ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(filteredOrders) { order in
+                LazyVStack(spacing: 8) {
+                    ForEach(visibleOrders) { order in
                         NavigationLink {
                             OrderDetailView(
                                 orderId: order.id,
@@ -186,7 +217,11 @@ struct OrdersView: View {
                                 currentSellerId: effectiveSellerId
                             )
                         } label: {
-                            OrderRowCard(order: order, products: localProducts.products)
+                            OrderRowCard(
+                                order: order,
+                                productsById: productsById,
+                                hasPendingCancellation: hasPendingCancellation(order)
+                            )
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("orders.row.\(order.id)")
@@ -195,6 +230,10 @@ struct OrdersView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 28)
             }
+            .transaction { transaction in
+                transaction.disablesAnimations = true
+            }
+            .animation(nil, value: visibleOrders.count)
             .refreshable {
                 await refreshOrders(force: true)
             }
@@ -203,16 +242,16 @@ struct OrdersView: View {
     }
 
     private func ordersHeaderBlock(statusBarOrders: [Order]) -> some View {
-        GlassCard(cornerRadius: 20) {
-            VStack(alignment: .center, spacing: 8) {
+        GlassCard(cornerRadius: 16, contentPadding: 9) {
+            VStack(alignment: .center, spacing: HeroMetrics.sectionSpacing) {
                 VStack(alignment: .center, spacing: HeroMetrics.headerSpacing) {
                     SnowfallTitleContainer(
                         cornerRadius: HeroMetrics.snowfallCornerRadius,
                         horizontalPadding: HeroMetrics.snowfallHorizontalPadding,
                         verticalPadding: HeroMetrics.snowfallVerticalPadding,
                         flakeCount: HeroMetrics.snowfallFlakeCount,
-                        effectHorizontalInset: 14,
-                        effectVerticalInset: 12
+                        effectHorizontalInset: 10,
+                        effectVerticalInset: 8
                     ) {
                         Image("OrdersTitle")
                             .resizable()
@@ -226,7 +265,7 @@ struct OrdersView: View {
                     Text(mode == .buyer
                          ? "Your purchases and delivery updates."
                          : "Manage fulfillment and customer orders.")
-                        .font(.tbBody)
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
@@ -241,62 +280,102 @@ struct OrdersView: View {
                 )
                 .frame(maxWidth: .infinity, alignment: .center)
 
-                completedDateFilterMenu
+                HStack {
+                    Spacer(minLength: 0)
+                    completedDateFilterMenu
+                }
             }
+            .animation(nil, value: selectedFilter)
+            .animation(nil, value: selectedDateFilter)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
+        .padding(.top, 4)
+        .padding(.bottom, 6)
+    }
+
+    private var isDateFilterApplied: Bool {
+        selectedDateFilter != .allTime
     }
 
     private var completedDateFilterMenu: some View {
         HStack(spacing: 7) {
             Menu {
-                ForEach(OrderDateFilter.allCases) { filter in
-                    Button {
-                        selectedFilter = .completed
-                        selectedDateFilter = filter
-                    } label: {
-                        Label(filter.title, systemImage: selectedDateFilter == filter ? "checkmark" : filter.systemImage)
+                Section("Show completed orders from") {
+                    ForEach(OrderDateFilter.allCases) { filter in
+                        Button {
+                            applyDateFilterSelection(filter)
+                        } label: {
+                            if selectedDateFilter == filter {
+                                Label(filter.title, systemImage: "checkmark")
+                            } else {
+                                Text(filter.title)
+                            }
+                        }
                     }
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text(selectedDateFilter.title)
-                        .font(.caption.weight(.semibold))
-                        .lineLimit(1)
-                }
-                .foregroundStyle(selectedFilter == .completed ? TBTheme.deepSky : Color.primary.opacity(0.64))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(selectedFilter == .completed ? TBTheme.skyBlue.opacity(0.10) : Color.white.opacity(0.68))
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(TBTheme.skyBlue.opacity(selectedFilter == .completed ? 0.18 : 0.10), lineWidth: 0.8)
-                )
+                dateFilterPill
             }
+            .menuStyle(.button)
             .accessibilityLabel("Filter completed orders by date")
+            .accessibilityValue(selectedDateFilter.title)
 
-            if selectedDateFilter != .allTime {
-                Button {
-                    selectedDateFilter = .allTime
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Color.white.opacity(0.65), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear completed orders date filter")
+            Button {
+                triggerSelectionHaptic()
+                clearDateFilter()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(
+                        width: HeroMetrics.dateFilterClearButtonWidth,
+                        height: HeroMetrics.dateFilterClearButtonWidth
+                    )
+                    .background(Color.white.opacity(0.65), in: Circle())
             }
+            .buttonStyle(PlainChipButtonStyle())
+            .opacity(selectedDateFilter == .allTime ? 0 : 1)
+            .allowsHitTesting(selectedDateFilter != .allTime)
+            .accessibilityHidden(selectedDateFilter == .allTime)
+            .accessibilityLabel("Clear completed orders date filter")
+            .frame(
+                width: HeroMetrics.dateFilterClearButtonWidth,
+                height: HeroMetrics.dateFilterClearButtonWidth
+            )
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .frame(height: HeroMetrics.dateFilterChipHeight, alignment: .center)
+        .transaction { $0.disablesAnimations = true }
+        .animation(nil, value: selectedDateFilter)
+    }
+
+    private var dateFilterPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 13, weight: .semibold))
+            Text(selectedDateFilter.title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+        }
+        .foregroundStyle(isDateFilterApplied ? TBTheme.deepSky : Color.primary.opacity(0.64))
+        .frame(width: HeroMetrics.dateFilterChipWidth, height: HeroMetrics.dateFilterChipHeight)
+        .background(
+            isDateFilterApplied
+                ? TBTheme.skyBlue.opacity(0.10)
+                : Color.white.opacity(0.68),
+            in: Capsule(style: .continuous)
+        )
+        .overlay {
+            Capsule(style: .continuous)
+                .strokeBorder(
+                    isDateFilterApplied
+                        ? TBTheme.skyBlue.opacity(0.18)
+                        : TBTheme.skyBlue.opacity(0.10),
+                    lineWidth: 0.8
+                )
+        }
+        .contentShape(Capsule(style: .continuous))
+        .animation(nil, value: isDateFilterApplied)
     }
 
     private var baseOrders: [Order] {
@@ -309,8 +388,54 @@ struct OrdersView: View {
     }
 
     private var filteredOrders: [Order] {
-        filterByDateIfNeeded(filtered(baseOrders, for: selectedFilter))
+        guard selectedDateFilter != .allTime else {
+            return sortOrders(filtered(baseOrders, for: selectedFilter))
+        }
+
+        let calendar = Calendar.current
+        let now = Date.now
+        let activeInterval = selectedDateFilter.dateInterval(calendar: calendar, now: now)
+
+        let dateFiltered = filtered(baseOrders, for: .completed).filter { order in
+            guard let date = completedDate(for: order) else { return false }
+            guard let activeInterval else { return true }
+            return activeInterval.contains(date)
+        }
+        return sortOrders(dateFiltered)
     }
+
+    private func applyDateFilterSelection(_ filter: OrderDateFilter) {
+#if os(iOS)
+        triggerSelectionHaptic()
+#endif
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectedDateFilter = filter
+            selectedFilter = .completed
+        }
+    }
+
+    private func clearDateFilter() {
+#if os(iOS)
+        triggerSelectionHaptic()
+#endif
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectedDateFilter = .allTime
+            if selectedFilter == .completed {
+                selectedFilter = .all
+            }
+        }
+    }
+
+#if os(iOS)
+    private func triggerSelectionHaptic() {
+        Haptics.selection.prepare()
+        Haptics.selection.impactOccurred(intensity: 0.75)
+    }
+#endif
 
     private var emptyStateMessage: String {
         if let refreshError = orderStore.refreshError {
@@ -354,26 +479,54 @@ struct OrdersView: View {
         }
     }
 
+    private func sortOrders(_ orders: [Order]) -> [Order] {
+        orders.sorted { lhs, rhs in
+            let lhsPriority = statusPriority(lhs.status)
+            let rhsPriority = statusPriority(rhs.status)
+            if lhsPriority != rhsPriority {
+                return lhsPriority < rhsPriority
+            }
+            return lhs.createdAt > rhs.createdAt
+        }
+    }
+
+    private func statusPriority(_ status: OrderStatus) -> Int {
+        switch status {
+        case .processing:
+            return 0
+        case .placed:
+            return 1
+        case .partiallyShipped:
+            return 2
+        case .shipped:
+            return 3
+        case .delivered:
+            return 4
+        default:
+            return 5
+        }
+    }
+
     private func isCompletedForCurrentMode(_ order: Order) -> Bool {
         switch mode {
         case .buyer:
-            return order.status == .shipped || order.status == .delivered
+            return order.status == .shipped || order.status == .delivered || order.status == .cancelled
         case .seller:
             guard let effectiveSellerId else { return false }
             let myShipments = order.shipments.filter { $0.sellerId == effectiveSellerId }
             guard !myShipments.isEmpty else { return false }
-            return myShipments.allSatisfy { $0.status == .shipped || $0.status == .delivered }
+            return myShipments.allSatisfy { $0.status == .shipped || $0.status == .delivered || $0.status == .cancelled }
         }
     }
 
-    private func filterByDateIfNeeded(_ orders: [Order]) -> [Order] {
-        guard selectedFilter == .completed,
-              let dateInterval = selectedDateFilter.dateInterval()
-        else { return orders }
-
-        return orders.filter { order in
-            guard let date = completedDate(for: order) else { return false }
-            return dateInterval.contains(date)
+    /// True when this order has a pending cancel request relevant to the current mode.
+    private func hasPendingCancellation(_ order: Order) -> Bool {
+        order.supportRequests.contains { request in
+            guard request.type == .cancel, request.status == .pending else { return false }
+            if mode == .seller, let effectiveSellerId {
+                return request.sellerId == effectiveSellerId
+            }
+            return true
         }
     }
 
@@ -394,6 +547,8 @@ struct OrdersView: View {
     }
 
     private func refreshOrders(force: Bool = false) async {
+        guard !orderStore.isRefreshing else { return }
+
         let now = Date()
         guard force || now.timeIntervalSince(lastOrdersRefresh) > 45 else { return }
         lastOrdersRefresh = now
@@ -566,7 +721,7 @@ struct BuyerOrderDetailView: View {
                 .padding(.bottom, 24)
             }
         }
-        .background(Color.blue.opacity(0.03).ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Order details")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -644,13 +799,33 @@ struct BuyerOrderDetailView: View {
                         .tint(TBTheme.icyBlue)
 
                         if shipment.status == .preparing {
-                            Button {
-                                supportSheet = .request(shipment, .cancel)
-                            } label: {
-                                Label("Request cancellation", systemImage: "xmark.circle")
-                                    .frame(maxWidth: .infinity)
+                            let hasPendingCancel = activeOrder.supportRequests.contains {
+                                $0.type == .cancel && $0.status == .pending && $0.shipmentId == shipment.id
                             }
-                            .buttonStyle(.bordered)
+                            if hasPendingCancel {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "clock.fill")
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Text("Cancellation request pending")
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .foregroundStyle(.orange)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
+                                )
+                            } else {
+                                Button {
+                                    supportSheet = .request(shipment, .cancel)
+                                } label: {
+                                    Label("Request cancellation", systemImage: "xmark.circle")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                            }
                         }
 
                         if shipment.status == .shipped || shipment.status == .delivered {
@@ -1097,7 +1272,7 @@ struct SellerOrderDetailView: View {
                 .padding(.bottom, 24)
             }
         }
-        .background(Color.blue.opacity(0.03).ignoresSafeArea())
+        .background(TBFrostBackground())
         .navigationTitle("Fulfill order")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -1437,7 +1612,10 @@ struct SellerOrderDetailView: View {
                 )
             }
 
-            let data = try Data(contentsOf: selectedVideoURL)
+            await Task.yield()
+            let data = try await Task.detached(priority: .userInitiated) {
+                try Data(contentsOf: selectedVideoURL)
+            }.value
             let normalizedExtension = (selectedVideoURL.pathExtension.isEmpty ? "mov" : selectedVideoURL.pathExtension).lowercased()
             if isPreviewOrder {
                 let previewFileURL = FileManager.default.temporaryDirectory
@@ -1624,19 +1802,23 @@ private struct SystemVideoLibraryPicker: UIViewControllerRepresentable {
             }
 
             provider.loadFileRepresentation(forTypeIdentifier: movieTypeIdentifier) { url, error in
-                DispatchQueue.main.async {
-                    if let error {
+                if let error {
+                    Task { @MainActor in
                         self.parent.onError(error.localizedDescription)
                         self.parent.isPresented = false
-                        return
                     }
+                    return
+                }
 
-                    guard let url else {
+                guard let url else {
+                    Task { @MainActor in
                         self.parent.onError("We couldn't load that maker video.")
                         self.parent.isPresented = false
-                        return
                     }
+                    return
+                }
 
+                Task.detached(priority: .userInitiated) {
                     let fileExtension = url.pathExtension.isEmpty ? "mov" : url.pathExtension
                     let destinationURL = FileManager.default.temporaryDirectory
                         .appendingPathComponent(UUID().uuidString)
@@ -1647,12 +1829,16 @@ private struct SystemVideoLibraryPicker: UIViewControllerRepresentable {
                             try FileManager.default.removeItem(at: destinationURL)
                         }
                         try FileManager.default.copyItem(at: url, to: destinationURL)
-                        self.parent.onPick(destinationURL)
+                        await MainActor.run {
+                            self.parent.onPick(destinationURL)
+                            self.parent.isPresented = false
+                        }
                     } catch {
-                        self.parent.onError("We couldn't prepare that maker video.")
+                        await MainActor.run {
+                            self.parent.onError("We couldn't prepare that maker video.")
+                            self.parent.isPresented = false
+                        }
                     }
-
-                    self.parent.isPresented = false
                 }
             }
         }
@@ -1753,7 +1939,7 @@ private struct ShipmentTrackingSheet: View {
                 }
                 .padding(16)
             }
-            .background(Color.blue.opacity(0.03).ignoresSafeArea())
+            .background(TBFrostBackground())
             .navigationTitle(trackingAction == .updateTracking ? "Update Tracking" : "Add Tracking")
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -1767,6 +1953,12 @@ private struct ShipmentTrackingSheet: View {
                 }
             }
         }
+    }
+}
+
+private struct PlainChipButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
     }
 }
 

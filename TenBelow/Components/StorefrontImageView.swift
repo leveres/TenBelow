@@ -102,15 +102,18 @@ private final class RemoteImageLoader: ObservableObject {
 struct StorefrontImageView<Placeholder: View>: View {
     let reference: String?
     let contentMode: ContentMode
+    let loadingPriority: TaskPriority
     @ViewBuilder let placeholder: () -> Placeholder
 
     init(
         reference: String?,
         contentMode: ContentMode = .fill,
+        loadingPriority: TaskPriority = .userInitiated,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.reference = reference
         self.contentMode = contentMode
+        self.loadingPriority = loadingPriority
         self.placeholder = placeholder
     }
 
@@ -141,7 +144,12 @@ struct StorefrontImageView<Placeholder: View>: View {
     @ViewBuilder
     private func remoteImage(_ url: URL) -> some View {
 #if canImport(UIKit)
-        CachedRemoteImage(url: url, contentMode: contentMode, placeholder: placeholder)
+        CachedRemoteImage(
+            url: url,
+            contentMode: contentMode,
+            loadingPriority: loadingPriority,
+            placeholder: placeholder
+        )
 #else
         AsyncImage(url: url) { phase in
             switch phase {
@@ -169,6 +177,7 @@ struct StorefrontImageView<Placeholder: View>: View {
 private struct CachedRemoteImage<Placeholder: View>: View {
     let url: URL
     let contentMode: ContentMode
+    let loadingPriority: TaskPriority
     @ViewBuilder let placeholder: () -> Placeholder
 
     @StateObject private var loader = RemoteImageLoader()
@@ -183,7 +192,7 @@ private struct CachedRemoteImage<Placeholder: View>: View {
                 placeholder()
             }
         }
-        .task(id: url) {
+        .task(id: url, priority: loadingPriority) {
             await loader.load(from: url)
         }
     }

@@ -35,6 +35,7 @@ struct ShippingProgressBar: View {
 
             ProgressView(value: progress)
                 .tint(progress >= 1.0 ? .green : TBTheme.accent)
+                .animation(nil, value: progress)
         }
         .padding(TBTheme.spacingMD)
         .background(

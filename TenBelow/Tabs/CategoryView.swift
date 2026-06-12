@@ -72,14 +72,15 @@ struct CategoryView: View {
                         ProductCard(
                             product: product,
                             seller: sellerProfilesByID[product.sellerId],
-                            allProducts: storefrontProducts
+                            allProducts: storefrontProducts,
+                            showsAccentBorder: true
                         )
                     }
                 }
                 .padding()
             }
         }
-        .background(TBTheme.cloudWhite)
+        .background(TBFrostBackground())
         .navigationTitle(displayTitle)
     }
 }
