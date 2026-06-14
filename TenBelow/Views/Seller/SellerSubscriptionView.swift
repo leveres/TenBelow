@@ -93,6 +93,7 @@ struct SellerSubscriptionView: View {
 
                 benefitRow(icon: "plus.circle.fill", title: "Product uploads", detail: "Create and update listings in TenBelow.")
                 benefitRow(icon: "shippingbox.fill", title: "Weekly Drop", detail: "Submit weekend listings when your membership is active.")
+                benefitRow(icon: "percent", title: "No sales commission", detail: "Keep what you earn on product sales. TenBelow is membership-based, not commission-based.")
                 benefitRow(icon: "checkmark.seal.fill", title: "Billed through Apple", detail: "Subscriptions use your Apple ID. Manage or cancel in Settings → Apple Account → Subscriptions.")
             }
         }

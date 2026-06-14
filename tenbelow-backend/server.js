@@ -223,6 +223,8 @@ const SELLER_VERIFICATION_MIN_POSITIVE_REVIEWS = 30;
 const SELLER_VERIFICATION_MIN_AVERAGE_RATING = 4.0;
 const SELLER_VERIFICATION_MIN_ACTIVE_DAYS = 30;
 const PLATFORM_MINIMUM_ORDER_CENTS = 1500;
+/** Marketplace revenue is seller membership — not per-sale commission on product. */
+const PLATFORM_PRODUCT_COMMISSION_RATE = 0;
 const LEGACY_PRODUCTS_PATH = new URL("../TenBelow/Data/Remote/products.json", import.meta.url);
 const LEGACY_CONFIG_PATH = new URL("../TenBelow/Data/Remote/config.json", import.meta.url);
 const LEGACY_SELLERS_PATH = new URL("./sellers.json", import.meta.url);
@@ -2620,7 +2622,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
         if (!seller?.stripeAccountId) continue;
         const productCents = Math.max(0, Math.floor(Number(amountCents) || 0));
         const shippingCents = Math.max(0, Math.floor(Number(shippingTotals[sellerId]) || 0));
-        const platformFee = Math.round(productCents * 0.10);
+        const platformFee = Math.round(productCents * PLATFORM_PRODUCT_COMMISSION_RATE);
         const transferAmount = productCents - platformFee + shippingCents;
         if (transferAmount <= 0) continue;
         await stripe.transfers.create({

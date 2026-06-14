@@ -43,6 +43,7 @@ struct SellOnTenBelowLandingView: View {
         GlassCard(cornerRadius: 22) {
             VStack(alignment: .leading, spacing: TBTheme.spacingLG) {
                 benefitRow(icon: "dollarsign.circle.fill", title: "Everything $10 & under", detail: "Simple pricing that attracts buyers.")
+                benefitRow(icon: "creditcard.fill", title: "Membership, not commission", detail: "Sell with a monthly membership — TenBelow does not take a cut of your product sales.")
                 benefitRow(icon: "shippingbox.fill", title: "Flexible fulfillment", detail: "Ship from inventory or print to order for each sale.")
                 benefitRow(icon: "chart.line.uptrend.xyaxis", title: "Weekly Drop exposure", detail: "Get featured in curated weekly drops.")
             }

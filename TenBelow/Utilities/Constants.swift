@@ -42,7 +42,7 @@ enum AppConstants {
     // MARK: - Seller Subscription
 
     static let sellerSubscriptionProductID = "com.innovativecodeworks.com.TenBelow.seller.monthly"
-    static let sellerSubscriptionFallbackPrice = "$11.99"
+    static let sellerSubscriptionFallbackPrice = "$12.99"
     static let manageSubscriptionsURL = URL(string: "https://apps.apple.com/account/subscriptions")!
 
     // MARK: - Stripe (replace with your publishable key from dashboard.stripe.com)
