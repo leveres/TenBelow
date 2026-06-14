@@ -59,6 +59,18 @@ final class CartStore: ObservableObject {
         items.reduce(0) { $0 + ($1.product.priceCents * $1.quantity) }
     }
 
+    var shippingCents: Int {
+        MarketplaceShippingCalculator.totalShippingCents(for: items)
+    }
+
+    var totalCents: Int {
+        subtotalCents + shippingCents
+    }
+
+    var sellerShippingQuotes: [SellerShippingQuote] {
+        MarketplaceShippingCalculator.quotes(for: items)
+    }
+
     func clear() {
         items.removeAll()
         storedItems.removeAll()

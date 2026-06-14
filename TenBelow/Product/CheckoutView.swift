@@ -269,16 +269,16 @@ struct CheckoutView: View {
                         .font(.system(size: 15, weight: .medium, design: .rounded))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("Set by seller")
+                    Text(cart.shippingCents == 0 ? "Free" : Money.format(cents: cart.shippingCents))
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(cart.shippingCents == 0 ? .green : TBTheme.deepSky)
                 }
                 HStack {
                     Text("Total")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundStyle(TBTheme.deepSky)
                     Spacer()
-                    Text(Money.format(cents: cart.subtotalCents))
+                    Text(Money.format(cents: cart.totalCents))
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundStyle(TBTheme.icyBlue)
                 }
@@ -432,7 +432,7 @@ struct CheckoutView: View {
             } else {
                 HStack {
                     Text(isCheckoutReady
-                         ? "Pay \(Money.format(cents: cart.subtotalCents))"
+                         ? "Pay \(Money.format(cents: cart.totalCents))"
                          : "Checkout Unavailable")
                     Image(systemName: isCheckoutReady ? "creditcard.fill" : "lock.fill")
                         .font(.caption.weight(.semibold))

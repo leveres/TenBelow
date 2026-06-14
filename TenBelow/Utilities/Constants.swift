@@ -8,8 +8,7 @@ enum AppConstants {
 
     // MARK: - Shipping
 
-    static let freeShippingThresholdCents = 1500
-    static let flatShippingCents          = 499
+    static let freeShippingThresholdCents = MarketplaceShippingCalculator.freeShippingThresholdCents
     static let minimumOrderCents          = 1500
 
     // MARK: - Cache File Names

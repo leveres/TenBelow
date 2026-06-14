@@ -85,6 +85,31 @@ struct CartView: View {
         sellerProfilesByID[sellerId]?.displayName ?? sellerId
     }
 
+    private func shippingQuote(for sellerId: String) -> SellerShippingQuote? {
+        cart.sellerShippingQuotes.first { $0.sellerId == sellerId }
+    }
+
+    private var shippingSummaryLabel: String {
+        if cart.shippingCents == 0 {
+            return "Free"
+        }
+        if itemsBySeller.count > 1 {
+            return Money.format(cents: cart.shippingCents)
+        }
+        return cart.sellerShippingQuotes.first?.displayLabel ?? Money.format(cents: cart.shippingCents)
+    }
+
+    /// Progress toward free shipping only when a single maker is in the cart (threshold is per seller).
+    private var freeShippingProgressSubtotalCents: Int? {
+        guard itemsBySeller.count == 1,
+              let group = itemsBySeller.first
+        else { return nil }
+
+        let subtotal = group.items.reduce(0) { $0 + ($1.product.priceCents * $1.quantity) }
+        guard subtotal < AppConstants.freeShippingThresholdCents else { return nil }
+        return subtotal
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -331,22 +356,48 @@ struct CartView: View {
                             ForEach(group.items) { item in
                                 CartRow(item: item)
                             }
+
+                            if let quote = shippingQuote(for: group.sellerId) {
+                                HStack {
+                                    Text("Shipping")
+                                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(quote.displayLabel)
+                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(quote.isFree ? .green : TBTheme.deepSky)
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal)
                 }
 
+                if let progressSubtotal = freeShippingProgressSubtotalCents {
+                    ShippingProgressBar(
+                        subtotalCents: progressSubtotal,
+                        freeShippingThresholdCents: AppConstants.freeShippingThresholdCents
+                    )
+                    .padding(.horizontal)
+                } else if itemsBySeller.count > 1 {
+                    Text("Free shipping applies at \(Money.format(cents: AppConstants.freeShippingThresholdCents))+ from each maker.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+
                 GlassCard(cornerRadius: 22, showsBorder: false) {
                     VStack(spacing: TBTheme.spacingMD) {
                         row("Subtotal", value: Money.format(cents: cart.subtotalCents))
-                        row("Shipping", value: "Set by seller", valueColor: .secondary)
+                        row("Shipping", value: shippingSummaryLabel, valueColor: cart.shippingCents == 0 ? .green : TBTheme.deepSky)
                         Divider().background(Color.secondary.opacity(0.2))
                         HStack {
                             Text("Total")
                                 .font(.system(size: 17, weight: .bold, design: .rounded))
                                 .foregroundStyle(TBTheme.deepSky)
                             Spacer()
-                            Text(Money.format(cents: cart.subtotalCents))
+                            Text(Money.format(cents: cart.totalCents))
                                 .font(.system(size: 18, weight: .bold, design: .rounded))
                                 .foregroundStyle(TBTheme.icyBlue)
                         }

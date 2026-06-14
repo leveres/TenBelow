@@ -37,6 +37,10 @@ import {
   normalizeExchangeRequests,
 } from "./exchangePolicy.js";
 import {
+  computeShippingTotalsBySeller,
+  FREE_SHIPPING_THRESHOLD_CENTS,
+} from "./shippingPolicy.js";
+import {
   DATA_DIRECTORY_PATH,
   DATA_DIRECTORY_URL,
   MEDIA_DIRECTORY_PATH,
@@ -2598,12 +2602,13 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
     try {
       const orderItems = JSON.parse(meta.orderItems || "[]");
       const sellerTotals = JSON.parse(meta.sellerTotals || "{}");
-      const shipping = JSON.parse(meta.shipping || "{}");
+      const shippingTotals = JSON.parse(meta.shippingTotals || "{}");
+      const shippingAddress = JSON.parse(meta.shippingAddress || meta.shipping || "{}");
       const sellers = await fetchSellers();
       upsertPaidOrder({
         orderId,
         buyerEmail: meta.buyerEmail,
-        shipping,
+        shipping: shippingAddress,
         totalCents: pi.amount_received || pi.amount,
         currency: (pi.currency || "usd").toUpperCase(),
         orderItems,
@@ -2613,8 +2618,10 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
       for (const [sellerId, amountCents] of Object.entries(sellerTotals)) {
         const seller = sellers[sellerId];
         if (!seller?.stripeAccountId) continue;
-        const platformFee = Math.round(amountCents * 0.10);
-        const transferAmount = amountCents - platformFee;
+        const productCents = Math.max(0, Math.floor(Number(amountCents) || 0));
+        const shippingCents = Math.max(0, Math.floor(Number(shippingTotals[sellerId]) || 0));
+        const platformFee = Math.round(productCents * 0.10);
+        const transferAmount = productCents - platformFee + shippingCents;
         if (transferAmount <= 0) continue;
         await stripe.transfers.create({
           amount: transferAmount,
@@ -3867,6 +3874,7 @@ app.get("/config", publicReadLimiter, async (req, res) => {
     const body = {
       ...config,
       minimumOrderCents: PLATFORM_MINIMUM_ORDER_CENTS,
+      freeShippingThresholdCents: FREE_SHIPPING_THRESHOLD_CENTS,
     };
     const etag = process.env.CONFIG_URL
       ? weakEtagFromString(`${process.env.CONFIG_URL}:${JSON.stringify(body)}`)
@@ -4016,7 +4024,8 @@ app.post("/create-payment-intent", paymentLimiter, requireAppClient, requireAuth
       });
     }
 
-    const totalCents = subtotalCents;
+    const { shippingTotals, totalShippingCents } = computeShippingTotalsBySeller(orderItems);
+    const totalCents = subtotalCents + totalShippingCents;
     const orderId = crypto.randomUUID();
 
     const paymentIntent = await stripe.paymentIntents.create({
@@ -4026,9 +4035,12 @@ app.post("/create-payment-intent", paymentLimiter, requireAppClient, requireAuth
       metadata: {
         orderId,
         buyerEmail: authenticatedBuyerEmail,
+        subtotalCents: String(subtotalCents),
+        shippingCents: String(totalShippingCents),
         orderItems: JSON.stringify(orderItems),
         sellerTotals: JSON.stringify(sellerTotals),
-        shipping: JSON.stringify({
+        shippingTotals: JSON.stringify(shippingTotals),
+        shippingAddress: JSON.stringify({
           name: shipping?.name || null,
           line1: shipping?.line1 || null,
           line2: shipping?.line2 || null,
@@ -4045,6 +4057,8 @@ app.post("/create-payment-intent", paymentLimiter, requireAppClient, requireAuth
         action: "payment_intent_created",
         orderId,
         itemCount: orderItems.length,
+        subtotalCents,
+        shippingCents: totalShippingCents,
         totalCents,
       })
     );

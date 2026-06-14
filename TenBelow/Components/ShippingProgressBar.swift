@@ -27,7 +27,7 @@ struct ShippingProgressBar: View {
                     .foregroundStyle(.green)
                     .shadow(color: .green.opacity(0.25), radius: 2, y: 1)
             } else {
-                Text("Add **\(Money.format(cents: remainingCents))** for free shipping")
+                Text("Add **\(Money.format(cents: remainingCents))** from this maker for free shipping")
                     .font(.system(size: 15, weight: .medium, design: .rounded))
                     .foregroundStyle(TBTheme.deepSky)
                     .shadow(color: TBTheme.skyBlue.opacity(0.15), radius: 2, y: 1)

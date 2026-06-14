@@ -25,6 +25,15 @@ struct ReceiptView: View {
     }
 
     private var totalCents: Int {
+        let subtotal = items.reduce(0) { $0 + ($1.product.priceCents * $1.quantity) }
+        return subtotal + MarketplaceShippingCalculator.totalShippingCents(for: items)
+    }
+
+    private var shippingCents: Int {
+        MarketplaceShippingCalculator.totalShippingCents(for: items)
+    }
+
+    private var subtotalCents: Int {
         items.reduce(0) { $0 + ($1.product.priceCents * $1.quantity) }
     }
 
@@ -60,6 +69,27 @@ struct ReceiptView: View {
                                 if group.sellerId != itemsBySeller.last?.sellerId {
                                     Divider().background(Color.secondary.opacity(0.2))
                                 }
+                            }
+
+                            Divider().background(Color.secondary.opacity(0.2))
+
+                            HStack {
+                                Text("Subtotal")
+                                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(Money.format(cents: subtotalCents))
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            }
+
+                            HStack {
+                                Text("Shipping")
+                                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(shippingCents == 0 ? "Free" : Money.format(cents: shippingCents))
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(shippingCents == 0 ? .green : TBTheme.deepSky)
                             }
 
                             Divider().background(Color.secondary.opacity(0.2))
