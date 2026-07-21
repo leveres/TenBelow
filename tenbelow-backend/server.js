@@ -54,6 +54,7 @@ import {
   recordSellerMediaUpload,
   upsertRelationalForManagedDocument,
 } from "./db/pgRelational.mjs";
+import { schedulePhase1Compare, syncPhase1AfterJsonWrite } from "./db/repositories/phase1.js";
 import { storeMediaBytes } from "./mediaObjectStorage.js";
 import {
   MEDIA_SIZE_LIMITS,
@@ -445,7 +446,9 @@ async function fetchCatalog() {
     try {
       const remote = await fetchJSON(process.env.CATALOG_URL);
       setCachedDocument("products", remote);
-      return hydrateCatalog(remote);
+      const hydrated = hydrateCatalog(remote);
+      schedulePhase1CatalogCompare();
+      return hydrated;
     } catch (e) {
       console.warn("CATALOG_URL fetch failed:", e.message);
     }
@@ -460,7 +463,13 @@ async function fetchCatalog() {
       setCachedDocument("products", catalogRaw);
     }
   }
-  return hydrateCatalog(catalogRaw);
+  const hydrated = hydrateCatalog(catalogRaw);
+  schedulePhase1CatalogCompare();
+  return hydrated;
+}
+
+function schedulePhase1CatalogCompare() {
+  schedulePhase1Compare("catalog-read");
 }
 
 async function fetchConfig() {
@@ -1148,6 +1157,7 @@ function writeManagedJSON(key, payload) {
       console.error("Postgres relational upsert failed:", key, err.message)
     );
   }
+  void syncPhase1AfterJsonWrite(key);
 }
 
 function listDataSnapshots(key, limit = 50) {
@@ -2340,9 +2350,11 @@ function loadBuyersFile() {
     }
   }
   const src = raw && typeof raw === "object" ? raw : {};
-  return Object.fromEntries(
+  const buyers = Object.fromEntries(
     Object.entries(src).map(([email, record]) => [email, normalizeBuyerRecord(record, email)])
   );
+  schedulePhase1Compare("buyers-read");
+  return buyers;
 }
 
 function saveBuyersFile(buyers) {
@@ -4080,7 +4092,9 @@ function loadSellersFile() {
   const cached = getCachedDocument("sellers");
   if (cached !== undefined) {
     try {
-      return normalizeSellerMap(cached);
+      const sellers = normalizeSellerMap(cached);
+      schedulePhase1Compare("sellers-read");
+      return sellers;
     } catch {
       return {};
     }
@@ -4088,9 +4102,12 @@ function loadSellersFile() {
   try {
     const parsed = JSON.parse(readFileSync(SELLERS_PATH, "utf-8"));
     setCachedDocument("sellers", parsed);
-    return normalizeSellerMap(parsed);
+    const sellers = normalizeSellerMap(parsed);
+    schedulePhase1Compare("sellers-read");
+    return sellers;
   } catch {
     setCachedDocument("sellers", {});
+    schedulePhase1Compare("sellers-read");
     return {};
   }
 }
@@ -5668,15 +5685,20 @@ app.put("/seller-profiles/:sellerId", requireAppClient, requireAuthenticatedSell
     }
 
     const body = req.body || {};
+    // Only overwrite media/website when the client explicitly sends those keys.
+    // Omitting them (common when editing text-only fields) must keep existing storefront images.
+    const hasAvatarURL = Object.prototype.hasOwnProperty.call(body, "avatarURL");
+    const hasBannerURL = Object.prototype.hasOwnProperty.call(body, "bannerURL");
+    const hasWebsiteURL = Object.prototype.hasOwnProperty.call(body, "websiteURL");
     const mergedProfile = normalizeSellerPublicProfile(
       {
         ...(seller.profile || {}),
         displayName: body.displayName,
         handle: body.handle,
         bio: body.bio,
-        avatarURL: body.avatarURL,
-        bannerURL: body.bannerURL,
-        websiteURL: body.websiteURL,
+        ...(hasAvatarURL ? { avatarURL: body.avatarURL } : {}),
+        ...(hasBannerURL ? { bannerURL: body.bannerURL } : {}),
+        ...(hasWebsiteURL ? { websiteURL: body.websiteURL } : {}),
         location: body.location,
         materials: Array.isArray(body.materials) ? body.materials : seller.profile?.materials,
         processingTime: body.processingTime,
