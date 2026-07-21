@@ -6,6 +6,11 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "check": "node --check server.js",
+    "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://127.0.0.1:5432/tenbelow} prisma generate",
+    "prisma:validate": "DATABASE_URL=${DATABASE_URL:-postgresql://127.0.0.1:5432/tenbelow} prisma validate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "migrate:prisma:dry-run": "node scripts/prisma-migration-dry-run.mjs",
     "migrate:json-to-pg": "node scripts/migrate-json-to-pg.mjs",
     "migrate:json-to-pg-relational": "node scripts/migrate-json-to-pg-relational.mjs",
     "verify:pg-relational": "node scripts/verify-pg-relational.mjs",
@@ -14,6 +19,7 @@
     "load-test:catalog": "node scripts/load-test-catalog.mjs"
   },
   "dependencies": {
+    "@prisma/client": "^6.8.2",
     "@apple/app-store-server-library": "^3.0.0",
     "@aws-sdk/client-s3": "^3.758.0",
     "cors": "^2.8.5",
@@ -25,5 +31,8 @@
     "pg": "^8.14.0",
     "resend": "^4.1.2",
     "stripe": "^17.5.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.8.2"
   }
 }
