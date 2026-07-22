@@ -3416,29 +3416,55 @@ struct EditSellerProfileView: View {
         let processingTime = draft.processingTime.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? seller.processingTime
             : draft.processingTime.trimmingCharacters(in: .whitespacesAndNewlines)
-        let uploadedAvatarURLString = await uploadProfileImageIfNeeded(
-            selectedAvatarImage,
-            mediaKind: "avatar",
-            fallbackURLString: draft.avatarURLString
-        )
-        let bannerUploadImage: UIImage? = {
-            guard let selectedBannerImage else { return nil }
-            let previewW: CGFloat = bannerPreviewWidth > 10
-                ? bannerPreviewWidth
-                : max((activeScreenWidth ?? 390) - TBTheme.spacingLG * 2, 320)
-            let previewH = SellerProfileMedia.bannerPreviewHeight
-            return SellerBannerCropExporter.renderForUpload(
-                image: selectedBannerImage,
-                previewContainerPoints: CGSize(width: previewW, height: previewH),
-                zoom: bannerZoom,
-                panPoints: bannerPan
+
+        let existingAvatarRef = [
+            draft.avatarURLString,
+            seller.avatarMediaReference ?? "",
+            seller.avatarURL?.absoluteString ?? ""
+        ]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? ""
+        let existingBannerRef = [
+            draft.bannerURLString,
+            seller.bannerMediaReference ?? "",
+            seller.bannerURL?.absoluteString ?? ""
+        ]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? ""
+
+        let uploadedAvatarURLString: String
+        let uploadedBannerURLString: String
+        do {
+            uploadedAvatarURLString = try await uploadProfileImageIfNeeded(
+                selectedAvatarImage,
+                mediaKind: "avatar",
+                fallbackURLString: existingAvatarRef,
+                requireUpload: selectedAvatarImage != nil
             )
-        }()
-        let uploadedBannerURLString = await uploadProfileImageIfNeeded(
-            bannerUploadImage,
-            mediaKind: "banner",
-            fallbackURLString: draft.bannerURLString
-        )
+            let bannerUploadImage: UIImage? = {
+                guard let selectedBannerImage else { return nil }
+                let previewW: CGFloat = bannerPreviewWidth > 10
+                    ? bannerPreviewWidth
+                    : max((activeScreenWidth ?? 390) - TBTheme.spacingLG * 2, 320)
+                let previewH = SellerProfileMedia.bannerPreviewHeight
+                return SellerBannerCropExporter.renderForUpload(
+                    image: selectedBannerImage,
+                    previewContainerPoints: CGSize(width: previewW, height: previewH),
+                    zoom: bannerZoom,
+                    panPoints: bannerPan
+                )
+            }()
+            uploadedBannerURLString = try await uploadProfileImageIfNeeded(
+                bannerUploadImage,
+                mediaKind: "banner",
+                fallbackURLString: existingBannerRef,
+                requireUpload: selectedBannerImage != nil
+            )
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription
+                ?? "Couldn't upload your storefront image. Check your connection and try again."
+            return
+        }
 
         let request = UpdateSellerProfileRequest(
             displayName: trimmedDisplayName,
@@ -3465,11 +3491,7 @@ struct EditSellerProfileView: View {
                 sellerId: seller.id,
                 profile: request
             )
-            seller = updatedSeller
-            storedBusinessName = updatedSeller.displayName
-            updatedSeller.storeLocally()
-            catalog.upsertSellerProfile(updatedSeller)
-            catalogRefreshToken += 1
+            applySavedSellerProfile(updatedSeller)
             #if DEBUG
             print("[ProfileSave] success sellerId=\(updatedSeller.id) avatar=\(updatedSeller.avatarURL?.absoluteString ?? "nil") banner=\(updatedSeller.bannerURL?.absoluteString ?? "nil") refreshToken=\(catalogRefreshToken)")
             #endif
@@ -3511,15 +3533,33 @@ struct EditSellerProfileView: View {
                 customOrderInfoURL: draft.normalizedCustomOrderInfoURL,
                 joinedAt: seller.joinedAt
             )
-            seller = fallbackSeller
-            storedBusinessName = fallbackSeller.displayName
-            fallbackSeller.storeLocally()
-            catalog.upsertSellerProfile(fallbackSeller)
+            applySavedSellerProfile(fallbackSeller)
             #if DEBUG
             print("[ProfileSave] fallback sellerId=\(fallbackSeller.id) avatar=\(fallbackSeller.avatarURL?.absoluteString ?? "nil") banner=\(fallbackSeller.bannerURL?.absoluteString ?? "nil") error=\((error as NSError).localizedDescription)")
             #endif
-            errorMessage = profileSaveSyncFailureMessage(for: error)
+            // Local storefront updates immediately; keep a short sync note before dismiss.
+            errorMessage = nil
+            sellerSessionWarning = profileSaveSyncFailureMessage(for: error)
+            dismiss()
         }
+    }
+
+    private func applySavedSellerProfile(_ updatedSeller: SellerProfile) {
+        seller = updatedSeller
+        storedBusinessName = updatedSeller.displayName
+        draft.avatarURLString = updatedSeller.avatarMediaReference
+            ?? updatedSeller.avatarURL?.absoluteString
+            ?? draft.avatarURLString
+        draft.bannerURLString = updatedSeller.bannerMediaReference
+            ?? updatedSeller.bannerURL?.absoluteString
+            ?? draft.bannerURLString
+        updatedSeller.storeLocally()
+        catalog.upsertSellerProfile(updatedSeller)
+        catalogRefreshToken += 1
+        selectedAvatarImage = nil
+        selectedBannerImage = nil
+        selectedAvatarItem = nil
+        selectedBannerItem = nil
     }
 
     private func loadProfileImage(from item: PhotosPickerItem?) async -> UIImage? {
@@ -3535,9 +3575,16 @@ struct EditSellerProfileView: View {
     private func uploadProfileImageIfNeeded(
         _ image: UIImage?,
         mediaKind: String,
-        fallbackURLString: String
-    ) async -> String {
-        guard let image, let imageData = image.jpegData(compressionQuality: 0.84) else {
+        fallbackURLString: String,
+        requireUpload: Bool
+    ) async throws -> String {
+        guard let image else {
+            return fallbackURLString
+        }
+        guard let imageData = image.jpegData(compressionQuality: 0.84) else {
+            if requireUpload {
+                throw ProfileMediaUploadError.invalidImage(mediaKind)
+            }
             return fallbackURLString
         }
 
@@ -3552,7 +3599,24 @@ struct EditSellerProfileView: View {
                 data: imageData
             )
         } catch {
+            if requireUpload {
+                throw ProfileMediaUploadError.uploadFailed(mediaKind)
+            }
             return fallbackURLString
+        }
+    }
+}
+
+private enum ProfileMediaUploadError: LocalizedError {
+    case invalidImage(String)
+    case uploadFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidImage(let kind):
+            return "That \(kind == "banner" ? "banner" : "photo") couldn't be prepared. Try another image."
+        case .uploadFailed(let kind):
+            return "Couldn't upload your \(kind == "banner" ? "banner" : "profile photo"). Check your connection and try Save again."
         }
     }
 }
@@ -3626,8 +3690,13 @@ private struct SellerProfileDraft {
         materials = seller.materials.joined(separator: ", ")
         shipsInMinDays = seller.shipsInDays.lowerBound
         shipsInMaxDays = seller.shipsInDays.upperBound
-        avatarURLString = seller.avatarURL?.absoluteString ?? ""
-        bannerURLString = seller.bannerURL?.absoluteString ?? ""
+        // Prefer raw hosted references (`/media/...`) so saves keep working after relaunch.
+        avatarURLString = seller.avatarMediaReference
+            ?? seller.avatarURL?.absoluteString
+            ?? ""
+        bannerURLString = seller.bannerMediaReference
+            ?? seller.bannerURL?.absoluteString
+            ?? ""
         acceptsCustomOrders = seller.acceptsCustomOrders
         customOrderInfoURLString = seller.customOrderInfoURL?.absoluteString ?? ""
     }

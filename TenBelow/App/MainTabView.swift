@@ -170,7 +170,8 @@ struct MainTabView: View {
 
             DropView()
                 .tag(MainTab.drop)
-                .tabItem { Label("Drop", systemImage: dropTabSymbolName) }
+                .tabItem { Label("Weekly Drop", systemImage: dropTabSymbolName) }
+                .badge(isWeeklyDropLive ? "LIVE" : nil)
 
             NavigationStack {
                 OrdersView()

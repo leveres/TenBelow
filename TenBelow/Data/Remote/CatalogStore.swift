@@ -45,7 +45,8 @@ final class CatalogStore: ObservableObject {
         let visibleProducts = catalogResult.products.filter { $0.isActive && $0.isApproved }
         self.products = visibleProducts
         self.isUsingCachedData = !catalogResult.isFromRemote
-        self.sellerProfiles = sellers
+        // Keep recently saved storefront media/text if a catalog refresh returns a thinner remote profile.
+        self.sellerProfiles = mergeSellerProfilesPreservingLocalEdits(sellers)
         self.config   = cfg
         contentRevision &+= 1
         if catalogResult.isFromRemote {
@@ -68,6 +69,23 @@ final class CatalogStore: ObservableObject {
             return try await SellerAPI.fetchProfiles()
         } catch {
             return sellerProfiles
+        }
+    }
+
+    /// Remote profiles win for live stats; local/cached edits fill in missing avatar, banner, bio, etc.
+    private func mergeSellerProfilesPreservingLocalEdits(_ remoteSellers: [SellerProfile]) -> [SellerProfile] {
+        let previousByID = Dictionary(uniqueKeysWithValues: sellerProfiles.map { ($0.id, $0) })
+        let storedProfile = SellerProfile.locallyStoredProfile()
+
+        return remoteSellers.map { remote in
+            var merged = remote
+            if let previous = previousByID[remote.id] {
+                merged = remote.mergingFallback(previous)
+            }
+            if let storedProfile, storedProfile.id == remote.id {
+                merged = merged.mergingFallback(storedProfile)
+            }
+            return merged
         }
     }
 

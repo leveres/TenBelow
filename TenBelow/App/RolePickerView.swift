@@ -1199,7 +1199,7 @@ struct RolePickerView: View {
             #endif
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8), action)
         } label: {
-            HStack(spacing: 14) {
+            HStack(alignment: .top, spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(
@@ -1231,8 +1231,9 @@ struct RolePickerView: View {
                     Text(description)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Color.primary.opacity(0.58))
-                        .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 Spacer(minLength: 0)
@@ -1246,6 +1247,7 @@ struct RolePickerView: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(TBTheme.deepSky.opacity(0.7))
                 }
+                .padding(.top, 2)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
@@ -1847,9 +1849,7 @@ private struct SellerAgreementAcceptanceView: View {
             Text("Review and accept before seller onboarding continues.")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(TBTheme.deepSky.opacity(0.72))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .allowsTightening(true)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(width: contentWidth, alignment: .leading)
         }
         .frame(width: contentWidth, alignment: .leading)
@@ -1874,7 +1874,7 @@ private struct SellerAgreementAcceptanceView: View {
                     Text("Account details ready for review.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -1916,8 +1916,8 @@ private struct SellerAgreementAcceptanceView: View {
                 Text(value.isEmpty ? "Required" : value)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
             }
 
             Spacer(minLength: 0)
@@ -2053,8 +2053,8 @@ private struct SellerAgreementAcceptanceView: View {
             Text(hasReachedAgreementEnd ? "Check the agreement box to continue." : "Scroll the agreement box to the end.")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.center)
         }
     }
 }
