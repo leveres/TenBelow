@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "start:production": "npm run prisma:migrate:deploy && node server.js",
+    "setup:postgres:phase1": "node scripts/setup-postgres-phase1.mjs",
     "dev": "node --watch server.js",
     "check": "node --check server.js",
     "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://127.0.0.1:5432/tenbelow} prisma generate",

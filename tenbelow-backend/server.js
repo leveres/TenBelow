@@ -54,7 +54,9 @@ import {
   recordSellerMediaUpload,
   upsertRelationalForManagedDocument,
 } from "./db/pgRelational.mjs";
-import { schedulePhase1Compare, syncPhase1AfterJsonWrite } from "./db/repositories/phase1.js";
+import { schedulePhase1Compare, syncPhase1AfterJsonWrite, syncPhase1ToPrisma } from "./db/repositories/phase1.js";
+import { applyDatabaseUrlToEnv } from "./db/prisma/databaseUrl.js";
+import { getPrisma, isPrismaConfigured } from "./db/prisma/client.js";
 import { storeMediaBytes } from "./mediaObjectStorage.js";
 import {
   MEDIA_SIZE_LIMITS,
@@ -8228,6 +8230,24 @@ async function checkReadiness() {
     checks.dataDirectoryWritable = false;
   }
 
+  applyDatabaseUrlToEnv();
+  checks.databaseUrlConfigured = isPrismaConfigured();
+  if (checks.databaseUrlConfigured) {
+    try {
+      const prisma = getPrisma();
+      if (prisma) {
+        await prisma.$queryRaw`SELECT 1`;
+        checks.postgresReachable = true;
+      } else {
+        checks.postgresReachable = false;
+      }
+    } catch {
+      checks.postgresReachable = false;
+    }
+  } else {
+    checks.postgresReachable = null;
+  }
+
   let ok =
     checks.dataDirectoryExists &&
     checks.dataDirectoryWritable &&
@@ -8236,6 +8256,10 @@ async function checkReadiness() {
 
   if (IS_PRODUCTION) {
     ok = ok && checks.stripeWebhookSecret && checks.appApiKey && checks.email;
+  }
+
+  if (checks.databaseUrlConfigured && checks.postgresReachable === false) {
+    console.warn("Readiness: DATABASE_URL is set but Postgres is not reachable");
   }
 
   return { ok, checks };
@@ -8264,6 +8288,7 @@ app.get("/ready", async (_, res) => {
 const PORT = process.env.PORT || 3000;
 
 async function startServer() {
+  applyDatabaseUrlToEnv();
   if (isPgEnabled()) {
     try {
       await ensureSchema();
@@ -8278,6 +8303,15 @@ async function startServer() {
       if (process.env.PG_READS === "1") {
         process.exit(1);
       }
+    }
+  }
+
+  if (isPrismaConfigured() && String(process.env.PRISMA_BOOTSTRAP_SYNC || "").trim() === "1") {
+    try {
+      const result = await syncPhase1ToPrisma();
+      console.log("Phase 1 Prisma bootstrap sync complete:", JSON.stringify(result));
+    } catch (err) {
+      console.error("Phase 1 Prisma bootstrap sync failed:", err.message || err);
     }
   }
 

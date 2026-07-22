@@ -3,6 +3,9 @@
  * Phase 1: scaffolding only — runtime still uses JSON persistence by default.
  */
 import { PrismaClient } from "@prisma/client";
+import { applyDatabaseUrlToEnv } from "./databaseUrl.js";
+
+applyDatabaseUrlToEnv();
 
 let prisma = null;
 

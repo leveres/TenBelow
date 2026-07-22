@@ -4,8 +4,8 @@ services:
     env: node
     plan: starter
     rootDir: tenbelow-backend
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: npm install && npm run prisma:generate
+    startCommand: npm run start:production
     healthCheckPath: "/health"
     envVars:
       - key: BACKEND_URL
@@ -24,6 +24,10 @@ services:
         sync: false
       - key: PG_READS
         value: "0"
+      - key: PRISMA_SYNC
+        value: "1"
+      - key: PRISMA_BOOTSTRAP_SYNC
+        value: "1"
       - key: S3_MEDIA_BUCKET
         sync: false
       - key: S3_MEDIA_REGION
