@@ -1,3 +1,4 @@
+# macOS AppleDouble / resource fork files (never commit)
 ._*
 tenbelow-backend/.env
 Config/StripeKeys.xcconfig
