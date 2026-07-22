@@ -2965,6 +2965,7 @@ struct EditSellerProfileView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
     @AppStorage("sellerBusinessName") private var storedBusinessName = ""
+    @AppStorage("sellerSellerId") private var sessionSellerId = ""
     @Binding var seller: SellerProfile
 
     @State private var draft: SellerProfileDraft
@@ -3410,6 +3411,12 @@ struct EditSellerProfileView: View {
             return
         }
 
+        let normalizedSessionSellerId = sessionSellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedSessionSellerId.isEmpty, seller.id != normalizedSessionSellerId {
+            errorMessage = "Your seller session doesn't match this storefront. Open Settings → Seller and sign in again."
+            return
+        }
+
         let minDays = min(draft.shipsInMinDays, draft.shipsInMaxDays)
         let maxDays = max(draft.shipsInMinDays, draft.shipsInMaxDays)
         let materials = draft.materialList.isEmpty ? seller.materials : draft.materialList
@@ -3600,6 +3607,9 @@ struct EditSellerProfileView: View {
             )
         } catch {
             if requireUpload {
+                if let apiError = error as? SellerAPIError, !apiError.message.isEmpty {
+                    throw apiError
+                }
                 throw ProfileMediaUploadError.uploadFailed(mediaKind)
             }
             return fallbackURLString

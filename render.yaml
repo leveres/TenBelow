@@ -9,7 +9,7 @@ services:
     healthCheckPath: "/health"
     envVars:
       - key: BACKEND_URL
-        sync: false
+        value: https://tenbelow.onrender.com
       - key: BACKEND_DATA_DIR
         value: /var/data
       - key: STRIPE_SECRET_KEY

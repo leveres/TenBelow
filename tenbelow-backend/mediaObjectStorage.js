@@ -13,9 +13,18 @@ function backendBase() {
   return String(process.env.BACKEND_URL || "http://localhost:3000").replace(/\/$/, "");
 }
 
+function readObjectStorageEnv() {
+  return {
+    bucket: String(process.env.S3_MEDIA_BUCKET || "").trim(),
+    region: String(process.env.S3_MEDIA_REGION || "").trim(),
+    accessKeyId: String(process.env.AWS_ACCESS_KEY_ID || "").trim(),
+    secretAccessKey: String(process.env.AWS_SECRET_ACCESS_KEY || "").trim(),
+  };
+}
+
 /**
  * When object storage is not configured, uploads behave as today (local disk + `/media/...` URL).
- * When S3_MEDIA_BUCKET (+ credentials) are set, objects are written to S3 and a public URL is returned.
+ * When S3_MEDIA_BUCKET, S3_MEDIA_REGION, and AWS credentials are all set, objects are written to S3.
  *
  * Env:
  * - S3_MEDIA_BUCKET, S3_MEDIA_REGION (use "auto" for R2 if needed)
@@ -25,21 +34,42 @@ function backendBase() {
  * - PUBLIC_MEDIA_BASE_URL=https://cdn.example.com (no trailing slash) — optional CDN / public bucket URL
  */
 export function isObjectStorageEnabled() {
-  return Boolean(String(process.env.S3_MEDIA_BUCKET || "").trim() && String(process.env.S3_MEDIA_REGION || "").trim());
+  const { bucket, region, accessKeyId, secretAccessKey } = readObjectStorageEnv();
+  return Boolean(bucket && region && accessKeyId && secretAccessKey);
+}
+
+export function getPartialObjectStorageWarning() {
+  const { bucket, region, accessKeyId, secretAccessKey } = readObjectStorageEnv();
+  const hasAny = Boolean(bucket || region || accessKeyId || secretAccessKey);
+  const complete = Boolean(bucket && region && accessKeyId && secretAccessKey);
+  if (hasAny && !complete) {
+    return "S3 media env vars are partially set; using disk storage until bucket, region, and AWS credentials are all configured.";
+  }
+  return null;
+}
+
+export function getMediaStorageMode() {
+  if (isObjectStorageEnabled()) return "object_storage";
+  if (getPartialObjectStorageWarning()) return "disk_fallback";
+  return "disk";
 }
 
 function s3Client() {
-  const accessKeyId = String(process.env.AWS_ACCESS_KEY_ID || "").trim();
-  const secretAccessKey = String(process.env.AWS_SECRET_ACCESS_KEY || "").trim();
+  const { region, accessKeyId, secretAccessKey } = readObjectStorageEnv();
   return new S3Client({
-    region: String(process.env.S3_MEDIA_REGION || "auto"),
+    region,
     endpoint: String(process.env.S3_ENDPOINT || "").trim() || undefined,
-    credentials:
-      accessKeyId && secretAccessKey
-        ? { accessKeyId, secretAccessKey }
-        : undefined,
+    credentials: { accessKeyId, secretAccessKey },
     forcePathStyle: String(process.env.S3_FORCE_PATH_STYLE || "").toLowerCase() === "true",
   });
+}
+
+async function storeMediaBytesOnDisk({ normalizedKey, buffer, mediaPath, publicBase }) {
+  const target = new URL(normalizedKey, MEDIA_DIRECTORY_URL);
+  mkdirSync(new URL("./", target), { recursive: true });
+  writeFileSync(fileURLToPath(target), buffer);
+  const url = publicBase ? `${publicBase}/${normalizedKey}` : `${backendBase()}${mediaPath}`;
+  return { url };
 }
 
 /**
@@ -73,14 +103,10 @@ export async function storeMediaBytes({ relativeKey, buffer, contentType }) {
   const publicBase = String(process.env.PUBLIC_MEDIA_BASE_URL || "").trim().replace(/\/$/, "");
 
   if (!isObjectStorageEnabled()) {
-    const target = new URL(normalizedKey, MEDIA_DIRECTORY_URL);
-    mkdirSync(new URL("./", target), { recursive: true });
-    writeFileSync(fileURLToPath(target), buffer);
-    const url = publicBase ? `${publicBase}/${normalizedKey}` : `${backendBase()}${mediaPath}`;
-    return { url };
+    return storeMediaBytesOnDisk({ normalizedKey, buffer, mediaPath, publicBase });
   }
 
-  const bucket = String(process.env.S3_MEDIA_BUCKET || "").trim();
+  const { bucket } = readObjectStorageEnv();
   await s3Client().send(
     new PutObjectCommand({
       Bucket: bucket,

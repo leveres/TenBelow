@@ -57,7 +57,8 @@ import {
 import { schedulePhase1Compare, syncPhase1AfterJsonWrite, syncPhase1ToPrisma } from "./db/repositories/phase1.js";
 import { applyDatabaseUrlToEnv } from "./db/prisma/databaseUrl.js";
 import { getPrisma, isPrismaConfigured } from "./db/prisma/client.js";
-import { storeMediaBytes } from "./mediaObjectStorage.js";
+import { storeMediaBytes, getPartialObjectStorageWarning, getMediaStorageMode } from "./mediaObjectStorage.js";
+import { getMediaStorageChecks } from "./mediaStorageHealth.js";
 import {
   MEDIA_SIZE_LIMITS,
   isServableMediaExtension,
@@ -8262,6 +8263,20 @@ async function checkReadiness() {
     console.warn("Readiness: DATABASE_URL is set but Postgres is not reachable");
   }
 
+  Object.assign(checks, getMediaStorageChecks());
+
+  if (IS_PRODUCTION && !checks.backendUrlConfigured) {
+    console.warn("Readiness: BACKEND_URL is not set; uploaded media URLs may be incorrect for clients.");
+  }
+
+  if (checks.mediaStoragePartialConfig) {
+    console.warn(`Readiness: ${checks.mediaStorageWarning}`);
+  }
+
+  if (IS_PRODUCTION && checks.mediaStorageReady === false) {
+    ok = false;
+  }
+
   return { ok, checks };
 }
 
@@ -8319,6 +8334,11 @@ async function startServer() {
     console.log(`TenBelow backend → http://localhost:${PORT}`);
     console.log(`TenBelow public URL → ${BACKEND_URL}`);
     console.log(`TenBelow data directory → ${DATA_DIRECTORY_PATH}`);
+    console.log(`TenBelow media storage → ${getMediaStorageMode()}`);
+    const partialMediaWarning = getPartialObjectStorageWarning();
+    if (partialMediaWarning) {
+      console.warn(partialMediaWarning);
+    }
     if (!transactionalEmailConfigured()) {
       console.warn("No transactional email provider configured. Set RESEND_API_KEY or SMTP settings.");
     } else if (!resend && smtpConfigured) {
