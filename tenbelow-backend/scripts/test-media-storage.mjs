@@ -5,7 +5,14 @@
  * Usage:
  *   node scripts/test-media-storage.mjs
  */
-import { storeMediaBytes, getMediaStorageMode, getPartialObjectStorageWarning, isObjectStorageEnabled } from "../mediaObjectStorage.js";
+import {
+  storeMediaBytes,
+  getMediaStorageMode,
+  getPartialObjectStorageWarning,
+  isObjectStorageEnabled,
+  resolveClientMediaURL,
+  canonicalStoredMediaReference,
+} from "../mediaObjectStorage.js";
 import { getMediaStorageChecks, probeMediaDirectoryWritable } from "../mediaStorageHealth.js";
 import { mkdirSync } from "fs";
 
@@ -19,6 +26,7 @@ async function runCase(name, envPatch) {
     "AWS_SECRET_ACCESS_KEY",
     "BACKEND_DATA_DIR",
     "BACKEND_URL",
+    "PUBLIC_MEDIA_BASE_URL",
   ]) {
     delete process.env[key];
   }
@@ -53,10 +61,28 @@ await runCase("disk-only", {});
 await runCase("partial-s3-no-creds", {
   S3_MEDIA_BUCKET: "tenbelow-media",
   S3_MEDIA_REGION: "auto",
+  PUBLIC_MEDIA_BASE_URL: "https://pub-371497e2785246a29d1704f28af6a229.r2.dev",
 });
 await runCase("partial-s3-bucket-only", {
   S3_MEDIA_BUCKET: "tenbelow-media",
 });
+
+process.env.PUBLIC_MEDIA_BASE_URL = "https://pub-371497e2785246a29d1704f28af6a229.r2.dev";
+process.env.BACKEND_URL = "https://tenbelow.onrender.com";
+const stale =
+  "https://pub-371497e2785246a29d1704f28af6a229.r2.dev/steven/profile/avatar-0.jpg?v=1784785133168";
+const resolved = resolveClientMediaURL(stale);
+const canonical = canonicalStoredMediaReference(stale);
+console.log(`OK  url-rewrite: resolved=${resolved}`);
+console.log(`    canonical=${canonical}`);
+if (resolved !== "https://tenbelow.onrender.com/media/steven/profile/avatar-0.jpg") {
+  console.error("FAIL url-rewrite: unexpected resolved URL");
+  process.exitCode = 1;
+}
+if (canonical !== "/media/steven/profile/avatar-0.jpg") {
+  console.error("FAIL url-rewrite: unexpected canonical path");
+  process.exitCode = 1;
+}
 
 if (process.exitCode) {
   console.error("\nMedia storage self-test failed.");

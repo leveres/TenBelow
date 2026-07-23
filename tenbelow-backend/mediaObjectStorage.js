@@ -64,12 +64,75 @@ function s3Client() {
   });
 }
 
-async function storeMediaBytesOnDisk({ normalizedKey, buffer, mediaPath, publicBase }) {
+async function storeMediaBytesOnDisk({ normalizedKey, buffer, mediaPath }) {
   const target = new URL(normalizedKey, MEDIA_DIRECTORY_URL);
   mkdirSync(new URL("./", target), { recursive: true });
   writeFileSync(fileURLToPath(target), buffer);
-  const url = publicBase ? `${publicBase}/${normalizedKey}` : `${backendBase()}${mediaPath}`;
-  return { url };
+  // Disk uploads are always served from this backend's /media route. Do not point clients at
+  // PUBLIC_MEDIA_BASE_URL when the bytes were not written to object storage.
+  return { url: `${backendBase()}${mediaPath}` };
+}
+
+/**
+ * Extract `sellerId/productId/file.ext` from stored references (/media/, CDN, or absolute backend URLs).
+ */
+export function mediaRelativeKeyFromReference(reference) {
+  const trimmed = String(reference || "").trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("/media/")) {
+    return trimmed.replace(/^\/media\//, "").split("?")[0];
+  }
+
+  const publicBase = String(process.env.PUBLIC_MEDIA_BASE_URL || "").trim().replace(/\/$/, "");
+  if (publicBase && trimmed.startsWith(publicBase)) {
+    return trimmed.slice(publicBase.length).replace(/^\//, "").split("?")[0] || null;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.pathname.startsWith("/media/")) {
+      return parsed.pathname.replace(/^\/media\//, "").split("?")[0];
+    }
+    const pathKey = parsed.pathname.replace(/^\//, "").split("?")[0];
+    if (pathKey.includes("/")) {
+      return pathKey;
+    }
+  } catch {
+    // Non-URL strings are returned unchanged by resolveClientMediaURL.
+  }
+
+  return null;
+}
+
+/** Return a URL the iOS app can load in the current storage configuration. */
+export function resolveClientMediaURL(reference) {
+  const trimmed = String(reference || "").trim();
+  if (!trimmed) return null;
+
+  const relativeKey = mediaRelativeKeyFromReference(trimmed);
+  if (!isObjectStorageEnabled() && relativeKey) {
+    return `${backendBase()}/media/${relativeKey}`;
+  }
+
+  if (trimmed.startsWith("/media/")) {
+    return `${backendBase()}${trimmed.split("?")[0]}`;
+  }
+
+  return trimmed;
+}
+
+/** Prefer portable `/media/...` paths when files live on the Render disk. */
+export function canonicalStoredMediaReference(reference) {
+  const trimmed = String(reference || "").trim();
+  if (!trimmed) return null;
+
+  const relativeKey = mediaRelativeKeyFromReference(trimmed);
+  if (!isObjectStorageEnabled() && relativeKey) {
+    return `/media/${relativeKey}`;
+  }
+
+  return trimmed;
 }
 
 /**
@@ -103,7 +166,7 @@ export async function storeMediaBytes({ relativeKey, buffer, contentType }) {
   const publicBase = String(process.env.PUBLIC_MEDIA_BASE_URL || "").trim().replace(/\/$/, "");
 
   if (!isObjectStorageEnabled()) {
-    return storeMediaBytesOnDisk({ normalizedKey, buffer, mediaPath, publicBase });
+    return storeMediaBytesOnDisk({ normalizedKey, buffer, mediaPath });
   }
 
   const { bucket } = readObjectStorageEnv();

@@ -57,7 +57,7 @@ import {
 import { schedulePhase1Compare, syncPhase1AfterJsonWrite, syncPhase1ToPrisma } from "./db/repositories/phase1.js";
 import { applyDatabaseUrlToEnv } from "./db/prisma/databaseUrl.js";
 import { getPrisma, isPrismaConfigured } from "./db/prisma/client.js";
-import { storeMediaBytes, getPartialObjectStorageWarning, getMediaStorageMode } from "./mediaObjectStorage.js";
+import { storeMediaBytes, getPartialObjectStorageWarning, getMediaStorageMode, resolveClientMediaURL, canonicalStoredMediaReference } from "./mediaObjectStorage.js";
 import { getMediaStorageChecks } from "./mediaStorageHealth.js";
 import {
   MEDIA_SIZE_LIMITS,
@@ -599,7 +599,9 @@ function sanitizeFileExtension(value, fallback = "bin") {
 function normalizeHostedMediaReference(value) {
   const trimmed = String(value || "").trim();
   if (!trimmed) return null;
-  if (trimmed.startsWith("/media/")) return trimmed;
+  if (trimmed.startsWith("/media/")) {
+    return resolveClientMediaURL(trimmed);
+  }
 
   try {
     const parsed = new URL(trimmed);
@@ -607,13 +609,13 @@ function normalizeHostedMediaReference(value) {
       return null;
     }
     if (parsed.pathname.startsWith("/media/")) {
-      return `${parsed.pathname}${parsed.search}`;
+      return resolveClientMediaURL(`${parsed.pathname}${parsed.search}`);
     }
   } catch {
     // Leave non-URL strings untouched below.
   }
 
-  return trimmed;
+  return resolveClientMediaURL(trimmed) || trimmed;
 }
 
 function normalizeHostedMediaReferences(values) {
@@ -5699,8 +5701,12 @@ app.put("/seller-profiles/:sellerId", requireAppClient, requireAuthenticatedSell
         displayName: body.displayName,
         handle: body.handle,
         bio: body.bio,
-        ...(hasAvatarURL ? { avatarURL: body.avatarURL } : {}),
-        ...(hasBannerURL ? { bannerURL: body.bannerURL } : {}),
+        ...(hasAvatarURL && body.avatarURL != null && String(body.avatarURL).trim() !== ""
+          ? { avatarURL: body.avatarURL }
+          : {}),
+        ...(hasBannerURL && body.bannerURL != null && String(body.bannerURL).trim() !== ""
+          ? { bannerURL: body.bannerURL }
+          : {}),
         ...(hasWebsiteURL ? { websiteURL: body.websiteURL } : {}),
         location: body.location,
         materials: Array.isArray(body.materials) ? body.materials : seller.profile?.materials,
@@ -5733,6 +5739,8 @@ app.put("/seller-profiles/:sellerId", requireAppClient, requireAuthenticatedSell
     );
 
     seller.businessName = mergedProfile.displayName;
+    mergedProfile.avatarURL = canonicalStoredMediaReference(mergedProfile.avatarURL);
+    mergedProfile.bannerURL = canonicalStoredMediaReference(mergedProfile.bannerURL);
     seller.profile = mergedProfile;
     sellers[sellerId] = seller;
     saveSellersFile(sellers);
