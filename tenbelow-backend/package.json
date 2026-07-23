@@ -16,6 +16,7 @@
     "sync:prisma:phase1": "node scripts/sync-json-to-prisma-phase1.mjs",
     "verify:prisma:phase1": "node scripts/verify-prisma-phase1.mjs",
     "test:media-storage": "node scripts/test-media-storage.mjs",
+    "print:media-storage-checklist": "node scripts/print-media-storage-checklist.mjs",
     "migrate:json-to-pg": "node scripts/migrate-json-to-pg.mjs",
     "migrate:json-to-pg-relational": "node scripts/migrate-json-to-pg-relational.mjs",
     "verify:pg-relational": "node scripts/verify-pg-relational.mjs",
