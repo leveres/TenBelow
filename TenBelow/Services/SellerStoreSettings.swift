@@ -28,11 +28,6 @@ struct SellerStoreSettingsResponse: Codable {
     let updatedAt: String?
 }
 
-private struct SellerStoreSettingsUpdateRequest: Encodable {
-    let shipping: SellerStoreSettingsShipping?
-    let policies: SellerStoreSettingsPolicies?
-}
-
 enum SellerStoreSettingsSync {
     private static let shippingKey = "sellerShippingSettingsData"
     private static let policiesKey = "sellerPolicySettingsData"
@@ -67,31 +62,5 @@ enum SellerStoreSettingsSync {
     static func loadLocalPolicies() -> SellerStoreSettingsPolicies? {
         guard let data = UserDefaults.standard.data(forKey: policiesKey) else { return nil }
         return try? JSONDecoder().decode(SellerStoreSettingsPolicies.self, from: data)
-    }
-}
-
-extension SellerAPI {
-    static func fetchStoreSettings(sellerId: String) async throws -> SellerStoreSettingsResponse {
-        let url = CheckoutAPI.baseURL.appendingPathComponent("seller-store-settings/\(sellerId)")
-        let (data, _) = try await performSellerAuthorizedRequest { URLRequest(url: url) }
-        return try JSONDecoder().decode(SellerStoreSettingsResponse.self, from: data)
-    }
-
-    static func updateStoreSettings(
-        sellerId: String,
-        shipping: SellerStoreSettingsShipping? = nil,
-        policies: SellerStoreSettingsPolicies? = nil
-    ) async throws -> SellerStoreSettingsResponse {
-        let url = CheckoutAPI.baseURL.appendingPathComponent("seller-store-settings/\(sellerId)")
-        let (data, _) = try await performSellerAuthorizedRequest {
-            var request = URLRequest(url: url)
-            request.httpMethod = "PUT"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONEncoder().encode(
-                SellerStoreSettingsUpdateRequest(shipping: shipping, policies: policies)
-            )
-            return request
-        }
-        return try JSONDecoder().decode(SellerStoreSettingsResponse.self, from: data)
     }
 }

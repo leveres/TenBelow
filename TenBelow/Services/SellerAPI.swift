@@ -377,4 +377,33 @@ enum SellerAPI {
 
         return try JSONDecoder().decode(UploadResponse.self, from: responseData).url
     }
+
+    static func fetchStoreSettings(sellerId: String) async throws -> SellerStoreSettingsResponse {
+        let url = baseURL.appendingPathComponent("seller-store-settings/\(sellerId)")
+        let (data, _) = try await performSellerAuthorizedRequest { URLRequest(url: url) }
+        return try JSONDecoder().decode(SellerStoreSettingsResponse.self, from: data)
+    }
+
+    static func updateStoreSettings(
+        sellerId: String,
+        shipping: SellerStoreSettingsShipping? = nil,
+        policies: SellerStoreSettingsPolicies? = nil
+    ) async throws -> SellerStoreSettingsResponse {
+        let url = baseURL.appendingPathComponent("seller-store-settings/\(sellerId)")
+        let (data, _) = try await performSellerAuthorizedRequest {
+            var request = URLRequest(url: url)
+            request.httpMethod = "PUT"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(
+                SellerStoreSettingsUpdateRequest(shipping: shipping, policies: policies)
+            )
+            return request
+        }
+        return try JSONDecoder().decode(SellerStoreSettingsResponse.self, from: data)
+    }
+}
+
+private struct SellerStoreSettingsUpdateRequest: Encodable {
+    let shipping: SellerStoreSettingsShipping?
+    let policies: SellerStoreSettingsPolicies?
 }

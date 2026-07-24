@@ -2434,7 +2434,7 @@ struct ShippingSettingsView: View {
         guard !trimmedSellerId.isEmpty else { return }
         await SellerStoreSettingsSync.refreshLocalCache(sellerId: trimmedSellerId)
         if let shipping = SellerStoreSettingsSync.loadLocalShipping() {
-            draft = SellerShippingSettingsDraft(from: shipping)
+            draft = SellerShippingSettingsDraft(serverShipping: shipping)
         }
     }
 
@@ -2558,7 +2558,7 @@ struct SellerPoliciesView: View {
         guard !trimmedSellerId.isEmpty else { return }
         await SellerStoreSettingsSync.refreshLocalCache(sellerId: trimmedSellerId)
         if let policies = SellerStoreSettingsSync.loadLocalPolicies() {
-            draft = SellerPolicySettingsDraft(from: policies)
+            draft = SellerPolicySettingsDraft(serverPolicies: policies)
         }
     }
 
@@ -4085,15 +4085,17 @@ private struct SellerShippingSettingsDraft: Codable {
         }
 
         return SellerShippingSettingsDraft(
-            processingTime: "1-2 business days",
-            minShipDays: 2,
-            maxShipDays: 4,
-            primaryRegion: "United States",
-            offersInternational: false,
-            internationalRegions: "",
-            flatRateText: "4.99",
-            freeShippingThresholdText: "35.00",
-            shippingNote: "Orders are printed to order and packed with care."
+            serverShipping: SellerStoreSettingsShipping(
+                processingTime: "1-2 business days",
+                minShipDays: 2,
+                maxShipDays: 4,
+                primaryRegion: "United States",
+                offersInternational: false,
+                internationalRegions: "",
+                flatRateText: "4.99",
+                freeShippingThresholdText: "35.00",
+                shippingNote: "Orders are printed to order and packed with care."
+            )
         )
     }
 
@@ -4102,7 +4104,7 @@ private struct SellerShippingSettingsDraft: Codable {
         UserDefaults.standard.set(data, forKey: SellerSettingsStorageKey.shipping)
     }
 
-    init(from shipping: SellerStoreSettingsShipping) {
+    init(serverShipping shipping: SellerStoreSettingsShipping) {
         processingTime = shipping.processingTime
         minShipDays = shipping.minShipDays
         maxShipDays = shipping.maxShipDays
@@ -4144,12 +4146,14 @@ private struct SellerPolicySettingsDraft: Codable {
         }
 
         return SellerPolicySettingsDraft(
-            acceptsReturns: true,
-            returnWindowDays: 14,
-            allowsExchanges: true,
-            allowsCancellations: true,
-            cancellationWindowHours: 12,
-            policyNote: "Because each product is made to order, custom color requests and personalized pieces may be final sale."
+            serverPolicies: SellerStoreSettingsPolicies(
+                acceptsReturns: true,
+                returnWindowDays: 14,
+                allowsExchanges: true,
+                allowsCancellations: true,
+                cancellationWindowHours: 12,
+                policyNote: "Because each product is made to order, custom color requests and personalized pieces may be final sale."
+            )
         )
     }
 
@@ -4158,7 +4162,7 @@ private struct SellerPolicySettingsDraft: Codable {
         UserDefaults.standard.set(data, forKey: SellerSettingsStorageKey.policies)
     }
 
-    init(from policies: SellerStoreSettingsPolicies) {
+    init(serverPolicies policies: SellerStoreSettingsPolicies) {
         acceptsReturns = policies.acceptsReturns
         returnWindowDays = policies.returnWindowDays
         allowsExchanges = policies.allowsExchanges
