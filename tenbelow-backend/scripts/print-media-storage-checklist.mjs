@@ -45,9 +45,10 @@ console.log("  REMOVE: S3_MEDIA_BUCKET, S3_MEDIA_REGION, AWS_ACCESS_KEY_ID, AWS_
 console.log("          S3_ENDPOINT, PUBLIC_MEDIA_BASE_URL");
 console.log("  Docs: tenbelow-backend/docs/media-storage-setup.md");
 
-console.log("\nPhase 2 (later) — add ALL R2 vars together:");
-console.log("  S3_MEDIA_BUCKET, S3_MEDIA_REGION=auto, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,");
-console.log("  S3_ENDPOINT, S3_FORCE_PATH_STYLE=true, PUBLIC_MEDIA_BASE_URL");
+console.log("\nProduction R2 cutover (Render shell, after full env + redeploy):");
+console.log("  DRY_RUN=1 npm run migrate:disk-media-to-r2");
+console.log("  npm run setup:r2-production");
+console.log("  Then manual deploy to reload JSON cache");
 
 if (BASE_URL) {
   console.log(`\nProduction probe: ${BASE_URL}/ready`);

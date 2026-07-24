@@ -1,64 +1,49 @@
-# Media storage — disk now, R2 later
+# Media storage — production R2 (recommended)
 
-TenBelow serves seller/product media through the backend. **Phase 1 (launch)** uses the Render persistent disk. **Phase 2 (scale)** switches to Cloudflare R2 when every object-storage env var is set together.
+For a **single end-to-end production setup** (Cloudflare R2 + migration + verify), start here:
 
-**Do not use Cloudflare Hyperdrive** for media or Postgres — Postgres lives on Render; media uses disk or R2.
+**→ [production-complete-checklist.md](./production-complete-checklist.md)**
+
+**Do not use Cloudflare Hyperdrive** for media or Postgres — Postgres lives on Render; media uses disk (local dev) or R2 (production).
 
 ---
 
-## Phase 1 — Disk on Render (use this now)
+## Production — Cloudflare R2
 
-Media files: `/var/data/media/` on the Render disk (mounted at `BACKEND_DATA_DIR`).
+Set **all** object-storage env vars in one session. Partial config (e.g. only `PUBLIC_MEDIA_BASE_URL`) breaks uploads — files land on disk while JSON points at R2 (404 in app).
 
-Public URLs: `https://tenbelow.onrender.com/media/{sellerId}/{productId}/{file}`
+### Cloudflare
+
+1. **Storage & databases → R2** → create bucket (e.g. `tenbelow`)
+2. **Public access** → enable public bucket URL (or custom domain)
+3. Copy **Public bucket URL** (e.g. `https://pub-xxxxx.r2.dev`, no trailing slash)
+4. **R2 → Manage R2 API tokens** → Object Read & Write on that bucket
+5. Note **Account ID**, **Access Key ID**, **Secret Access Key**
+6. **S3 endpoint:** `https://{ACCOUNT_ID}.r2.cloudflarestorage.com`
 
 ### Render → tenbelow-backend → Environment
 
-**Keep (required for marketplace + media on disk):**
+| Variable | Example |
+|----------|---------|
+| `S3_MEDIA_BUCKET` | `tenbelow` |
+| `S3_MEDIA_REGION` | `auto` |
+| `AWS_ACCESS_KEY_ID` | From R2 token |
+| `AWS_SECRET_ACCESS_KEY` | From R2 token |
+| `S3_ENDPOINT` | `https://ACCOUNT_ID.r2.cloudflarestorage.com` |
+| `S3_FORCE_PATH_STYLE` | `true` |
+| `PUBLIC_MEDIA_BASE_URL` | `https://pub-xxxxx.r2.dev` |
 
-| Variable | Value |
-|----------|--------|
-| `BACKEND_URL` | `https://tenbelow.onrender.com` |
-| `BACKEND_DATA_DIR` | `/var/data` |
-| `DATABASE_URL` | Internal Postgres URL from Render |
-| `APP_API_KEY` | Same as iOS `TENBELOW_APP_API_KEY` |
-| `AUTH_JWT_SECRET` or shared secret material | (already set) |
-| Stripe, Resend, etc. | (already set) |
-
-**Remove for Phase 1** (partial R2 config breaks photo uploads):
-
-| Variable | Action |
-|----------|--------|
-| `S3_MEDIA_BUCKET` | **Delete** |
-| `S3_MEDIA_REGION` | **Delete** |
-| `AWS_ACCESS_KEY_ID` | **Delete** |
-| `AWS_SECRET_ACCESS_KEY` | **Delete** |
-| `S3_ENDPOINT` | **Delete** |
-| `PUBLIC_MEDIA_BASE_URL` | **Delete** |
-| `S3_FORCE_PATH_STYLE` | **Delete** (optional; harmless if left) |
+Also keep: `BACKEND_URL`, `BACKEND_DATA_DIR`, `DATABASE_URL`, `APP_API_KEY`, Stripe, Resend, auth secrets.
 
 Save → redeploy.
 
-### Verify after deploy
+### Verify
 
 ```bash
-curl -s https://tenbelow.onrender.com/ready | jq '.checks | {mediaStorageMode, mediaStorageReady, mediaDirectoryWritable, backendUrlConfigured, mediaStoragePartialConfig}'
+curl -s https://tenbelow.onrender.com/ready | jq '.checks | {mediaStorageMode, mediaStorageReady, mediaStoragePartialConfig, objectStorageEnabled}'
 ```
 
-Expected:
-
-```json
-{
-  "mediaStorageMode": "disk",
-  "mediaStorageReady": true,
-  "mediaDirectoryWritable": true,
-  "backendUrlConfigured": true
-}
-```
-
-No `mediaStoragePartialConfig: true`.
-
-Local checklist:
+Expected: `mediaStorageMode: "object_storage"`, `mediaStorageReady: true`, no partial config.
 
 ```bash
 cd tenbelow-backend
@@ -66,78 +51,53 @@ npm run print:media-storage-checklist
 npm run test:media-storage
 ```
 
-### iOS app
+Upload one image from the app; open the returned URL in Safari — must be **HTTP 200**.
 
-Rebuild from Xcode after backend deploy (includes R2 → `/media/` fallback for stale profile URLs).
+### Migrate existing disk files
 
-Test: **Store → Edit Profile** → photo + banner → **Save Changes** → dashboard and **View stores** show images.
-
-### Disk budget
-
-Starter disk is **1 GB** (`render.yaml`). Monitor usage in Render. Plan R2 cutover before heavy video uploads or hundreds of large images.
-
----
-
-## Phase 2 — Full Cloudflare R2 (when ready)
-
-Only enable when you can set **all** variables in one session and verify a test upload returns **HTTP 200** from the public URL.
-
-### Cloudflare (R2)
-
-1. **Storage & databases → R2** → bucket (e.g. `tenbelow`)
-2. **Manage public access** → allow public read (or custom domain)
-3. Note **Public bucket URL** (e.g. `https://pub-xxxxx.r2.dev`)
-4. **R2 → Manage R2 API tokens** → Create token with Object Read & Write on that bucket
-5. Note **Account ID**, **Access Key ID**, **Secret Access Key**
-6. **S3 API endpoint**: `https://{account_id}.r2.cloudflarestorage.com`
-
-### Render → tenbelow-backend → Environment (add all at once)
-
-| Variable | Example / notes |
-|----------|------------------|
-| `S3_MEDIA_BUCKET` | `tenbelow` |
-| `S3_MEDIA_REGION` | `auto` |
-| `AWS_ACCESS_KEY_ID` | From R2 API token |
-| `AWS_SECRET_ACCESS_KEY` | From R2 API token |
-| `S3_ENDPOINT` | `https://ACCOUNT_ID.r2.cloudflarestorage.com` |
-| `S3_FORCE_PATH_STYLE` | `true` |
-| `PUBLIC_MEDIA_BASE_URL` | `https://pub-xxxxx.r2.dev` (no trailing slash) |
-
-Keep `BACKEND_URL` and `BACKEND_DATA_DIR` unchanged.
-
-### Verify R2 cutover
+After R2 is live, on **Render shell**:
 
 ```bash
-curl -s https://tenbelow.onrender.com/ready | jq '.checks | {mediaStorageMode, objectStorageEnabled, mediaStorageReady}'
-# mediaStorageMode: "object_storage"
-# objectStorageEnabled: true
-
-npm run test:media-storage
+cd tenbelow-backend
+DRY_RUN=1 npm run migrate:disk-media-to-r2   # preview
+npm run setup:r2-production                  # upload + rewrite JSON URLs
 ```
 
-Upload one test image from the app, then open the returned URL in Safari — must be **200**, not 404.
-
-### Existing media on disk
-
-After R2 is live, either:
-
-- **Re-save** seller profiles / products from the app (simplest at current scale), or
-- **Copy** `/var/data/media/*` into the R2 bucket preserving keys (`sellerId/productId/file.ext`), then re-save profiles so URLs update.
-
-The backend rewrites stale CDN URLs to `/media/...` on disk mode; after R2, new uploads use `PUBLIC_MEDIA_BASE_URL`.
+Then **manual deploy** once (reloads in-memory JSON cache).
 
 ---
 
-## Quick reference — env template (do not commit secrets)
+## Local dev / disk fallback
 
-Copy to a password manager / Render dashboard when doing Phase 2:
+Without S3 env vars, media writes to `BACKEND_DATA_DIR/media/` and serves at `{BACKEND_URL}/media/...`.
+
+**Remove** all `S3_*`, `AWS_*`, and `PUBLIC_MEDIA_BASE_URL` on Render if you are not doing full R2 yet — partial vars cause broken profile photos.
 
 ```bash
-# Phase 1 — disk only (no lines below)
+curl -s https://tenbelow.onrender.com/ready | jq '.checks | {mediaStorageMode, mediaStorageReady, mediaDirectoryWritable, mediaStoragePartialConfig}'
+```
+
+Expected disk mode:
+
+```json
+{
+  "mediaStorageMode": "disk",
+  "mediaStorageReady": true,
+  "mediaDirectoryWritable": true
+}
+```
+
+Disk budget on Render starter: **1 GB** (`render.yaml`). R2 avoids disk limits for marketplace media.
+
+---
+
+## Env template (do not commit secrets)
+
+```bash
 BACKEND_URL=https://tenbelow.onrender.com
 BACKEND_DATA_DIR=/var/data
 
-# Phase 2 — add ALL of these together
+# Production R2 — set ALL together
 # S3_MEDIA_BUCKET=tenbelow
 # S3_MEDIA_REGION=auto
 # AWS_ACCESS_KEY_ID=
@@ -147,4 +107,4 @@ BACKEND_DATA_DIR=/var/data
 # PUBLIC_MEDIA_BASE_URL=https://pub-xxxxx.r2.dev
 ```
 
-See also: [postgres-production-setup.md](./postgres-production-setup.md) for database wiring.
+See also: [postgres-production-setup.md](./postgres-production-setup.md).
