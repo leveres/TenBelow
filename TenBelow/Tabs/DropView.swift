@@ -111,13 +111,18 @@ struct DropView: View {
     private var isActive: Bool { effectiveDropResponse?.active == true }
     private var dropProducts: [DropProduct] { effectiveDropResponse?.products ?? [] }
     private var weeklyDropProducts: [DropProduct] {
-        dropProducts.filter { $0.priceCents >= DropConstants.minPriceCents }
+        dropProducts
+            .filter { $0.priceCents >= DropConstants.minPriceCents }
+            .filter { CatalogSeedPolicy.isRealDropProduct($0) }
     }
     private var buyerPreviewDropProducts: [DropProduct] {
+        #if DEBUG
         let source = resolvedStorefrontProducts(
             remoteProducts: catalog.products,
-            fallbackProducts: MockData.products
+            fallbackProducts: localProducts.products
         )
+        .filter { CatalogSeedPolicy.isRealStorefrontProduct($0) }
+
         return source.enumerated().map { entry in
             let index = entry.offset
             let product = entry.element
@@ -125,7 +130,7 @@ struct DropView: View {
                 id: "buyer-preview-drop-\(index)-\(product.id)",
                 sellerId: product.sellerId,
                 name: product.name,
-                priceCents: max(product.priceCents, 1200),
+                priceCents: max(product.priceCents, DropConstants.minPriceCents),
                 previousPriceCents: product.previousPriceCents,
                 category: product.category.rawValue,
                 imageURLs: product.imageNames,
@@ -135,10 +140,10 @@ struct DropView: View {
                 story: "A preview of the premium Friday lineup.",
                 bestUseCase: "Buyer-facing preview data",
                 material: product.material,
-                durabilityNote: "Preview sample",
-                careWarnings: [],
-                shipsInMinDays: 2,
-                shipsInMaxDays: 4,
+                durabilityNote: product.durabilityNote,
+                careWarnings: product.careWarnings,
+                shipsInMinDays: product.shipsInDays.lowerBound,
+                shipsInMaxDays: product.shipsInDays.upperBound,
                 approvalStatus: .approved,
                 reviewNotes: nil,
                 reviewedAt: nil,
@@ -146,6 +151,9 @@ struct DropView: View {
                 slotNumber: index + 1
             )
         }
+        #else
+        return []
+        #endif
     }
     private var shouldShowBuyerDropPreview: Bool {
         if isUsingWeeklyDropPreview {
@@ -315,9 +323,11 @@ struct DropView: View {
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                #if DEBUG
                 ToolbarItem(placement: .topBarLeading) {
                     weeklyDropPreviewMenu
                 }
+                #endif
                 if !isSeller {
                     ToolbarItem(placement: .topBarTrailing) {
                         CartButton(itemCount: cart.items.reduce(0) { $0 + $1.quantity }) {
@@ -329,9 +339,11 @@ struct DropView: View {
             }
             #else
             .toolbar {
+                #if DEBUG
                 ToolbarItem(placement: .automatic) {
                     weeklyDropPreviewMenu
                 }
+                #endif
                 if !isSeller {
                     ToolbarItem(placement: .automatic) {
                         CartButton(itemCount: cart.items.reduce(0) { $0 + $1.quantity }) {
@@ -369,6 +381,11 @@ struct DropView: View {
             .onAppear {
                 isDropVisible = true
                 previewAnchorNow = countdownNow
+                #if !DEBUG
+                if weeklyDropPreviewMode != .liveData {
+                    weeklyDropPreviewModeRaw = WeeklyDropPreviewMode.liveData.rawValue
+                }
+                #endif
             }
             .onDisappear {
                 isDropVisible = false
@@ -454,6 +471,38 @@ struct DropView: View {
 
     // MARK: - Buyer Inactive Drop
 
+    #if DEBUG
+    private var buyerPreviewExamplesSection: some View {
+        VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
+            Text("Preview examples")
+                .font(.tbSectionTitle)
+                .foregroundStyle(TBTheme.frostTitleGradient)
+            Text("DEBUG only — real uploaded products with photos.")
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+
+            if buyerPreviewDropProducts.isEmpty {
+                Text("No real drop-ready products yet.")
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(buyerPreviewDropProducts) { product in
+                    Button {
+                        selectedDropProduct = resolvedProduct(for: product)
+                    } label: {
+                        DropProductRow(
+                            product: product,
+                            sellerDisplayName: displayName(forSellerId: product.sellerId)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+    #endif
+
     @ViewBuilder
     private var buyerInactiveDropContent: some View {
         VStack(spacing: TBTheme.spacingMD + 2) {
@@ -494,29 +543,11 @@ struct DropView: View {
             )
             .shadow(color: TBTheme.deepSky.opacity(0.1), radius: 12, y: 4)
 
-            if !buyerPreviewDropProducts.isEmpty && !isUsingWeeklyDropPreview {
-                VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
-                    Text("Preview examples")
-                        .font(.tbSectionTitle)
-                        .foregroundStyle(TBTheme.frostTitleGradient)
-                    Text("Mock buyer view of how weekly drop products will appear.")
-                        .font(.tbCaption)
-                        .foregroundStyle(.secondary)
-
-                    ForEach(buyerPreviewDropProducts) { product in
-                        Button {
-                            selectedDropProduct = resolvedProduct(for: product)
-                        } label: {
-                            DropProductRow(
-                                product: product,
-                                sellerDisplayName: displayName(forSellerId: product.sellerId)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.top, 2)
+            #if DEBUG
+            if shouldShowBuyerDropPreview {
+                buyerPreviewExamplesSection
             }
+            #endif
 
             Spacer(minLength: DropLayoutMetrics.buyerInactiveHeroBottomSpacing)
         }

@@ -276,3 +276,41 @@ func resolvedStorefrontProducts(remoteProducts: [RemoteProduct], fallbackProduct
 
     return mappedRemoteProducts.isEmpty ? fallbackProducts : mappedRemoteProducts
 }
+
+// MARK: - Seed / mock catalog filtering
+
+enum CatalogSeedPolicy {
+    static let seedSellerIDs: Set<String> = ["seller_001", "seller_002"]
+    static let bundledPlaceholderImageNames: Set<String> = [
+        "products_image",
+        "filament_image",
+        "printer_image",
+    ]
+
+    static func isSeedSeller(_ sellerId: String) -> Bool {
+        seedSellerIDs.contains(sellerId.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    static func hasUploadedMedia(in imageReferences: [String]) -> Bool {
+        imageReferences.contains { reference in
+            let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return false }
+            if bundledPlaceholderImageNames.contains(trimmed) { return false }
+            if trimmed.hasPrefix("/media/") { return true }
+            if let url = Product.mediaURL(for: trimmed),
+               let scheme = url.scheme?.lowercased(),
+               ["http", "https"].contains(scheme) {
+                return true
+            }
+            return false
+        }
+    }
+
+    static func isRealStorefrontProduct(_ product: Product) -> Bool {
+        !isSeedSeller(product.sellerId) && hasUploadedMedia(in: product.imageNames)
+    }
+
+    static func isRealDropProduct(_ product: DropProduct) -> Bool {
+        !isSeedSeller(product.sellerId) && hasUploadedMedia(in: product.imageURLs)
+    }
+}

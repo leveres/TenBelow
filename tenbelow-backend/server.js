@@ -7460,9 +7460,33 @@ function resolveDropProducts(weekData = {}, catalog = {}) {
       ) {
         return null;
       }
+      if (isSeedSellerId(product.sellerId)) {
+        return null;
+      }
+      if (!hasRealUploadedMedia(product)) {
+        return null;
+      }
       return buildDropProduct(product, entry, index);
     })
     .filter(Boolean);
+}
+
+const SEED_SELLER_IDS = new Set(["seller_001", "seller_002"]);
+const PLACEHOLDER_IMAGE_NAMES = new Set(["products_image", "filament_image", "printer_image"]);
+
+function isSeedSellerId(sellerId) {
+  return SEED_SELLER_IDS.has(String(sellerId || "").trim());
+}
+
+function hasRealUploadedMedia(product) {
+  const urls = Array.isArray(product?.imageURLs) ? product.imageURLs : [];
+  return urls.some((reference) => {
+    const trimmed = String(reference || "").trim();
+    if (!trimmed || PLACEHOLDER_IMAGE_NAMES.has(trimmed)) {
+      return false;
+    }
+    return trimmed.startsWith("http") || trimmed.startsWith("/media/");
+  });
 }
 
 const DROP_TIME_ZONE = "America/New_York";

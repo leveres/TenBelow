@@ -18,9 +18,16 @@ final class LocalProductStore: ObservableObject {
         )
 
         if persisted.isEmpty {
+            #if DEBUG
             storedProducts = seedProductsFromMocks()
+            #else
+            storedProducts = []
+            #endif
         } else {
             storedProducts = persisted
+            #if !DEBUG
+            storedProducts.removeAll { CatalogSeedPolicy.isSeedSeller($0.sellerId) }
+            #endif
         }
 
         syncPersistedSellerDraftsIntoProducts()
