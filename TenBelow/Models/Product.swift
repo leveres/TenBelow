@@ -187,9 +187,6 @@ extension Product {
 
         if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() {
             if ["http", "https"].contains(scheme) {
-                if let rewrittenCDN = rewriteStaleCDNMediaURLIfNeeded(url) {
-                    return rewrittenCDN
-                }
                 return rewriteLocalhostMediaURLIfNeeded(url)
             }
             if allowFileURLs && scheme == "file" {
@@ -203,26 +200,6 @@ extension Product {
         }
 
         return nil
-    }
-
-    private static func rewriteStaleCDNMediaURLIfNeeded(_ url: URL) -> URL? {
-        guard let configured = AppConstants.backendBaseURL,
-              let configuredHost = configured.host?.lowercased(),
-              !["localhost", "127.0.0.1"].contains(configuredHost),
-              let host = url.host?.lowercased(),
-              host.contains("r2.dev") || host.contains("cloudflarestorage.com"),
-              url.path.contains("/profile/")
-        else {
-            return nil
-        }
-
-        let pathKey = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !pathKey.isEmpty,
-              let absolute = URL(string: "/media/\(pathKey)", relativeTo: configured)?.absoluteURL
-        else {
-            return nil
-        }
-        return absolute
     }
 
     private static func rewriteLocalhostMediaURLIfNeeded(_ url: URL) -> URL {

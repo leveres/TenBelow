@@ -69,32 +69,67 @@ private final class RemoteImageLoader: ObservableObject {
         }
 
         var lastError: Error?
+        var candidateURLs = [url]
+        if let diskFallback = backendDiskMediaFallbackURL(for: url) {
+            candidateURLs.append(diskFallback)
+        }
 
-        for attempt in 0..<3 {
-            do {
-                var request = URLRequest(url: url)
-                request.cachePolicy = .returnCacheDataElseLoad
-                AppConstants.applyAppClientAuth(to: &request)
-                let (remoteData, response) = try await URLSession.tenBelow.data(for: request)
-
-                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                    throw URLError(.badServerResponse)
+        for candidateURL in candidateURLs {
+            for attempt in 0..<3 {
+                do {
+                    return try await fetchRemoteData(from: candidateURL)
+                } catch {
+                    #if DEBUG
+                    if url.absoluteString.contains("/profile/") {
+                        print("[ProfileImage] retry attempt=\(attempt + 1) url=\(candidateURL.absoluteString) error=\(error.localizedDescription)")
+                    }
+                    #endif
+                    lastError = error
+                    guard attempt < 2 else { break }
+                    try? await Task.sleep(for: .milliseconds(250))
                 }
-
-                return remoteData
-            } catch {
-                #if DEBUG
-                if url.absoluteString.contains("/profile/") {
-                    print("[ProfileImage] retry attempt=\(attempt + 1) url=\(url.absoluteString) error=\(error.localizedDescription)")
-                }
-                #endif
-                lastError = error
-                guard attempt < 2 else { break }
-                try? await Task.sleep(for: .milliseconds(250))
             }
         }
 
         throw lastError ?? URLError(.cannotLoadFromNetwork)
+    }
+
+    private func fetchRemoteData(from url: URL) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.cachePolicy = .returnCacheDataElseLoad
+        if shouldApplyAppClientAuth(for: url) {
+            AppConstants.applyAppClientAuth(to: &request)
+        }
+        let (remoteData, response) = try await URLSession.tenBelow.data(for: request)
+
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw URLError(.badServerResponse)
+        }
+
+        return remoteData
+    }
+
+    private func shouldApplyAppClientAuth(for url: URL) -> Bool {
+        guard let backendHost = AppConstants.backendBaseURL?.host?.lowercased(),
+              let urlHost = url.host?.lowercased()
+        else {
+            return false
+        }
+        return urlHost == backendHost
+    }
+
+    /// Legacy disk fallback when catalog still references R2 but bytes only exist on Render `/media/`.
+    private func backendDiskMediaFallbackURL(for url: URL) -> URL? {
+        guard let configured = AppConstants.backendBaseURL,
+              let host = url.host?.lowercased(),
+              host.contains("r2.dev") || host.contains("cloudflarestorage.com")
+        else {
+            return nil
+        }
+
+        let pathKey = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !pathKey.isEmpty else { return nil }
+        return URL(string: "/media/\(pathKey)", relativeTo: configured)?.absoluteURL
     }
 }
 #endif
