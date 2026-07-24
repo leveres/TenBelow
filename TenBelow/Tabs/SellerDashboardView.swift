@@ -112,6 +112,7 @@ struct SellerDashboardView: View {
             #if DEBUG
             print("[SellerDashboard] task start sellerId=\(seller.id)")
             #endif
+            await SellerStoreSettingsSync.refreshLocalCache(sellerId: seller.id)
             refreshSellerFromLatestSources()
             await refreshDashboardIfNeeded()
         }

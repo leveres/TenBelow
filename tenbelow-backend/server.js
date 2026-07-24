@@ -1868,6 +1868,60 @@ function normalizeSellerRecord(record = {}, sellerId = "") {
     creatorBadge: founding.creatorBadge,
     membershipStatus: effectiveMembership.membershipStatus,
     profile: normalizeSellerPublicProfile(record.profile, sellerId, record.businessName),
+    storeSettings: normalizeSellerStoreSettings(record.storeSettings, record.profile),
+  };
+}
+
+function normalizeSellerStoreSettings(raw = {}, profile = {}) {
+  const shipping = raw.shipping || {};
+  const policies = raw.policies || {};
+  const minShipDays = Math.max(
+    1,
+    asFiniteNumber(shipping.minShipDays, asFiniteNumber(profile.shipsInMinDays, 2))
+  );
+  const maxShipDays = Math.max(
+    minShipDays,
+    asFiniteNumber(shipping.maxShipDays, asFiniteNumber(profile.shipsInMaxDays, 4))
+  );
+
+  return {
+    shipping: {
+      processingTime: String(
+        shipping.processingTime || profile.processingTime || "1-2 business days"
+      ).trim(),
+      minShipDays,
+      maxShipDays,
+      primaryRegion: String(shipping.primaryRegion || profile.location || "United States").trim(),
+      offersInternational: shipping.offersInternational === true,
+      internationalRegions: String(shipping.internationalRegions || "").trim(),
+      flatRateText: String(shipping.flatRateText || "4.99").trim(),
+      freeShippingThresholdText: String(shipping.freeShippingThresholdText || "35.00").trim(),
+      shippingNote: String(
+        shipping.shippingNote || "Orders are printed to order and packed with care."
+      ).trim(),
+    },
+    policies: {
+      acceptsReturns: policies.acceptsReturns !== false,
+      returnWindowDays: Math.max(0, asFiniteNumber(policies.returnWindowDays, 14)),
+      allowsExchanges: policies.allowsExchanges !== false,
+      allowsCancellations: policies.allowsCancellations !== false,
+      cancellationWindowHours: Math.max(0, asFiniteNumber(policies.cancellationWindowHours, 12)),
+      policyNote: String(
+        policies.policyNote ||
+          "Because each product is made to order, custom color requests and personalized pieces may be final sale."
+      ).trim(),
+    },
+    updatedAt: raw.updatedAt || null,
+  };
+}
+
+function buildSellerStoreSettingsResponse(sellerId, seller = {}) {
+  const settings = normalizeSellerStoreSettings(seller.storeSettings, seller.profile || {});
+  return {
+    sellerId,
+    shipping: settings.shipping,
+    policies: settings.policies,
+    updatedAt: settings.updatedAt,
   };
 }
 
@@ -5752,6 +5806,74 @@ app.put("/seller-profiles/:sellerId", requireAppClient, requireAuthenticatedSell
     });
   } catch (err) {
     console.error("update seller-profile error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/seller-store-settings/:sellerId", requireAppClient, requireAuthenticatedSeller, (req, res) => {
+  try {
+    const sellerId = String(req.params.sellerId || "").trim();
+    if (!sellerId) return res.status(400).json({ error: "Seller id is required" });
+    if (req.auth.sellerId !== sellerId) {
+      return res.status(403).json({ error: "Seller store settings access denied" });
+    }
+
+    const sellers = loadSellersFile();
+    const seller = sellers[sellerId];
+    if (!seller) {
+      return res.status(404).json({ error: "Seller not found" });
+    }
+
+    res.json(buildSellerStoreSettingsResponse(sellerId, seller));
+  } catch (err) {
+    console.error("seller-store-settings get error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/seller-store-settings/:sellerId", requireAppClient, requireAuthenticatedSeller, (req, res) => {
+  try {
+    const sellerId = String(req.params.sellerId || "").trim();
+    if (!sellerId) return res.status(400).json({ error: "Seller id is required" });
+    if (req.auth.sellerId !== sellerId) {
+      return res.status(403).json({ error: "Seller store settings update denied" });
+    }
+
+    const sellers = loadSellersFile();
+    let seller = sellers[sellerId];
+    if (!seller) {
+      return res.status(404).json({ error: "Seller not found" });
+    }
+
+    const body = req.body || {};
+    const existing = normalizeSellerStoreSettings(seller.storeSettings, seller.profile || {});
+    const merged = normalizeSellerStoreSettings(
+      {
+        shipping: { ...existing.shipping, ...(body.shipping || {}) },
+        policies: { ...existing.policies, ...(body.policies || {}) },
+        updatedAt: new Date().toISOString(),
+      },
+      seller.profile || {}
+    );
+
+    seller.storeSettings = merged;
+    seller.profile = normalizeSellerPublicProfile(
+      {
+        ...(seller.profile || {}),
+        processingTime: merged.shipping.processingTime,
+        shipsInMinDays: merged.shipping.minShipDays,
+        shipsInMaxDays: merged.shipping.maxShipDays,
+        location: merged.shipping.primaryRegion || seller.profile?.location,
+      },
+      sellerId,
+      seller.businessName || seller.profile?.displayName
+    );
+    sellers[sellerId] = seller;
+    saveSellersFile(sellers);
+
+    res.json(buildSellerStoreSettingsResponse(sellerId, seller));
+  } catch (err) {
+    console.error("seller-store-settings put error:", err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -2327,8 +2327,10 @@ struct SellerReviewsView: View {
 
 struct ShippingSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("sellerSellerId") private var sellerId = ""
     @State private var draft = SellerShippingSettingsDraft.load()
     @State private var saveMessage: String?
+    @State private var isSaving = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -2418,7 +2420,21 @@ struct ShippingSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .safeAreaInset(edge: .bottom) {
-            SellerSettingsSaveBar(title: "Save Shipping Settings", action: saveSettings)
+            SellerSettingsSaveBar(title: isSaving ? "Saving…" : "Save Shipping Settings") {
+                saveSettings()
+            }
+        }
+        .task {
+            await loadFromServerIfNeeded()
+        }
+    }
+
+    private func loadFromServerIfNeeded() async {
+        let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSellerId.isEmpty else { return }
+        await SellerStoreSettingsSync.refreshLocalCache(sellerId: trimmedSellerId)
+        if let shipping = SellerStoreSettingsSync.loadLocalShipping() {
+            draft = SellerShippingSettingsDraft(from: shipping)
         }
     }
 
@@ -2428,13 +2444,43 @@ struct ShippingSettingsView: View {
         draft.minShipDays = minDays
         draft.maxShipDays = maxDays
         draft.store()
-        saveMessage = "Shipping settings saved locally."
+
+        Task {
+            await saveSettingsToServer()
+        }
+    }
+
+    @MainActor
+    private func saveSettingsToServer() async {
+        isSaving = true
+        defer { isSaving = false }
+
+        let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSellerId.isEmpty else {
+            saveMessage = "Shipping settings saved on this device."
+            return
+        }
+
+        do {
+            try await MarketplaceAuthSession.ensureSellerSessionReady()
+            let response = try await SellerAPI.updateStoreSettings(
+                sellerId: trimmedSellerId,
+                shipping: draft.asServerPayload(),
+                policies: nil
+            )
+            SellerStoreSettingsSync.applyToLocalCache(response)
+            saveMessage = "Shipping settings saved."
+        } catch {
+            saveMessage = "Saved on this device. Couldn't sync to the server — try again."
+        }
     }
 }
 
 struct SellerPoliciesView: View {
+    @AppStorage("sellerSellerId") private var sellerId = ""
     @State private var draft = SellerPolicySettingsDraft.load()
     @State private var saveMessage: String?
+    @State private var isSaving = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -2498,13 +2544,54 @@ struct SellerPoliciesView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .safeAreaInset(edge: .bottom) {
-            SellerSettingsSaveBar(title: "Save Policies", action: savePolicies)
+            SellerSettingsSaveBar(title: isSaving ? "Saving…" : "Save Policies") {
+                savePolicies()
+            }
+        }
+        .task {
+            await loadFromServerIfNeeded()
+        }
+    }
+
+    private func loadFromServerIfNeeded() async {
+        let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSellerId.isEmpty else { return }
+        await SellerStoreSettingsSync.refreshLocalCache(sellerId: trimmedSellerId)
+        if let policies = SellerStoreSettingsSync.loadLocalPolicies() {
+            draft = SellerPolicySettingsDraft(from: policies)
         }
     }
 
     private func savePolicies() {
         draft.store()
-        saveMessage = "Policy settings saved locally."
+        Task {
+            await savePoliciesToServer()
+        }
+    }
+
+    @MainActor
+    private func savePoliciesToServer() async {
+        isSaving = true
+        defer { isSaving = false }
+
+        let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSellerId.isEmpty else {
+            saveMessage = "Policy settings saved on this device."
+            return
+        }
+
+        do {
+            try await MarketplaceAuthSession.ensureSellerSessionReady()
+            let response = try await SellerAPI.updateStoreSettings(
+                sellerId: trimmedSellerId,
+                shipping: nil,
+                policies: draft.asServerPayload()
+            )
+            SellerStoreSettingsSync.applyToLocalCache(response)
+            saveMessage = "Policy settings saved."
+        } catch {
+            saveMessage = "Saved on this device. Couldn't sync to the server — try again."
+        }
     }
 }
 
@@ -4014,6 +4101,32 @@ private struct SellerShippingSettingsDraft: Codable {
         guard let data = try? JSONEncoder().encode(self) else { return }
         UserDefaults.standard.set(data, forKey: SellerSettingsStorageKey.shipping)
     }
+
+    init(from shipping: SellerStoreSettingsShipping) {
+        processingTime = shipping.processingTime
+        minShipDays = shipping.minShipDays
+        maxShipDays = shipping.maxShipDays
+        primaryRegion = shipping.primaryRegion
+        offersInternational = shipping.offersInternational
+        internationalRegions = shipping.internationalRegions
+        flatRateText = shipping.flatRateText
+        freeShippingThresholdText = shipping.freeShippingThresholdText
+        shippingNote = shipping.shippingNote
+    }
+
+    func asServerPayload() -> SellerStoreSettingsShipping {
+        SellerStoreSettingsShipping(
+            processingTime: processingTime,
+            minShipDays: minShipDays,
+            maxShipDays: maxShipDays,
+            primaryRegion: primaryRegion,
+            offersInternational: offersInternational,
+            internationalRegions: internationalRegions,
+            flatRateText: flatRateText,
+            freeShippingThresholdText: freeShippingThresholdText,
+            shippingNote: shippingNote
+        )
+    }
 }
 
 private struct SellerPolicySettingsDraft: Codable {
@@ -4043,6 +4156,26 @@ private struct SellerPolicySettingsDraft: Codable {
     func store() {
         guard let data = try? JSONEncoder().encode(self) else { return }
         UserDefaults.standard.set(data, forKey: SellerSettingsStorageKey.policies)
+    }
+
+    init(from policies: SellerStoreSettingsPolicies) {
+        acceptsReturns = policies.acceptsReturns
+        returnWindowDays = policies.returnWindowDays
+        allowsExchanges = policies.allowsExchanges
+        allowsCancellations = policies.allowsCancellations
+        cancellationWindowHours = policies.cancellationWindowHours
+        policyNote = policies.policyNote
+    }
+
+    func asServerPayload() -> SellerStoreSettingsPolicies {
+        SellerStoreSettingsPolicies(
+            acceptsReturns: acceptsReturns,
+            returnWindowDays: returnWindowDays,
+            allowsExchanges: allowsExchanges,
+            allowsCancellations: allowsCancellations,
+            cancellationWindowHours: cancellationWindowHours,
+            policyNote: policyNote
+        )
     }
 }
 
