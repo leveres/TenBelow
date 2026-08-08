@@ -32,7 +32,13 @@ final class CatalogDecodePerformanceTests: XCTestCase {
                 archivedAt: nil,
                 reviewNotes: nil,
                 submittedAt: nil,
-                previousPriceCents: nil
+                previousPriceCents: nil,
+                rightsOwnershipType: nil,
+                rightsReferenceFlags: nil,
+                rightsCertificationAccepted: nil,
+                rightsCertificationAcceptedAt: nil,
+                requiresManualReview: nil,
+                reviewReason: nil
             )
         }
 

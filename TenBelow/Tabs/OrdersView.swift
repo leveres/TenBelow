@@ -208,7 +208,7 @@ struct OrdersView: View {
             ordersHeaderBlock(statusBarOrders: statusBarOrders)
 
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 10) {
                     ForEach(visibleOrders) { order in
                         NavigationLink {
                             OrderDetailView(
@@ -228,7 +228,11 @@ struct OrdersView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 28)
+                .padding(.top, 2)
+                .padding(
+                    .bottom,
+                    TopLevelHeaderMetrics.homeFloatingTabBarClearance + 52
+                )
             }
             .transaction { transaction in
                 transaction.disablesAnimations = true

@@ -3,8 +3,9 @@
  * One-command production checklist:
  * 1) JSON -> Postgres relational migration
  * 2) Relational verification (strict)
- * 3) Core smoke test
- * 4) Readiness + admin relational health summary
+ * 3) Prisma Phase 1 sync + verification (strict)
+ * 4) Core smoke test
+ * 5) Readiness + admin relational health summary
  *
  * Usage:
  *   DATABASE_URL=... BASE_URL=https://tenbelow.onrender.com node scripts/release-checklist.mjs
@@ -55,31 +56,35 @@ async function main() {
   }
 
   if (process.env.SKIP_MIGRATION !== "1") {
-    printSection("Step 1/4: Migrate JSON -> Postgres relational");
+    printSection("Step 1/5: Migrate JSON -> Postgres relational");
     runNodeScript("scripts/migrate-json-to-pg-relational.mjs");
   } else {
-    printSection("Step 1/4: Migration skipped (SKIP_MIGRATION=1)");
+    printSection("Step 1/5: Migration skipped (SKIP_MIGRATION=1)");
   }
 
   if (process.env.SKIP_VERIFY !== "1") {
-    printSection("Step 2/4: Verify relational tables (STRICT)");
+    printSection("Step 2/5: Verify relational tables (STRICT)");
     runNodeScript("scripts/verify-pg-relational.mjs", { STRICT: "1" });
+
+    printSection("Step 3/5: Sync and verify Prisma Phase 1 (STRICT)");
+    runNodeScript("scripts/sync-json-to-prisma-phase1.mjs");
+    runNodeScript("scripts/verify-prisma-phase1.mjs", { STRICT: "1" });
   } else {
-    printSection("Step 2/4: Verify skipped (SKIP_VERIFY=1)");
+    printSection("Steps 2-3/5: Verification skipped (SKIP_VERIFY=1)");
   }
 
   if (process.env.SKIP_SMOKE !== "1") {
-    printSection("Step 3/4: Smoke test core endpoints");
+    printSection("Step 4/5: Smoke test core endpoints");
     runNodeScript("scripts/smoke-core-endpoints.mjs", {
       BASE_URL,
       STRICT: "1",
       ADMIN_API_KEY: "",
     });
   } else {
-    printSection("Step 3/4: Smoke skipped (SKIP_SMOKE=1)");
+    printSection("Step 4/5: Smoke skipped (SKIP_SMOKE=1)");
   }
 
-  printSection("Step 4/4: Runtime readiness summary");
+  printSection("Step 5/5: Runtime readiness summary");
   const ready = await fetchJSON(`${BASE_URL}/ready`);
   console.log(`ready status=${ready.status} ok=${ready.body?.ok === true}`);
   if (ready.body?.checks) {

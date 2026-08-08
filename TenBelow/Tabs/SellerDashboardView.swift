@@ -382,8 +382,7 @@ struct SellerDashboardView: View {
         HStack(spacing: 12) {
             NavigationLink {
                 SellerStoresDirectoryView(
-                    currentSellerID: seller.id,
-                    products: storefrontProducts
+                    currentSellerID: seller.id
                 )
             } label: {
                 secondaryButton(icon: "eye", title: "View stores")
@@ -941,27 +940,27 @@ private struct SellerPayoutAPIError: LocalizedError {
 // MARK: - Preview
 
 private struct SellerStoresDirectoryView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var catalog: CatalogStore
-    @EnvironmentObject private var localProducts: LocalProductStore
 
     @State private var currentStorePage = 0
 
     let currentSellerID: String
-    let products: [Product]
 
-    private let profilesPerPage = 5
+    private let profilesPerPage = 3
 
     private var storefrontProducts: [Product] {
         resolvedStorefrontProducts(
             remoteProducts: catalog.products,
-            fallbackProducts: products.isEmpty ? localProducts.products : products
+            fallbackProducts: []
         )
+        .filter { !CatalogSeedPolicy.isSeedSeller($0.sellerId) }
     }
 
     private var sellerProfiles: [SellerProfile] {
         var profilesByID: [String: SellerProfile] = [:]
 
-        for profile in catalog.sellerProfiles {
+        for profile in catalog.sellerProfiles where !CatalogSeedPolicy.isSeedSeller(profile.id) {
             profilesByID[profile.id] = profile.applyingStorefrontProducts(
                 storefrontProducts.filter { $0.sellerId == profile.id }
             )
@@ -970,7 +969,7 @@ private struct SellerStoresDirectoryView: View {
         for (sellerId, profile) in resolvedSellerProfilesByID(
             storefrontProducts: storefrontProducts,
             remoteProfiles: catalog.sellerProfiles
-        ) {
+        ) where !CatalogSeedPolicy.isSeedSeller(sellerId) {
             profilesByID[sellerId] = profile.mergingFallback(profilesByID[sellerId])
         }
 
@@ -997,7 +996,7 @@ private struct SellerStoresDirectoryView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
+        VStack(alignment: .leading, spacing: 12) {
             directoryHeader
                 .padding(.horizontal, 20)
 
@@ -1006,37 +1005,47 @@ private struct SellerStoresDirectoryView: View {
                     .padding(.horizontal, 20)
                 Spacer(minLength: 0)
             } else {
-                VStack(spacing: 14) {
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(), spacing: 0)
-                        ],
-                        alignment: .center,
-                        spacing: 12
-                    ) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(visibleSellerProfiles) { profile in
-                            NavigationLink {
-                                PublicSellerProfileView(
-                                    seller: profile,
-                                    products: storefrontProducts.filter { $0.sellerId == profile.id }
-                                )
-                            } label: {
-                                sellerStoreTile(profile)
+                            if profile.id == currentSellerID {
+                                Button {
+                                    dismiss()
+                                } label: {
+                                    PremiumStorefrontCard(content: cardContent(for: profile))
+                                }
+                                .buttonStyle(PremiumStorefrontCardButtonStyle())
+                            } else {
+                                NavigationLink {
+                                    PublicSellerProfileView(
+                                        seller: profile,
+                                        products: storefrontProducts.filter { $0.sellerId == profile.id }
+                                    )
+                                } label: {
+                                    PremiumStorefrontCard(content: cardContent(for: profile))
+                                }
+                                .buttonStyle(PremiumStorefrontCardButtonStyle())
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 20)
+                    .padding(.top, 2)
+                    .padding(
+                        .bottom,
+                        TopLevelHeaderMetrics.homeFloatingTabBarClearance + 20
+                    )
+                }
+                .refreshable {
+                    await catalog.load()
+                }
 
-                    if totalStorePages > 1 {
-                        storePaginationControls
-                            .padding(.horizontal, 20)
-                    }
-
-                    Spacer(minLength: 0)
+                if totalStorePages > 1 {
+                    storePaginationControls
+                        .padding(.horizontal, 20)
                 }
             }
         }
+        .padding(.bottom, TopLevelHeaderMetrics.homeFloatingTabBarClearance + 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(TBFrostBackground())
         .navigationTitle("")
@@ -1069,7 +1078,7 @@ private struct SellerStoresDirectoryView: View {
             .padding(.top, -6)
             .padding(.leading, -8)
 
-            Text("Browse other TenBelow makers, study their storefronts, and see how sellers are presenting their products.")
+            Text("Discover real makers, explore their newest work, and find a storefront worth following.")
                 .font(.tbBody)
                 .foregroundStyle(.secondary)
                 .lineSpacing(2)
@@ -1105,225 +1114,12 @@ private struct SellerStoresDirectoryView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    private func sellerStoreTile(_ profile: SellerProfile) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            StorefrontImageView(reference: profile.avatarURL?.absoluteString, contentMode: .fill) {
-                Circle()
-                    .fill(TBTheme.skyLight.opacity(0.58))
-                    .overlay {
-                        Text(avatarInitials(for: profile))
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(TBTheme.deepSky)
-                    }
-            }
-            .frame(width: 46, height: 46)
-            .clipShape(Circle())
-            .overlay(
-                Circle()
-                    .strokeBorder(.white.opacity(0.9), lineWidth: 2)
-            )
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(profile.displayName)
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
-                    .foregroundStyle(TBTheme.deepSky)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-
-                Text(storeStatusText(for: profile))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(TBTheme.icyBlue)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-
-                Text(storeMetricText(for: profile))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(TBTheme.icyBlue.opacity(0.86))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-
-                Text(profile.handle)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            viewStoreCapsule
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: 340, minHeight: 94, alignment: .center)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.96),
-                    TBTheme.skyLight.opacity(0.26)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+    private func cardContent(for profile: SellerProfile) -> PremiumStorefrontCardContent {
+        PremiumStorefrontCardContent(
+            seller: profile,
+            products: storefrontProducts.filter { $0.sellerId == profile.id },
+            isCurrentSeller: profile.id == currentSellerID
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(TBTheme.skyBlue.opacity(0.16), lineWidth: 0.8)
-        )
-        .shadow(color: TBTheme.deepSky.opacity(0.035), radius: 8, y: 3)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func sellerStoreRow(_ profile: SellerProfile) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            StorefrontImageView(reference: profile.avatarURL?.absoluteString, contentMode: .fill) {
-                Circle()
-                    .fill(TBTheme.skyLight.opacity(0.52))
-                    .overlay {
-                        Text(avatarInitials(for: profile))
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(TBTheme.deepSky)
-                    }
-            }
-            .frame(width: 54, height: 54)
-            .clipShape(Circle())
-            .overlay(
-                Circle()
-                    .strokeBorder(.white.opacity(0.82), lineWidth: 2)
-            )
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text(profile.displayName)
-                        .font(.tbBodyStrong)
-                        .foregroundStyle(TBTheme.deepSky)
-                        .lineLimit(1)
-
-                    if profile.showsVerifiedBadge {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(TBTheme.icyBlue)
-                    }
-
-                    if profile.id == currentSellerID {
-                        Text("You")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(TBTheme.accent, in: Capsule())
-                    }
-                }
-
-                Text(profile.handle)
-                    .font(.tbCaption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                HStack(spacing: 8) {
-                    sellerDirectoryPill(icon: "cube.box", text: "\(profile.productCount) product\(profile.productCount == 1 ? "" : "s")")
-                    if profile.rating > 0 {
-                        sellerDirectoryPill(icon: "star.fill", text: String(format: "%.1f", profile.rating))
-                    }
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(TBTheme.deepSky.opacity(0.46))
-        }
-        .padding(14)
-        .background(.white.opacity(0.84), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 0.8)
-        )
-    }
-
-    private func sellerDirectoryPill(icon: String, text: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-            Text(text)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-        }
-        .foregroundStyle(
-            LinearGradient(
-                colors: [TBTheme.deepSky, TBTheme.icyBlue],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-        )
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.94),
-                            TBTheme.skyLight.opacity(0.62)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(
-            Capsule(style: .continuous)
-                .strokeBorder(TBTheme.skyBlue.opacity(0.3), lineWidth: 0.75)
-        )
-        .shadow(color: TBTheme.deepSky.opacity(0.06), radius: 2, y: 1)
-    }
-
-    private var viewStoreCapsule: some View {
-        HStack(spacing: 4) {
-            Text("View")
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-        }
-        .font(.system(size: 12, weight: .bold, design: .rounded))
-        .foregroundStyle(TBTheme.deepSky)
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
-        .background(
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.94),
-                            TBTheme.skyLight.opacity(0.52)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(
-            Capsule(style: .continuous)
-                .strokeBorder(TBTheme.skyBlue.opacity(0.3), lineWidth: 0.75)
-        )
-        .shadow(color: TBTheme.deepSky.opacity(0.06), radius: 2, y: 1)
-    }
-
-    private func storeStatusText(for profile: SellerProfile) -> String {
-        if profile.id == currentSellerID {
-            return "Your store"
-        }
-        if profile.showsVerifiedBadge {
-            return "Verified seller"
-        }
-        return "Seller store"
-    }
-
-    private func storeMetricText(for profile: SellerProfile) -> String {
-        let productText = "\(profile.productCount) product\(profile.productCount == 1 ? "" : "s")"
-        guard profile.rating > 0 else { return productText }
-        return "\(productText) • \(String(format: "%.1f", profile.rating))"
     }
 
     private var emptyState: some View {
@@ -1333,22 +1129,12 @@ private struct SellerStoresDirectoryView: View {
                     .font(.tbBodyStrong)
                     .foregroundStyle(TBTheme.deepSky)
 
-                Text("Seller profiles will appear here once shops are published in the catalog.")
+                Text("Real seller profiles will appear here as makers publish their storefronts.")
                     .font(.tbCaption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-    }
-
-    private func avatarInitials(for profile: SellerProfile) -> String {
-        let initials = profile.displayName
-            .split(whereSeparator: \.isWhitespace)
-            .prefix(2)
-            .compactMap(\.first)
-            .map(String.init)
-            .joined()
-        return initials.isEmpty ? "TB" : initials
     }
 }
 

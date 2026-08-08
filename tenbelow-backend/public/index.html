@@ -38,48 +38,20 @@
           </div>
         </div>
 
-        <div class="hero-screens" id="screens" aria-label="TenBelow app screen previews">
-          <article class="phone-shot phone-shot-main" style="--screen-accent: var(--deep-sky)">
+        <div class="hero-screens" id="screens" aria-label="TenBelow app screenshots">
+          <figure class="phone-shot phone-shot-main">
             <div class="phone-shell">
-              <div class="phone-sensor"></div>
-              <div class="screen-content shop-screen">
-                <p class="screen-title">Shop</p>
-                <p class="screen-subtitle">Everything is $10 and under.</p>
-                <div class="search-pill">Search products, materials, or sellers</div>
-                <div class="category-row">
-                  <span>All</span>
-                  <span>New</span>
-                  <span>Favorites</span>
-                </div>
-                <div class="product-preview-grid">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </div>
-              </div>
+              <img src="/screenshots/stores.png" alt="TenBelow Stores screen showing real maker profiles" />
             </div>
-            <p class="shot-caption">Shop screen</p>
-          </article>
+            <figcaption class="shot-caption">Discover maker storefronts</figcaption>
+          </figure>
 
-          <article class="phone-shot phone-shot-back" style="--screen-accent: var(--icy-blue)">
+          <figure class="phone-shot phone-shot-back">
             <div class="phone-shell">
-              <div class="phone-sensor"></div>
-              <div class="screen-content orders-screen">
-                <p class="screen-title">Orders</p>
-                <p class="screen-subtitle">Purchases, receipts, and updates.</p>
-                <div class="status-strip">
-                  <span>Active</span>
-                  <span>Done</span>
-                  <span>Filter</span>
-                </div>
-                <div class="order-card"></div>
-                <div class="order-card short"></div>
-                <div class="order-card"></div>
-              </div>
+              <img src="/screenshots/orders.png" alt="TenBelow Orders screen showing purchase and delivery updates" />
             </div>
-            <p class="shot-caption">Orders screen</p>
-          </article>
+            <figcaption class="shot-caption">Track every order</figcaption>
+          </figure>
         </div>
       </section>
 
@@ -144,13 +116,38 @@
         </div>
       </section>
 
-      <section class="section screenshot-note">
-        <p class="eyebrow">Real screenshots next</p>
-        <h2>Drop exported app screenshots into the public folder when they are ready.</h2>
-        <p>
-          This page is now styled around the actual TenBelow app theme. When screenshots are exported, place them in
-          <code>tenbelow-backend/public/screenshots</code> and we can swap the preview frames to real images.
-        </p>
+      <section class="section screenshot-gallery" aria-labelledby="gallery-title">
+        <div class="gallery-heading">
+          <p class="eyebrow">Built for buyers and makers</p>
+          <h2 id="gallery-title">The actual TenBelow app. No generic mockups.</h2>
+          <p>Explore storefronts, follow fulfillment, and run a seller dashboard in one focused iPhone experience.</p>
+        </div>
+
+        <div class="gallery-grid">
+          <figure class="gallery-card">
+            <img src="/screenshots/stores.png" alt="TenBelow maker storefront directory" loading="lazy" />
+            <figcaption>
+              <strong>Discover real makers</strong>
+              <span>Browse storefronts with seller imagery, shipping speed, and direct store access.</span>
+            </figcaption>
+          </figure>
+
+          <figure class="gallery-card gallery-card-featured">
+            <img src="/screenshots/seller-dashboard.png" alt="TenBelow seller dashboard" loading="lazy" />
+            <figcaption>
+              <strong>Run your storefront</strong>
+              <span>Manage products, shipping, policies, support, custom requests, and payouts.</span>
+            </figcaption>
+          </figure>
+
+          <figure class="gallery-card">
+            <img src="/screenshots/orders.png" alt="TenBelow buyer orders screen" loading="lazy" />
+            <figcaption>
+              <strong>Stay on top of orders</strong>
+              <span>See active purchases, delivery status, totals, and completed orders at a glance.</span>
+            </figcaption>
+          </figure>
+        </div>
       </section>
     </main>
 

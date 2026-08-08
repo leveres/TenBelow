@@ -28,7 +28,6 @@ struct HomeView: View {
     @State private var lastLiveDropRefresh = Date.distantPast
     @State private var isLiveDropRefreshInFlight = false
     @State private var isHomeVisible = false
-    private let drop = MockData.currentDrop
     private let rotationInterval: TimeInterval = 120
     private let rotationTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
 
@@ -242,10 +241,15 @@ struct HomeView: View {
     }
 
     private var products: [Product] {
-        resolvedStorefrontProducts(
+        let resolvedProducts = resolvedStorefrontProducts(
             remoteProducts: catalog.products,
             fallbackProducts: localProducts.products
         )
+#if DEBUG
+        return resolvedProducts
+#else
+        return resolvedProducts.filter(CatalogSeedPolicy.isRealStorefrontProduct)
+#endif
     }
 
     /// Fresh favorites only: keep mock filler for thin live catalogs, but do not re-add local seller drafts after
@@ -269,9 +273,11 @@ struct HomeView: View {
         if catalog.isUsingCachedData {
             appendUnique(localProducts.products)
         }
+        #if DEBUG
         if merged.count < HomeMetrics.freshFavoritesMaxStripCards {
             appendUnique(MockData.products)
         }
+        #endif
         return merged
     }
 
@@ -343,10 +349,6 @@ struct HomeView: View {
     private var excludedFeaturedProductIDs: Set<String> {
         if let liveDrop, liveDrop.active {
             return Set(liveDrop.products.map(\.id))
-        }
-
-        if catalog.config.dropEnabled {
-            return Set(drop.products.map(\.id))
         }
 
         return []

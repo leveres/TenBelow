@@ -132,7 +132,7 @@ main {
 
 .hero-copy h1,
 .section-copy h2,
-.screenshot-note h2 {
+.gallery-heading h2 {
   margin: 0;
   color: var(--deep-sky);
   letter-spacing: -0.065em;
@@ -146,7 +146,7 @@ main {
 
 .hero-text,
 .section-copy p,
-.screenshot-note p {
+.gallery-heading p {
   color: var(--muted);
   font-size: 1.16rem;
   line-height: 1.75;
@@ -210,14 +210,21 @@ main {
 }
 
 .phone-shell {
-  min-height: 584px;
-  padding: 16px;
-  border: 9px solid #15384e;
+  padding: 7px;
+  overflow: hidden;
+  border: 7px solid #15384e;
   border-radius: 48px;
   background: #15384e;
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.12),
     var(--shadow);
+}
+
+.phone-shell img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 35px;
 }
 
 .phone-sensor {
@@ -333,8 +340,7 @@ main {
 }
 
 .app-store-strip div,
-.feature-list article,
-.screenshot-note {
+.feature-list article {
   border: 1px solid rgba(255, 255, 255, 0.86);
   background: var(--glass);
   box-shadow:
@@ -382,7 +388,7 @@ main {
 }
 
 .section-copy h2,
-.screenshot-note h2 {
+.gallery-heading h2 {
   max-width: 760px;
   font-size: clamp(2.35rem, 5.2vw, 4.6rem);
 }
@@ -425,21 +431,72 @@ main {
   line-height: 1.65;
 }
 
-.screenshot-note {
+.screenshot-gallery {
   margin-bottom: 58px;
-  padding: 50px;
-  border-radius: 38px;
+}
+
+.gallery-heading {
+  max-width: 780px;
+  margin: 0 auto 42px;
   text-align: center;
 }
 
-.screenshot-note h2,
-.screenshot-note p {
+.gallery-heading h2,
+.gallery-heading p {
   margin-right: auto;
   margin-left: auto;
 }
 
-.screenshot-note p {
+.gallery-heading p {
   max-width: 720px;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+  align-items: start;
+}
+
+.gallery-card {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 34px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(18, 107, 152, 0.06),
+    0 24px 58px rgba(18, 107, 152, 0.13);
+  backdrop-filter: blur(18px);
+}
+
+.gallery-card-featured {
+  transform: translateY(-18px);
+}
+
+.gallery-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 472 / 780;
+  object-fit: cover;
+  object-position: top;
+  border-bottom: 1px solid var(--line);
+}
+
+.gallery-card figcaption {
+  display: grid;
+  gap: 7px;
+  padding: 22px;
+}
+
+.gallery-card strong {
+  color: var(--deep-sky);
+  font-size: 1.08rem;
+}
+
+.gallery-card span {
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 code {
@@ -468,6 +525,63 @@ code {
   gap: 18px;
 }
 
+.legal-main {
+  width: min(840px, calc(100% - 32px));
+  margin: 34px auto 72px;
+}
+
+.legal-document {
+  padding: clamp(28px, 6vw, 58px);
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 38px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow:
+    inset 0 0 0 1px rgba(18, 107, 152, 0.06),
+    0 24px 64px rgba(18, 107, 152, 0.11);
+  backdrop-filter: blur(20px);
+}
+
+.legal-document h1 {
+  margin: 0;
+  color: var(--deep-sky);
+  font-size: clamp(2.6rem, 8vw, 5rem);
+  letter-spacing: -0.065em;
+  line-height: 0.98;
+}
+
+.legal-document h2 {
+  margin: 34px 0 10px;
+  color: var(--deep-sky);
+  font-size: 1.32rem;
+  letter-spacing: -0.025em;
+}
+
+.legal-document p,
+.legal-document li {
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.72;
+}
+
+.legal-document ul {
+  padding-left: 1.3rem;
+}
+
+.legal-effective-date {
+  margin: 16px 0 30px;
+  color: var(--icy-blue);
+  font-weight: 800;
+}
+
+.legal-back-link {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 24px;
+  color: var(--deep-sky);
+  font-weight: 800;
+  text-decoration: none;
+}
+
 @media (max-width: 940px) {
   .hero,
   .feature-section {
@@ -492,6 +606,14 @@ code {
 
   .app-store-strip {
     grid-template-columns: 1fr;
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gallery-card-featured {
+    transform: none;
   }
 }
 
@@ -530,8 +652,11 @@ code {
   }
 
   .phone-shell {
-    min-height: 500px;
     border-radius: 40px;
+  }
+
+  .phone-shell img {
+    border-radius: 29px;
   }
 
   .screen-content {
@@ -547,7 +672,7 @@ code {
     padding: 58px 0;
   }
 
-  .screenshot-note {
-    padding: 34px 20px;
+  .gallery-grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -1,4 +1,5 @@
-// Copy to StripeKeys.xcconfig (add to .gitignore) and reference from Xcode build configurations.
+// Copy to StripeKeys.xcconfig (add to .gitignore) and reference it from Xcode,
+// or provide these user-defined build settings from your secure CI/App Store archive configuration.
 // Do not commit real secret keys — only publishable keys belong in the iOS app.
 
 // --- Debug (Stripe test mode) ---
@@ -7,4 +8,5 @@ TENBELOW_STRIPE_PUBLISHABLE_KEY = pk_test_REPLACE_ME
 TENBELOW_APP_API_KEY = tb_app_client_REPLACE_ME
 
 // --- Release / TestFlight (Stripe live mode) ---
-// TENBELOW_STRIPE_PUBLISHABLE_KEY = pk_live_REPLACE_ME
+// The Release configuration maps this value into TENBELOW_STRIPE_PUBLISHABLE_KEY.
+TENBELOW_STRIPE_LIVE_PUBLISHABLE_KEY = pk_live_REPLACE_ME

@@ -246,6 +246,8 @@ const CUSTOM_ORDER_REQUESTS_PATH = dataFileURL("custom-order-requests.json");
 const SELLER_INQUIRIES_PATH = dataFileURL("seller-inquiries.json");
 const WEBHOOK_EVENTS_PATH = dataFileURL("webhook-events.json");
 const PUBLIC_INDEX_HTML_PATH = fileURLToPath(new URL("./public/index.html", import.meta.url));
+const PUBLIC_PRIVACY_HTML_PATH = fileURLToPath(new URL("./public/privacy.html", import.meta.url));
+const PUBLIC_TERMS_HTML_PATH = fileURLToPath(new URL("./public/terms.html", import.meta.url));
 const PUBLIC_ASSETS_PATH = fileURLToPath(new URL("./public/", import.meta.url));
 const ADMIN_REVIEW_HTML_PATH = fileURLToPath(new URL("./admin/review.html", import.meta.url));
 const ADMIN_ASSETS_PATH = fileURLToPath(new URL("./admin/", import.meta.url));
@@ -2869,6 +2871,16 @@ app.use("/admin/assets", (req, res, next) => {
 app.get("/", (req, res) => {
   res.setHeader("Cache-Control", IS_PRODUCTION ? "public, max-age=300" : "no-store, max-age=0");
   res.sendFile(PUBLIC_INDEX_HTML_PATH);
+});
+
+app.get("/privacy", (req, res) => {
+  res.setHeader("Cache-Control", IS_PRODUCTION ? "public, max-age=300" : "no-store, max-age=0");
+  res.sendFile(PUBLIC_PRIVACY_HTML_PATH);
+});
+
+app.get("/terms", (req, res) => {
+  res.setHeader("Cache-Control", IS_PRODUCTION ? "public, max-age=300" : "no-store, max-age=0");
+  res.sendFile(PUBLIC_TERMS_HTML_PATH);
 });
 
 app.get("/admin/review", (req, res) => {
@@ -8363,11 +8375,18 @@ app.delete("/drop/submission/:productId", requireAppClient, requireAuthenticated
 
 async function checkReadiness() {
   const resendStatus = resend ? await getResendProviderStatus() : { valid: null, detail: "not_configured" };
+  const stripeSecretKey = String(process.env.STRIPE_SECRET_KEY || "").trim();
   const checks = {
     dataDirectoryExists: existsSync(DATA_DIRECTORY_PATH),
     dataDirectoryWritable: false,
-    stripeSecretKey: Boolean(String(process.env.STRIPE_SECRET_KEY || "").trim()),
+    stripeSecretKey: Boolean(stripeSecretKey),
+    stripeMode: stripeSecretKey.startsWith("sk_live_")
+      ? "live"
+      : stripeSecretKey.startsWith("sk_test_")
+        ? "test"
+        : "unknown",
     stripeWebhookSecret: Boolean(String(process.env.STRIPE_WEBHOOK_SECRET || "").trim()),
+    appStoreVerificationConfigured: isAppStoreVerificationConfigured(),
     appApiKey: Boolean(String(process.env.APP_API_KEY || "").trim()),
     authSecret: Boolean(String(process.env.AUTH_JWT_SECRET || "").trim() || String(process.env.APP_API_KEY || "").trim()),
     email: transactionalEmailConfigured(),
@@ -8433,10 +8452,6 @@ async function checkReadiness() {
 
   return { ok, checks };
 }
-
-app.get("/", (_, res) =>
-  res.json({ ok: true, service: "TenBelow", hint: "API routes include /config, /health, /ready, /catalog" })
-);
 
 app.get("/health", (_, res) => res.json({ ok: true }));
 
