@@ -233,6 +233,21 @@ enum SellerAPI {
         return try JSONDecoder().decode(SellerStatusResponse.self, from: data)
     }
 
+    /// Marks in-app seller onboarding complete and queues the welcome email on the backend.
+    static func completeAppOnboarding() async throws {
+        let url = baseURL.appendingPathComponent("seller/app-onboarding-complete")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(EmptyBody())
+        let (data, http) = try await performSellerAuthorizedRequest { request }
+        if !(200...299).contains(http.statusCode) {
+            throw SellerAPIError(statusCode: http.statusCode, message: serverErrorMessage(from: data))
+        }
+    }
+
+    private struct EmptyBody: Encodable {}
+
     static func onboardingLink(sellerId: String) async throws -> OnboardingLinkResponse {
         let url = baseURL.appendingPathComponent("seller-onboarding-link/\(sellerId)")
         let (data, _) = try await performSellerAuthorizedRequest { URLRequest(url: url) }

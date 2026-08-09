@@ -153,6 +153,10 @@ struct MainTabView: View {
             await refreshSellerOrdersForTabBadgeIfNeeded()
             await PushDeviceRegistration.syncAfterIdentityChange()
         }
+        .task(id: "seller-welcome|\(userRole)|\(sellerSellerId)") {
+            guard userRole == "seller", !sellerSellerId.isEmpty else { return }
+            try? await SellerAPI.completeAppOnboarding()
+        }
     }
 
     private var isEntrySplashActive: Bool {

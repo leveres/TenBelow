@@ -543,17 +543,19 @@ function buildSellerComplianceSection(account) {
     welcomePill.textContent = "Welcome email delivery failed";
   } else {
     welcomePill.className = "compliance-pill";
-    welcomePill.textContent = "Welcome email pending";
+    welcomePill.textContent = account.appOnboardingCompletedAt
+      ? "Welcome email sending"
+      : "Welcome email after app onboarding";
   }
   pills.appendChild(welcomePill);
 
   section.append(title, pills, details);
 
-  if (account.kind === "seller" && welcome.status !== "sent") {
+  if (account.kind === "seller" && welcome.status === "failed") {
     const retryButton = document.createElement("button");
     retryButton.type = "button";
     retryButton.className = "account-action-button";
-    retryButton.textContent = welcome.status === "failed" ? "Retry welcome email" : "Send welcome email";
+    retryButton.textContent = "Retry welcome email";
     retryButton.addEventListener("click", () => {
       retrySellerWelcomeEmail(account.id, retryButton);
     });

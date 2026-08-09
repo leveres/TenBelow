@@ -2,6 +2,7 @@ import { sendSellerWelcomeEmail } from "./sellerWelcomeEmail.js";
 
 export async function deliverSellerWelcomeEmailIfNeeded({
   sellerId,
+  requireAppOnboardingComplete = false,
   loadSellersFile,
   saveSellersFile,
   sendTransactionalEmail,
@@ -11,6 +12,10 @@ export async function deliverSellerWelcomeEmailIfNeeded({
   const seller = sellers[sellerId];
   if (!seller?.sellerAgreement?.accepted) {
     return { skipped: true, reason: "agreement_not_accepted" };
+  }
+
+  if (requireAppOnboardingComplete === true && !seller.appOnboardingCompletedAt) {
+    return { skipped: true, reason: "app_onboarding_incomplete" };
   }
 
   seller.welcomeEmail = seller.welcomeEmail || {

@@ -116,6 +116,12 @@ struct OnboardingView: View {
     }
 
     private func completeOnboarding() {
+        if userRole == "seller" {
+            Task {
+                try? await SellerAPI.completeAppOnboarding()
+            }
+        }
+
         withAnimation(.easeInOut(duration: 0.28)) {
             shouldShowHomeEntrySplash = true
             pendingLaunchTab = userRole == "seller" ? 1 : 0

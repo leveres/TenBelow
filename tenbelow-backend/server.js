@@ -1886,6 +1886,7 @@ function normalizeSellerRecord(record = {}, sellerId = "") {
     },
     sellerAgreement: normalizeSellerAgreementFields(record),
     welcomeEmail: normalizeSellerWelcomeEmailFields(record),
+    appOnboardingCompletedAt: record.appOnboardingCompletedAt || null,
     sellerPoliciesAcknowledged: record.sellerPoliciesAcknowledged === true,
     membership: normalizeMembership(record.membership),
     isFoundingCreator: founding.isFoundingCreator,
@@ -5676,13 +5677,45 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
       payoutSetupPending: !account?.id,
       payoutSetupMessage: account?.id ? null : STRIPE_CONNECT_SETUP_MESSAGE,
     });
+  } catch (err) {
+    console.error("create-seller-account error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/seller/app-onboarding-complete", requireAppClient, requireAuthenticatedSeller, async (req, res) => {
+  try {
+    const sellerId = String(req.auth.sellerId || "").trim();
+    const sellers = loadSellersFile();
+    const seller = sellers[sellerId];
+    if (!seller) return res.status(404).json({ error: "Seller not found" });
+    if (!seller.sellerAgreement?.accepted) {
+      return res.status(400).json({ error: "Seller agreement acceptance is required before welcome email delivery." });
+    }
+
+    if (!seller.appOnboardingCompletedAt) {
+      seller.appOnboardingCompletedAt = new Date().toISOString();
+      saveSellersFile(sellers);
+      upsertSellerAgreementAcceptanceToPrisma(sellerId, seller).catch((syncErr) => {
+        console.warn("seller app onboarding prisma sync warning:", syncErr?.message || syncErr);
+      });
+    }
 
     queueSellerWelcomeEmail({
       sellerId,
+      requireAppOnboardingComplete: true,
       ...sellerWelcomeEmailDeliveryArgs(),
     });
+
+    const refreshed = loadSellersFile()[sellerId] || seller;
+    res.json({
+      ok: true,
+      sellerId,
+      appOnboardingCompletedAt: refreshed.appOnboardingCompletedAt || seller.appOnboardingCompletedAt,
+      welcomeEmailStatus: refreshed.welcomeEmail?.status || "pending",
+    });
   } catch (err) {
-    console.error("create-seller-account error:", err);
+    console.error("seller app onboarding complete error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -6811,6 +6844,7 @@ app.get("/admin/accounts", adminMutationLimiter, requireAdmin, async (req, res) 
             lastError: null,
             attemptCount: 0,
           },
+          appOnboardingCompletedAt: sellerRecord.appOnboardingCompletedAt || null,
           sellerPoliciesAcknowledged: sellerRecord.sellerPoliciesAcknowledged === true,
           createdAt: profile.joinedAt || null,
           updatedAt: sellerRecord.membership?.lastSyncedAt || null,
