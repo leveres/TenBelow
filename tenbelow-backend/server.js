@@ -7839,6 +7839,36 @@ function resolveDropProducts(weekData = {}, catalog = {}) {
     .filter(Boolean);
 }
 
+function resolveSellerSubmissionProducts(weekData = {}, catalog = {}, sellerId = "") {
+  const normalizedSellerId = String(sellerId || "").trim();
+  if (!normalizedSellerId) return [];
+
+  const catalogProducts = Array.isArray(catalog.products) ? catalog.products : [];
+  const productsById = new Map(
+    catalogProducts.map((product) => {
+      const normalizedProduct = normalizeCatalogProduct(product);
+      return [normalizedProduct.id, normalizedProduct];
+    })
+  );
+
+  return dropEntriesForWeek(weekData)
+    .filter((entry) => entry.sellerId === normalizedSellerId)
+    .map((entry, index) => {
+      const product = productsById.get(entry.productId);
+      if (!product || product.sellerId !== normalizedSellerId || product.isDrop !== true) {
+        return null;
+      }
+      if (isSeedSellerId(product.sellerId)) {
+        return null;
+      }
+      if (String(product.approvalStatus || "").trim().toLowerCase() === "archived") {
+        return null;
+      }
+      return buildDropProduct(product, entry, index);
+    })
+    .filter(Boolean);
+}
+
 const SEED_SELLER_IDS = new Set(["seller_001", "seller_002"]);
 const PLACEHOLDER_IMAGE_NAMES = new Set(["products_image", "filament_image", "printer_image"]);
 
@@ -8415,67 +8445,78 @@ app.get("/drop/current", publicReadLimiter, async (req, res) => {
 });
 
 app.get("/drop/my-submissions/:sellerId", requireAppClient, requireAuthenticatedSeller, async (req, res) => {
-  const { sellerId } = req.params;
-  if (req.auth.sellerId !== String(sellerId || "").trim()) {
-    auditOwnershipMismatch(req, {
-      scope: "drop_my_submissions",
-      expectedSellerId: String(sellerId || "").trim(),
-      actualSellerId: req.auth.sellerId || null,
-    });
-    return res.status(403).json({ error: "Seller submissions access denied" });
-  }
-  const window = getCurrentDropSubmissionWindow();
-  const drops = loadDropsFile();
-  const catalog = await fetchCatalog();
+  try {
+    const sellerId = String(req.auth.sellerId || "").trim();
+    const requestedSellerId = String(req.params.sellerId || "").trim();
+    if (!sellerId) {
+      return res.status(401).json({ error: "Authenticated seller session required" });
+    }
+    if (requestedSellerId && requestedSellerId !== sellerId) {
+      auditOwnershipMismatch(req, {
+        scope: "drop_my_submissions",
+        expectedSellerId: requestedSellerId,
+        actualSellerId: sellerId,
+      });
+    }
 
-  const lineupFriday = getFridayStartForStagedDropLineup(new Date());
-  let lineupCycle = dropCycleWindowForFridayStart(lineupFriday);
-  let weekData = drops[lineupCycle.weekId];
-  let myProducts = resolveDropProducts(weekData, catalog).filter((product) => product.sellerId === sellerId);
+    const window = getCurrentDropSubmissionWindow();
+    const drops = loadDropsFile();
+    const catalog = await fetchCatalog();
 
-  if (myProducts.length === 0) {
-    const standard = getRelevantDropFridayStart(new Date());
-    const standardCycle = dropCycleWindowForFridayStart(standard);
-    const priorFriday = addDropZoneDays(standard, -7, DROP_TIME_ZONE);
-    const priorCycle = dropCycleWindowForFridayStart(priorFriday);
-    const now = new Date();
-    const parts = dropTimeParts(now, DROP_TIME_ZONE);
-    if (
-      parts.weekday === 4 &&
-      parts.hour < 17 &&
-      now > priorCycle.endsAt &&
-      now < standardCycle.submissionStartsAt
-    ) {
-      const altWeekData = drops[priorCycle.weekId];
-      const altProducts = resolveDropProducts(altWeekData, catalog).filter((product) => product.sellerId === sellerId);
-      if (altProducts.length > 0) {
-        myProducts = altProducts;
-        lineupCycle = priorCycle;
+    const lineupFriday = getFridayStartForStagedDropLineup(new Date());
+    let lineupCycle = dropCycleWindowForFridayStart(lineupFriday);
+    let weekData = drops[lineupCycle.weekId];
+    let myProducts = resolveSellerSubmissionProducts(weekData, catalog, sellerId);
+
+    if (myProducts.length === 0) {
+      const standard = getRelevantDropFridayStart(new Date());
+      const standardCycle = dropCycleWindowForFridayStart(standard);
+      const priorFriday = addDropZoneDays(standard, -7, DROP_TIME_ZONE);
+      const priorCycle = dropCycleWindowForFridayStart(priorFriday);
+      const now = new Date();
+      const parts = dropTimeParts(now, DROP_TIME_ZONE);
+      if (
+        parts.weekday === 4 &&
+        parts.hour < 17 &&
+        now > priorCycle.endsAt &&
+        now < standardCycle.submissionStartsAt
+      ) {
+        const altWeekData = drops[priorCycle.weekId];
+        const altProducts = resolveSellerSubmissionProducts(altWeekData, catalog, sellerId);
+        if (altProducts.length > 0) {
+          myProducts = altProducts;
+          lineupCycle = priorCycle;
+        }
       }
     }
-  }
 
-  res.json({
-    sellerId,
-    weekId: lineupCycle.weekId,
-    isActive: window.isActive,
-    nextDropAt: window.nextDropAt,
-    slotsUsed: myProducts.length,
-    slotsMax: DROP_MAX_SLOTS_PER_SELLER,
-    products: myProducts,
-  });
+    res.json({
+      sellerId,
+      weekId: lineupCycle.weekId,
+      isActive: window.isActive,
+      nextDropAt: window.nextDropAt,
+      slotsUsed: myProducts.length,
+      slotsMax: DROP_MAX_SLOTS_PER_SELLER,
+      products: myProducts,
+    });
+  } catch (err) {
+    console.error("drop/my-submissions error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/drop/history/:sellerId", requireAppClient, requireAuthenticatedSeller, async (req, res) => {
-  const { sellerId } = req.params;
-  const normalizedSellerId = String(sellerId || "").trim();
-  if (req.auth.sellerId !== normalizedSellerId) {
+  const normalizedSellerId = String(req.auth.sellerId || "").trim();
+  const requestedSellerId = String(req.params.sellerId || "").trim();
+  if (!normalizedSellerId) {
+    return res.status(401).json({ error: "Authenticated seller session required" });
+  }
+  if (requestedSellerId && requestedSellerId !== normalizedSellerId) {
     auditOwnershipMismatch(req, {
       scope: "drop_history",
-      expectedSellerId: normalizedSellerId,
-      actualSellerId: req.auth.sellerId || null,
+      expectedSellerId: requestedSellerId,
+      actualSellerId: normalizedSellerId,
     });
-    return res.status(403).json({ error: "Seller drop history access denied" });
   }
 
   try {

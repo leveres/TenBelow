@@ -64,8 +64,14 @@ enum DropAPI {
 
     // MARK: - Get seller's submissions for this week
 
-    static func mySubmissions(sellerId: String) async throws -> SellerSubmissionsResponse {
-        let url = baseURL.appendingPathComponent("drop/my-submissions/\(sellerId)")
+    static func mySubmissions(sellerId: String? = nil) async throws -> SellerSubmissionsResponse {
+        let resolvedSellerId = sellerId
+            ?? MarketplaceAuthSession.authenticatedSellerId()
+            ?? ""
+        guard !resolvedSellerId.isEmpty else {
+            throw DropAPIError(statusCode: 401, message: "Authenticated seller session required")
+        }
+        let url = baseURL.appendingPathComponent("drop/my-submissions/\(resolvedSellerId)")
         let (data, _) = try await performSellerAuthorizedRequest {
             URLRequest(url: url)
         }
@@ -74,8 +80,14 @@ enum DropAPI {
 
     // MARK: - Get seller's previous weekly drop history
 
-    static func history(sellerId: String) async throws -> SellerDropHistoryResponse {
-        let url = baseURL.appendingPathComponent("drop/history/\(sellerId)")
+    static func history(sellerId: String? = nil) async throws -> SellerDropHistoryResponse {
+        let resolvedSellerId = sellerId
+            ?? MarketplaceAuthSession.authenticatedSellerId()
+            ?? ""
+        guard !resolvedSellerId.isEmpty else {
+            throw DropAPIError(statusCode: 401, message: "Authenticated seller session required")
+        }
+        let url = baseURL.appendingPathComponent("drop/history/\(resolvedSellerId)")
         let (data, _) = try await performSellerAuthorizedRequest {
             URLRequest(url: url)
         }

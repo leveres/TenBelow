@@ -1237,25 +1237,48 @@ struct DropView: View {
         }
 
         if isSeller {
+            let resolvedSellerId = MarketplaceAuthSession.authenticatedSellerId() ?? sellerId
             do {
-                sellerSubmissions = try await DropAPI.mySubmissions(sellerId: sellerId)
+                try await MarketplaceAuthSession.ensureSellerSessionReady()
+                sellerSubmissions = try await DropAPI.mySubmissions(sellerId: resolvedSellerId)
             } catch {
-                errorMessage = "We couldn't load your weekly drop submissions."
+                if sellerSubmissions == nil {
+                    sellerSubmissions = emptySellerSubmissions(for: resolvedSellerId)
+                }
+                if errorMessage == nil {
+                    if let dropError = error as? DropAPIError, dropError.isSellerSessionRequired {
+                        errorMessage = "Sign in to your seller account in Settings to manage Weekly Drop submissions."
+                    } else if !MarketplaceAuthSession.hasActiveSellerSession {
+                        errorMessage = "Sign in to your seller account in Settings to manage Weekly Drop submissions."
+                    }
+                }
             }
 
             do {
-                sellerDropHistory = try await DropAPI.history(sellerId: sellerId)
+                sellerDropHistory = try await DropAPI.history(sellerId: resolvedSellerId)
                 if selectedHistoryWeekId == nil {
                     selectedHistoryWeekId = sellerDropHistory?.weeks.first?.weekId
                 }
             } catch {
                 if sellerDropHistory == nil {
-                    sellerDropHistory = SellerDropHistoryResponse(sellerId: sellerId, weeks: [])
+                    sellerDropHistory = SellerDropHistoryResponse(sellerId: resolvedSellerId, weeks: [])
                 }
             }
         }
 
         isLoading = false
+    }
+
+    private func emptySellerSubmissions(for sellerId: String) -> SellerSubmissionsResponse {
+        SellerSubmissionsResponse(
+            sellerId: sellerId,
+            weekId: dropResponse?.weekId ?? "",
+            isActive: false,
+            nextDropAt: dropResponse?.nextDropAt,
+            slotsUsed: 0,
+            slotsMax: DropConstants.maxSlotsPerSeller,
+            products: []
+        )
     }
 
     private func resolvedProduct(for dropProduct: DropProduct) -> Product {

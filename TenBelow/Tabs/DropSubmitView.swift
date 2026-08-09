@@ -467,7 +467,8 @@ private final class WeeklyDropPrepViewModel: ObservableObject {
         }
 
         do {
-            let response = try await DropAPI.mySubmissions(sellerId: sellerId)
+            let resolvedSellerId = MarketplaceAuthSession.authenticatedSellerId() ?? sellerId
+            let response = try await DropAPI.mySubmissions(sellerId: resolvedSellerId)
             submissions = Self.filteredSubmissions(response, catalog: catalog)
             workspaceError = nil
         } catch {

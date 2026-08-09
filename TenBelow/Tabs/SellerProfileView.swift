@@ -515,7 +515,8 @@ struct SellerProfileView: View {
                 SellerVerificationStore.setTrustedTesterVerified(status.trustedTesterVerified, sellerId: sellerId)
             }
             if status?.onboardingComplete == true {
-                dropSubmissions = try await DropAPI.mySubmissions(sellerId: sellerId)
+                let resolvedSellerId = MarketplaceAuthSession.authenticatedSellerId() ?? sellerId
+                dropSubmissions = try await DropAPI.mySubmissions(sellerId: resolvedSellerId)
             }
             await sellerSubscription.refresh()
         } catch {

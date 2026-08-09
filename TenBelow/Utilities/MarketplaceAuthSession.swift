@@ -70,6 +70,17 @@ enum MarketplaceAuthSession {
         return sellerBearerToken() != nil
     }
 
+    /// Prefer the seller ID embedded in the JWT so drop/profile APIs stay aligned with the server account.
+    nonisolated static func authenticatedSellerId() -> String? {
+        if let token = sellerBearerToken(),
+           let claim = sellerIdClaim(from: token) {
+            return claim
+        }
+        let stored = UserDefaults.standard.string(forKey: "sellerSellerId")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return stored.isEmpty ? nil : stored
+    }
+
     nonisolated static var hasActiveBuyerSession: Bool {
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: "buyerAccountCreated") else { return false }
@@ -283,7 +294,7 @@ enum MarketplaceAuthSession {
                 canonicalSellerId: response.sellerId ?? tokenSellerId
             )
         } catch {
-            clearSellerSession()
+            // Keep the existing JWT when refresh fails so seller tools keep working offline or after transient errors.
         }
     }
 
