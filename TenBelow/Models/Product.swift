@@ -230,7 +230,7 @@ extension Product {
             }
         }
 
-        if trimmed.hasPrefix("/"), let base = AppConstants.backendBaseURL,
+        if trimmed.hasPrefix("/"), let base = BackendURLConfiguration.baseURL(),
            let absolute = URL(string: trimmed, relativeTo: base)?.absoluteURL {
             return rewriteLocalhostMediaURLIfNeeded(absolute)
         }
@@ -239,7 +239,7 @@ extension Product {
     }
 
     nonisolated private static func rewriteLocalhostMediaURLIfNeeded(_ url: URL) -> URL {
-        guard let configured = AppConstants.backendBaseURL,
+        guard let configured = BackendURLConfiguration.baseURL(),
               let configuredHost = configured.host?.lowercased(),
               let urlHost = url.host?.lowercased(),
               ["localhost", "127.0.0.1"].contains(urlHost),

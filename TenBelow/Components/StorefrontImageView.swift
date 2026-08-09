@@ -110,7 +110,7 @@ private final class RemoteImageLoader: ObservableObject {
     }
 
     private func shouldApplyAppClientAuth(for url: URL) -> Bool {
-        guard let backendHost = AppConstants.backendBaseURL?.host?.lowercased(),
+        guard let backendHost = BackendURLConfiguration.baseURL()?.host?.lowercased(),
               let urlHost = url.host?.lowercased()
         else {
             return false
@@ -120,7 +120,7 @@ private final class RemoteImageLoader: ObservableObject {
 
     /// Legacy disk fallback when catalog still references R2 but bytes only exist on Render `/media/`.
     private func backendDiskMediaFallbackURL(for url: URL) -> URL? {
-        guard let configured = AppConstants.backendBaseURL,
+        guard let configured = BackendURLConfiguration.baseURL(),
               let host = url.host?.lowercased(),
               host.contains("r2.dev") || host.contains("cloudflarestorage.com")
         else {

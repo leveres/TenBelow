@@ -2,7 +2,6 @@ import Foundation
 
 enum AppConstants {
     /// Injected via target build settings → `Info.plist` (`$(TENBELOW_*)`). For App Store Release, set HTTPS production URL, `pk_live_…`, and an app API key that matches the backend.
-    private nonisolated static let backendBaseURLInfoKey = "TENBELOW_BACKEND_BASE_URL"
     private nonisolated static let stripePublishableKeyInfoKey = "TENBELOW_STRIPE_PUBLISHABLE_KEY"
     private nonisolated static let appAPIKeyInfoKey = "TENBELOW_APP_API_KEY"
 
@@ -36,72 +35,9 @@ enum AppConstants {
 
     // MARK: - Stripe (replace with your publishable key from dashboard.stripe.com)
 
-    #if DEBUG
-    nonisolated(unsafe) private static var debugBackendBaseURLOverrideSnapshot: String?
-
-    /// Keeps DEBUG LAN overrides available to `backendBaseURL` from background media loaders without touching `UserDefaults` off the main actor.
-    @MainActor
-    static func refreshDebugBackendBaseURLOverrideCache() {
-        let rawValue = configurationValue(for: backendBaseURLInfoKey)
-        let stored = UserDefaults.standard.string(forKey: debugBackendBaseURLOverrideKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let stored, !stored.isEmpty, let url = validBackendURL(from: stored) else {
-            debugBackendBaseURLOverrideSnapshot = nil
-            return
-        }
-
-        if shouldIgnoreDebugBackendOverride(url, configuredBackendValue: rawValue) {
-            UserDefaults.standard.removeObject(forKey: debugBackendBaseURLOverrideKey)
-            debugBackendBaseURLOverrideSnapshot = nil
-        } else {
-            debugBackendBaseURLOverrideSnapshot = stored
-        }
-    }
-    #endif
-
     nonisolated static var backendBaseURL: URL? {
-        let rawValue = configurationValue(for: backendBaseURLInfoKey)
-        #if DEBUG
-        if let override = debugBackendBaseURLOverrideSnapshot,
-           !override.isEmpty,
-           let url = validBackendURL(from: override),
-           !shouldIgnoreDebugBackendOverride(url, configuredBackendValue: rawValue) {
-            return url
-        }
-        #endif
-        return validBackendURL(from: rawValue)
+        BackendURLConfiguration.baseURL()
     }
-
-    /// Parses backend base URL from build settings or overrides; applies Release vs Debug rules (HTTP allowed in DEBUG).
-    nonisolated private static func validBackendURL(from rawValue: String) -> URL? {
-        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              !isPlaceholderConfigurationValue(trimmed),
-              let url = URL(string: trimmed),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              url.host != nil else {
-            return nil
-        }
-
-        #if !DEBUG
-        guard scheme == "https" else { return nil }
-        if let host = url.host?.lowercased(),
-           host == "localhost" || host == "127.0.0.1" {
-            return nil
-        }
-        #endif
-
-        return url
-    }
-
-    #if DEBUG
-    nonisolated private static func shouldIgnoreDebugBackendOverride(_ overrideURL: URL, configuredBackendValue: String) -> Bool {
-        guard configuredBackendValue.contains("tenbelow.onrender.com") else { return false }
-        return overrideURL.scheme?.lowercased() != "https"
-    }
-    #endif
 
     static var isBackendConfigured: Bool {
         backendBaseURL != nil || isTestingOverridesEnabled
@@ -149,7 +85,15 @@ enum AppConstants {
     static let testingModeUserDefaultsKey = "tb.testingModeEnabled"
 
     /// DEBUG-only: override plist `TENBELOW_BACKEND_BASE_URL` (e.g. `http://192.168.1.12:3000`) so a physical device can reach the Mac running `tenbelow-backend`.
-    nonisolated static let debugBackendBaseURLOverrideKey = "tb.debugBackendBaseURLOverride"
+    nonisolated static let debugBackendBaseURLOverrideKey = BackendURLConfiguration.debugBackendBaseURLOverrideKey
+
+    #if DEBUG
+    /// Keeps DEBUG LAN overrides available to media loaders without touching `UserDefaults` off the main actor.
+    @MainActor
+    static func refreshDebugBackendBaseURLOverrideCache() {
+        BackendURLConfiguration.refreshDebugOverrideCache()
+    }
+    #endif
 
     #if DEBUG
     /// Applies `CommandLine.arguments` flags used by `TenBelowUITests` (call once at launch, before stores read config).
