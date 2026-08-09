@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "start:production": "npm run prisma:migrate:deploy && node server.js",
+    "start:production": "npm run prisma:migrate:deploy && npm run sync:legal-documents && node server.js",
     "setup:postgres:phase1": "node scripts/setup-postgres-phase1.mjs",
     "dev": "node --watch server.js",
     "check": "node --check server.js",
