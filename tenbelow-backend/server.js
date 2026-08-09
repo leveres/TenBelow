@@ -5631,6 +5631,12 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
       });
     }
 
+    const token = issueUserSessionToken({
+      role: "seller",
+      sellerId,
+      sellerEmail: email,
+    });
+
     sellers[sellerId] = {
       stripeAccountId: account?.id || "",
       email,
@@ -5661,12 +5667,6 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
       });
       onboardingUrl = link.url;
     }
-
-    const token = issueUserSessionToken({
-      role: "seller",
-      sellerId,
-      sellerEmail: email,
-    });
 
     res.json({
       sellerId,

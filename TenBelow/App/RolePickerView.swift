@@ -951,15 +951,21 @@ struct RolePickerView: View {
                 sellerAgreementAccepted: true,
                 sellerPoliciesAcknowledged: true
             )
-            if let token = response.token, !token.isEmpty {
-                MarketplaceAuthSession.storeSellerSessionToken(token)
+            guard let token = response.token, !token.isEmpty else {
+                await MainActor.run {
+                    sellerErrorMessage = "Your seller account was created, but sign-in failed. Open Settings → Sign in as seller and try again."
+                    isCreatingSellerAccount = false
+                }
+                return
             }
+            MarketplaceAuthSession.storeSellerSessionToken(token)
 
             await applyCreatedSellerRegistration(
                 trimmedSellerId: validated.sellerId,
                 trimmedEmail: validated.email,
                 trimmedBusinessName: validated.businessName,
                 useOfflinePreview: false,
+                deferAppRootTransition: true,
                 releaseCreatingState: false
             )
             await completeSellerAgreementTransition()
@@ -1132,6 +1138,9 @@ struct RolePickerView: View {
 
         sellerAgreementCreationSucceeded = false
         transitionToOnboarding(as: "seller")
+        await MarketplaceAuthSession.syncAfterIdentityChange()
+        _ = try? await MarketplaceAuthSession.ensureSellerSessionReady()
+        await PushDeviceRegistration.syncAfterIdentityChange()
     }
 
     private func applyCreatedSellerRegistration(
@@ -1139,6 +1148,7 @@ struct RolePickerView: View {
         trimmedEmail: String,
         trimmedBusinessName: String,
         useOfflinePreview: Bool,
+        deferAppRootTransition: Bool = false,
         releaseCreatingState: Bool = true
     ) async {
         let starterProfile = SellerProfile.starterProfile(
@@ -1158,10 +1168,14 @@ struct RolePickerView: View {
             if releaseCreatingState {
                 isCreatingSellerAccount = false
             }
-            userRole = "seller"
-            pendingLaunchTab = 1
-            hasSeenOnboarding = false
+            if !deferAppRootTransition {
+                userRole = "seller"
+                pendingLaunchTab = 1
+                hasSeenOnboarding = false
+            }
         }
+
+        guard !deferAppRootTransition else { return }
 
         await MarketplaceAuthSession.syncAfterIdentityChange()
         _ = try? await MarketplaceAuthSession.ensureSellerSessionReady()
@@ -1189,6 +1203,9 @@ struct RolePickerView: View {
         withAnimation(.easeInOut(duration: 0.45)) {
             userRole = role
             hasSeenOnboarding = false
+            if role == "seller" {
+                pendingLaunchTab = 1
+            }
         }
     }
 
@@ -2050,12 +2067,22 @@ private struct SellerAgreementAcceptanceView: View {
             .disabled(!hasReachedAgreementEnd || !hasAcceptedAgreement || isCreatingAccount)
             .opacity(hasReachedAgreementEnd && hasAcceptedAgreement ? 1 : 0.55)
 
-            Text(hasReachedAgreementEnd ? "Check the agreement box to continue." : "Scroll the agreement box to the end.")
+            Text(agreementActionHint)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.center)
         }
+    }
+
+    private var agreementActionHint: String {
+        if !hasReachedAgreementEnd {
+            return "Scroll to the end of the agreement to continue."
+        }
+        if !hasAcceptedAgreement {
+            return "Check the agreement box to continue."
+        }
+        return "Tap agree to create your seller account."
     }
 }
 
