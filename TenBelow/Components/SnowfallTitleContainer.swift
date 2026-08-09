@@ -5,6 +5,9 @@ import SwiftUI
 /// Same snowfall system as weekly-drop title art; use behind glass or on colored card backgrounds.
 struct SnowfallParticleCanvas: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    // Deselected TabView tabs stay mounted, so without this the animation timeline keeps
+    // ticking (and burning CPU/GPU) for every tab's header at once.
+    @State private var isVisible = false
 
     var flakeCount: Int = 24
     var animates: Bool = true
@@ -16,13 +19,15 @@ struct SnowfallParticleCanvas: View {
 
         Group {
             if effectiveAnimates {
-                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: false)) { timeline in
+                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: !isVisible)) { timeline in
                     snowCanvas(flakes: flakes, time: CGFloat(timeline.date.timeIntervalSinceReferenceDate))
                 }
             } else {
                 snowCanvas(flakes: flakes, time: 0)
             }
         }
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false }
     }
 
     private func snowCanvas(flakes: [TitleSnowParticle], time: CGFloat) -> some View {

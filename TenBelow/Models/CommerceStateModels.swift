@@ -122,7 +122,9 @@ struct StoredProduct: Identifiable, Codable, Hashable {
         name = draft.name.isEmpty ? "Untitled Product" : draft.name
         priceCents = sanitizedPrice
         category = draft.category
-        imageNames = draft.imageURLStrings.isEmpty ? (existing?.imageNames ?? fallbackImageNames) : draft.imageURLStrings
+        imageNames = Product.displayableMediaReferences(
+            in: draft.imageURLStrings.isEmpty ? (existing?.imageNames ?? fallbackImageNames) : draft.imageURLStrings
+        )
         demoVideoURL = URL(string: draft.demoVideoURLString) ?? existing?.demoVideoURL
         productionPreviewURL = URL(string: draft.productionPreviewURLString)
         pageViewCount = existing?.pageViewCount ?? 0

@@ -5,61 +5,71 @@ struct PremiumStorefrontCardContent: Equatable {
     let products: [Product]
     let isCurrentSeller: Bool
 
-    var displayedProducts: [Product] {
-        products
+    // Derived once at init: the card body reads these repeatedly, and recomputing
+    // filter/sort passes per property access was measurable in directory scrolling.
+    let displayedProducts: [Product]
+    let thumbnailReferences: [String]
+    let categories: [Category]
+    let creatorClipURL: URL?
+    let effectiveRating: Double
+    let effectiveReviewCount: Int
+    let productCount: Int
+    let isFastShipping: Bool
+    let isTopRated: Bool
+
+    init(seller: SellerProfile, products: [Product], isCurrentSeller: Bool) {
+        self.seller = seller
+        self.products = products
+        self.isCurrentSeller = isCurrentSeller
+
+        let displayed = products
             .filter { CatalogSeedPolicy.hasUploadedMedia(in: $0.imageNames) }
             .sorted { $0.createdAt > $1.createdAt }
-    }
+        displayedProducts = displayed
 
-    var thumbnailReferences: [String] {
-        displayedProducts
+        thumbnailReferences = displayed
             .compactMap(\.primaryImageReference)
             .prefix(3)
             .map { $0 }
-    }
 
-    var categories: [Category] {
         var seen = Set<Category>()
-        return products.compactMap { product in
+        categories = products.compactMap { product in
             guard seen.insert(product.category).inserted else { return nil }
             return product.category
         }
         .prefix(3)
         .map { $0 }
-    }
 
-    var creatorClipURL: URL? {
-        displayedProducts.compactMap(\.demoVideoURL).first
-    }
+        creatorClipURL = displayed.compactMap(\.demoVideoURL).first
 
-    var effectiveRating: Double {
+        let rating: Double
         if seller.rating > 0 {
-            return seller.rating
+            rating = seller.rating
+        } else {
+            let reviewedProducts = products.filter { $0.averageRating > 0 && $0.reviewCount > 0 }
+            let reviewCount = reviewedProducts.reduce(0) { $0 + $1.reviewCount }
+            if reviewCount > 0 {
+                let weightedTotal = reviewedProducts.reduce(0.0) {
+                    $0 + ($1.averageRating * Double($1.reviewCount))
+                }
+                rating = weightedTotal / Double(reviewCount)
+            } else {
+                rating = 0
+            }
         }
+        effectiveRating = rating
 
-        let reviewedProducts = products.filter { $0.averageRating > 0 && $0.reviewCount > 0 }
-        let reviewCount = reviewedProducts.reduce(0) { $0 + $1.reviewCount }
-        guard reviewCount > 0 else { return 0 }
-        let weightedTotal = reviewedProducts.reduce(0.0) {
-            $0 + ($1.averageRating * Double($1.reviewCount))
-        }
-        return weightedTotal / Double(reviewCount)
+        let reviewCount = max(seller.totalReviewCount, products.reduce(0) { $0 + $1.reviewCount })
+        effectiveReviewCount = reviewCount
+        productCount = max(seller.productCount, products.count)
+        isFastShipping = seller.shipsInDays.lowerBound > 0 && seller.shipsInDays.upperBound <= 2
+        isTopRated = rating >= 4.7 && reviewCount >= 10
     }
 
-    var effectiveReviewCount: Int {
-        max(seller.totalReviewCount, products.reduce(0) { $0 + $1.reviewCount })
-    }
-
-    var productCount: Int {
-        max(seller.productCount, products.count)
-    }
-
-    var isFastShipping: Bool {
-        seller.shipsInDays.lowerBound > 0 && seller.shipsInDays.upperBound <= 2
-    }
-
-    var isTopRated: Bool {
-        effectiveRating >= 4.7 && effectiveReviewCount >= 10
+    static func == (lhs: PremiumStorefrontCardContent, rhs: PremiumStorefrontCardContent) -> Bool {
+        lhs.seller == rhs.seller
+            && lhs.products == rhs.products
+            && lhs.isCurrentSeller == rhs.isCurrentSeller
     }
 }
 

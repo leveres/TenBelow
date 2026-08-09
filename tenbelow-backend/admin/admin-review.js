@@ -522,13 +522,69 @@ function buildSellerComplianceSection(account) {
   if (account.legalName) detailParts.push(`Legal name: ${account.legalName}`);
   const origin = sellerShippingOriginLabel(account.shippingOrigin);
   if (origin) detailParts.push(`Shipping origin: ${origin}`);
-  if (account.sellerAgreement?.version) {
+  if (account.sellerAgreement?.versionLabel) {
+    detailParts.push(`Agreement version label: ${account.sellerAgreement.versionLabel}`);
+  } else if (account.sellerAgreement?.version) {
     detailParts.push(`Agreement version: ${account.sellerAgreement.version}`);
+  }
+  if (account.sellerAgreement?.documentId) {
+    detailParts.push(`Document: ${account.sellerAgreement.documentId}`);
   }
   details.textContent = detailParts.length ? detailParts.join(" · ") : "No onboarding compliance details recorded yet.";
 
+  const welcome = account.welcomeEmail || {};
+  const welcomePill = document.createElement("span");
+  if (welcome.status === "sent") {
+    welcomePill.className = "compliance-pill is-ok";
+    const sentWhen = formatAgreementTimestamp(welcome.sentAt);
+    welcomePill.textContent = sentWhen ? `Welcome email sent · ${sentWhen}` : "Welcome email sent";
+  } else if (welcome.status === "failed") {
+    welcomePill.className = "compliance-pill is-missing";
+    welcomePill.textContent = "Welcome email delivery failed";
+  } else {
+    welcomePill.className = "compliance-pill";
+    welcomePill.textContent = "Welcome email pending";
+  }
+  pills.appendChild(welcomePill);
+
   section.append(title, pills, details);
+
+  if (account.kind === "seller" && welcome.status !== "sent") {
+    const retryButton = document.createElement("button");
+    retryButton.type = "button";
+    retryButton.className = "account-action-button";
+    retryButton.textContent = welcome.status === "failed" ? "Retry welcome email" : "Send welcome email";
+    retryButton.addEventListener("click", () => {
+      retrySellerWelcomeEmail(account.id, retryButton);
+    });
+    section.appendChild(retryButton);
+  }
+
   return section;
+}
+
+async function retrySellerWelcomeEmail(sellerId, button) {
+  if (!sellerId || !button) return;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "Sending…";
+  try {
+    const response = await fetch(`/admin/sellers/${encodeURIComponent(sellerId)}/resend-welcome-email`, {
+      method: "POST",
+      headers: adminHeaders(),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Welcome email retry failed");
+    }
+    button.textContent = payload.alreadySent ? "Already sent" : "Sent";
+    await loadAccounts();
+  } catch (error) {
+    button.textContent = "Retry failed";
+    window.alert(error.message || "Welcome email retry failed");
+    button.disabled = false;
+    button.textContent = originalText;
+  }
 }
 
 function renderAccounts(payload) {

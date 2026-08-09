@@ -20,6 +20,36 @@ final class StorefrontResolutionTests: XCTestCase {
         XCTAssertFalse(CatalogSeedPolicy.isSeedSeller("real-maker"))
     }
 
+    func testRemoteProductDecodesLegacyNumericCertificationDate() throws {
+        let payload = """
+        {
+          "id": "approved-product",
+          "sellerId": "real-maker",
+          "name": "Approved Product",
+          "priceCents": 450,
+          "category": "desk",
+          "imageURLs": ["https://cdn.example.com/product.jpg"],
+          "demoVideoURL": null,
+          "productionPreviewURL": null,
+          "material": "PETG",
+          "durabilityNote": "Everyday use",
+          "careWarnings": [],
+          "shipsInMinDays": 2,
+          "shipsInMaxDays": 4,
+          "isDrop": false,
+          "isActive": true,
+          "isApproved": true,
+          "rightsCertificationAcceptedAt": 807865623.079337
+        }
+        """
+
+        let product = try JSONDecoder().decode(RemoteProduct.self, from: Data(payload.utf8))
+
+        XCTAssertEqual(product.id, "approved-product")
+        XCTAssertNotNil(product.rightsCertificationAcceptedAt)
+        XCTAssertNotNil(product.asStorefrontProduct().rightsCertificationAcceptedAt)
+    }
+
     func testPremiumStorefrontContentDerivesRealMetadata() {
         let seller = SellerProfile(
             id: "real-maker",
@@ -70,6 +100,30 @@ final class StorefrontResolutionTests: XCTestCase {
         XCTAssertTrue(content.isTopRated)
         XCTAssertTrue(content.isFastShipping)
         XCTAssertNotNil(content.creatorClipURL)
+    }
+
+    func testReplacingSellerAccountIDPreservesPublicHandle() {
+        let profile = SellerProfile(
+            id: "stale-handle-value",
+            displayName: "Steven",
+            handle: "@stege",
+            bio: "Useful prints.",
+            location: "United States",
+            shipsInDays: 2...4,
+            materials: ["PETG"],
+            processingTime: "2 business days",
+            productCount: 1,
+            orderCount: 0,
+            rating: 0,
+            isVerified: false,
+            joinedAt: .now
+        )
+
+        let reconciled = profile.replacingAccountID(with: "steven")
+
+        XCTAssertEqual(reconciled.id, "steven")
+        XCTAssertEqual(reconciled.displayName, "Steven")
+        XCTAssertEqual(reconciled.handle, "@stege")
     }
 
     private func makeProduct(

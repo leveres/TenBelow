@@ -328,13 +328,19 @@ enum SellerAPI {
             var request = URLRequest(url: url)
             request.httpMethod = "PUT"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONEncoder().encode(product)
+            request.httpBody = try encodeSellerProductRequest(product)
             return request
         }
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(SellerProductResponse.self, from: data).product
+    }
+
+    static func encodeSellerProductRequest(_ product: UpsertSellerProductRequest) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(product)
     }
 
     static func removeProduct(

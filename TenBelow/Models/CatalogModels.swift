@@ -192,25 +192,93 @@ struct RemoteProduct: Codable, Identifiable, Hashable {
 }
 
 extension RemoteProduct {
+    private enum CodingKeys: String, CodingKey {
+        case id, sellerId, name, priceCents, category, imageURLs, demoVideoURL
+        case productionPreviewURL, material, durabilityNote, careWarnings
+        case shipsInMinDays, shipsInMaxDays, isDrop, isActive, isApproved
+        case averageRating, reviewCount, approvalStatus, archivedAt, reviewNotes
+        case submittedAt, previousPriceCents, rightsOwnershipType, rightsReferenceFlags
+        case rightsCertificationAccepted, rightsCertificationAcceptedAt
+        case requiresManualReview, reviewReason
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        sellerId = try container.decode(String.self, forKey: .sellerId)
+        name = try container.decode(String.self, forKey: .name)
+        priceCents = try container.decode(Int.self, forKey: .priceCents)
+        category = try container.decode(String.self, forKey: .category)
+        imageURLs = try container.decode([String].self, forKey: .imageURLs)
+        demoVideoURL = try container.decodeIfPresent(String.self, forKey: .demoVideoURL)
+        productionPreviewURL = try container.decodeIfPresent(String.self, forKey: .productionPreviewURL)
+        material = try container.decode(String.self, forKey: .material)
+        durabilityNote = try container.decode(String.self, forKey: .durabilityNote)
+        careWarnings = try container.decode([String].self, forKey: .careWarnings)
+        shipsInMinDays = try container.decode(Int.self, forKey: .shipsInMinDays)
+        shipsInMaxDays = try container.decode(Int.self, forKey: .shipsInMaxDays)
+        isDrop = try container.decode(Bool.self, forKey: .isDrop)
+        isActive = try container.decode(Bool.self, forKey: .isActive)
+        isApproved = try container.decode(Bool.self, forKey: .isApproved)
+        averageRating = try container.decodeIfPresent(Double.self, forKey: .averageRating)
+        reviewCount = try container.decodeIfPresent(Int.self, forKey: .reviewCount)
+        approvalStatus = try container.decodeIfPresent(String.self, forKey: .approvalStatus)
+        archivedAt = try container.decodeIfPresent(String.self, forKey: .archivedAt)
+        reviewNotes = try container.decodeIfPresent(String.self, forKey: .reviewNotes)
+        submittedAt = try container.decodeIfPresent(String.self, forKey: .submittedAt)
+        previousPriceCents = try container.decodeIfPresent(Int.self, forKey: .previousPriceCents)
+        rightsOwnershipType = try container.decodeIfPresent(String.self, forKey: .rightsOwnershipType)
+        rightsReferenceFlags = try container.decodeIfPresent([String].self, forKey: .rightsReferenceFlags)
+        rightsCertificationAccepted = try container.decodeIfPresent(Bool.self, forKey: .rightsCertificationAccepted)
+        requiresManualReview = try container.decodeIfPresent(Bool.self, forKey: .requiresManualReview)
+        reviewReason = try container.decodeIfPresent(String.self, forKey: .reviewReason)
+
+        if let isoString = try? container.decode(String.self, forKey: .rightsCertificationAcceptedAt) {
+            rightsCertificationAcceptedAt = isoString
+        } else if let seconds = try? container.decode(Double.self, forKey: .rightsCertificationAcceptedAt) {
+            let date = seconds > 978_307_200
+                ? Date(timeIntervalSince1970: seconds)
+                : Date(timeIntervalSinceReferenceDate: seconds)
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            rightsCertificationAcceptedAt = formatter.string(from: date)
+        } else {
+            rightsCertificationAcceptedAt = nil
+        }
+    }
+}
+
+extension RemoteProduct {
     /// Same resolution as storefront images: absolute URLs, or `/media/...` against `AppConstants.backendBaseURL`.
     private static func resolvedMediaURLString(_ raw: String?) -> URL? {
         Product.mediaURL(for: raw)
     }
 
-    func asStorefrontProduct(fallbackProduct: Product? = nil) -> Product {
+    private static func parsedISO8601Date(_ value: String?) -> Date? {
+        guard let value else { return nil }
         let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: value) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value)
+    }
+
+    func asStorefrontProduct(fallbackProduct: Product? = nil) -> Product {
         let createdAtDate =
-            submittedAt.flatMap { formatter.date(from: $0) } ??
+            Self.parsedISO8601Date(submittedAt) ??
             fallbackProduct?.createdAt ??
             .now
-        let rightsAcceptedAtDate = rightsCertificationAcceptedAt.flatMap { formatter.date(from: $0) }
+        let rightsAcceptedAtDate = Self.parsedISO8601Date(rightsCertificationAcceptedAt)
         return Product(
             id: id,
             sellerId: sellerId,
             name: name,
             priceCents: priceCents,
             category: resolvedCategory,
-            imageNames: imageURLs.isEmpty ? (fallbackProduct?.imageNames ?? ["products_image"]) : imageURLs,
+            imageNames: Product.displayableMediaReferences(
+                in: imageURLs.isEmpty ? (fallbackProduct?.imageNames ?? ["products_image"]) : imageURLs
+            ),
             demoVideoURL: Self.resolvedMediaURLString(demoVideoURL),
             productionPreviewURL: Self.resolvedMediaURLString(productionPreviewURL) ?? fallbackProduct?.productionPreviewURL,
             pageViewCount: fallbackProduct?.pageViewCount ?? 0,
@@ -274,7 +342,12 @@ func resolvedStorefrontProducts(remoteProducts: [RemoteProduct], fallbackProduct
         )
     }
 
-    return mappedRemoteProducts.isEmpty ? fallbackProducts : mappedRemoteProducts
+    let resolvedProducts = mappedRemoteProducts.isEmpty ? fallbackProducts : mappedRemoteProducts
+    #if DEBUG
+    return resolvedProducts
+    #else
+    return resolvedProducts.filter(CatalogSeedPolicy.isRealStorefrontProduct)
+    #endif
 }
 
 // MARK: - Seed / mock catalog filtering
@@ -312,5 +385,10 @@ enum CatalogSeedPolicy {
 
     static func isRealDropProduct(_ product: DropProduct) -> Bool {
         !isSeedSeller(product.sellerId) && hasUploadedMedia(in: product.imageURLs)
+    }
+
+    /// Weekly Drop lineups must only include catalog rows explicitly enrolled via drop submission.
+    static func isEnrolledWeeklyDropProduct(id: String, catalog: [RemoteProduct]) -> Bool {
+        catalog.first(where: { $0.id == id })?.isDrop == true
     }
 }

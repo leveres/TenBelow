@@ -291,10 +291,71 @@ extension SellerProfile {
 
 private enum SellerProfileLocalStore {
     static let storageKey = "sellerLocalProfileData"
+
+    // Memoized decode: this is read once per seller on every catalog resolution, so decoding
+    // JSON from UserDefaults on each call causes visible render hitches on catalog-heavy screens.
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cachedData: Data?
+    nonisolated(unsafe) private static var cachedProfile: SellerProfile?
+
+    static func loadProfile() -> SellerProfile? {
+        let data = UserDefaults.standard.data(forKey: storageKey)
+
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+
+        if data == cachedData {
+            return cachedProfile
+        }
+
+        let decoded = data.flatMap { try? JSONDecoder().decode(SellerProfile.self, from: $0) }
+        cachedData = data
+        cachedProfile = decoded
+        return decoded
+    }
+
+    static func storeProfile(_ profile: SellerProfile) {
+        guard let data = try? JSONEncoder().encode(profile) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
+
+        cacheLock.lock()
+        cachedData = data
+        cachedProfile = profile
+        cacheLock.unlock()
+    }
 }
 
 private enum BuyerEngagementSnapshotStore {
     static let storageKey = "buyerEngagementStore.snapshots"
+
+    // Memoized follower counts: decoding every engagement snapshot per seller per render
+    // is far too slow for catalog screens. Recomputed only when the persisted bytes change.
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cachedData: Data?
+    nonisolated(unsafe) private static var cachedFollowerCounts: [String: Int] = [:]
+
+    static func followerCount(forSellerId sellerId: String) -> Int {
+        let data = UserDefaults.standard.data(forKey: storageKey)
+
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+
+        if data != cachedData {
+            var counts: [String: Int] = [:]
+            if let data,
+               let snapshots = try? JSONDecoder().decode([String: BuyerEngagementSnapshot].self, from: data) {
+                for snapshot in snapshots.values {
+                    for followedSellerId in snapshot.followedSellerIDs {
+                        counts[followedSellerId, default: 0] += 1
+                    }
+                }
+            }
+            cachedData = data
+            cachedFollowerCounts = counts
+        }
+
+        return cachedFollowerCounts[sellerId] ?? 0
+    }
 }
 
 enum SellerVerificationStore {
@@ -349,11 +410,7 @@ extension SellerProfile {
     }
 
     static func locallyStoredProfile() -> SellerProfile? {
-        guard let data = UserDefaults.standard.data(forKey: SellerProfileLocalStore.storageKey) else {
-            return nil
-        }
-
-        return try? JSONDecoder().decode(SellerProfile.self, from: data)
+        SellerProfileLocalStore.loadProfile()
     }
 
     static func previewProfile(sellerId: String, businessName: String) -> SellerProfile {
@@ -365,41 +422,44 @@ extension SellerProfile {
             return stored
         }
 
-        let base = SellerProfile.sample
-        let resolvedId = trimmedSellerId.isEmpty ? base.id : trimmedSellerId
-        let resolvedDisplayName = trimmedBusinessName.isEmpty ? base.displayName : trimmedBusinessName
-        let resolvedHandle = trimmedSellerId.isEmpty ? base.handle : "@\(trimmedSellerId)"
-
-        return SellerProfile(
-            id: resolvedId,
-            displayName: resolvedDisplayName,
-            handle: resolvedHandle,
-            bio: base.bio,
-            avatarMediaReference: base.avatarMediaReference,
-            bannerMediaReference: base.bannerMediaReference,
-            websiteURL: base.websiteURL,
-            location: base.location,
-            shipsInDays: base.shipsInDays,
-            materials: base.materials,
-            processingTime: base.processingTime,
-            productCount: base.productCount,
-            orderCount: base.orderCount,
-            totalReviewCount: base.totalReviewCount,
-            positiveReviewCount: base.positiveReviewCount,
-            rating: base.rating,
-            likeCount: base.likeCount,
-            pageViewCount: base.pageViewCount,
-            designLicense: base.designLicense,
-            isVerified: base.isVerified,
-            acceptsCustomOrders: base.acceptsCustomOrders,
-            customOrderInfoURL: base.customOrderInfoURL,
-            joinedAt: base.joinedAt
+        return SellerProfile.starterProfile(
+            sellerId: trimmedSellerId,
+            businessName: trimmedBusinessName
         )
     }
 
     func storeLocally() {
-        guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: SellerProfileLocalStore.storageKey)
+        SellerProfileLocalStore.storeProfile(self)
+    }
+
+    /// Re-keys locally cached profile data to the immutable authenticated account ID.
+    /// The public handle is intentionally preserved because it is independent from ownership.
+    func replacingAccountID(with accountID: String) -> SellerProfile {
+        SellerProfile(
+            id: accountID,
+            displayName: displayName,
+            handle: handle,
+            bio: bio,
+            avatarMediaReference: avatarMediaReference,
+            bannerMediaReference: bannerMediaReference,
+            websiteURL: websiteURL,
+            location: location,
+            shipsInDays: shipsInDays,
+            materials: materials,
+            processingTime: processingTime,
+            productCount: productCount,
+            orderCount: orderCount,
+            totalReviewCount: totalReviewCount,
+            positiveReviewCount: positiveReviewCount,
+            rating: rating,
+            likeCount: likeCount,
+            pageViewCount: pageViewCount,
+            designLicense: designLicense,
+            isVerified: isVerified,
+            acceptsCustomOrders: acceptsCustomOrders,
+            customOrderInfoURL: customOrderInfoURL,
+            joinedAt: joinedAt
+        )
     }
 }
 
@@ -423,7 +483,11 @@ func resolvedSellerProfile(
     } else if let storedProfile {
         baseProfile = storedProfile
     } else {
+        #if DEBUG
         baseProfile = SellerProfile.mockLookup(id: trimmedSellerId)
+        #else
+        baseProfile = nil
+        #endif
     }
 
     if let baseProfile {
@@ -597,12 +661,5 @@ private func persistedFollowerCount(forSellerId sellerId: String) -> Int {
     let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedSellerId.isEmpty else { return 0 }
 
-    let snapshots: [String: BuyerEngagementSnapshot] = LocalCodableStore.load(
-        key: BuyerEngagementSnapshotStore.storageKey,
-        default: [:]
-    )
-
-    return snapshots.values.reduce(0) { count, snapshot in
-        count + (snapshot.followedSellerIDs.contains(trimmedSellerId) ? 1 : 0)
-    }
+    return BuyerEngagementSnapshotStore.followerCount(forSellerId: trimmedSellerId)
 }

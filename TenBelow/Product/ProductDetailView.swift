@@ -38,6 +38,16 @@ struct ProductDetailView: View {
     @State private var showShareSheet = false
     #endif
 
+    @State private var sellerCache = SellerCache()
+
+    /// Memoized per catalog revision so a detail push resolves the seller once instead of
+    /// on every property access during the transition.
+    private final class SellerCache {
+        var key: String?
+        var sellerProducts: [Product] = []
+        var sellerProfile: SellerProfile?
+    }
+
     private var relatedProducts: [Product] {
         sellerProducts
             .filter { $0.id != product.id }
@@ -47,23 +57,47 @@ struct ProductDetailView: View {
     }
 
     private var sellerProfile: SellerProfile? {
-        resolvedSellerProfile(
-            sellerId: product.sellerId,
-            storefrontProducts: sellerProducts,
-            remoteProfiles: catalog.sellerProfiles
-        )
+        refreshSellerCacheIfNeeded()
+        return sellerCache.sellerProfile
     }
 
     private var sellerProducts: [Product] {
+        refreshSellerCacheIfNeeded()
+        return sellerCache.sellerProducts
+    }
+
+    private func refreshSellerCacheIfNeeded() {
+        let key = "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(product.sellerId)"
+        guard sellerCache.key != key else { return }
+
         let storefrontProducts = resolvedStorefrontProducts(
             remoteProducts: catalog.products,
             fallbackProducts: localProducts.products
         )
-        return storefrontProducts.filter { $0.sellerId == product.sellerId }
+        let filtered = storefrontProducts.filter { $0.sellerId == product.sellerId }
+
+        sellerCache.key = key
+        sellerCache.sellerProducts = filtered
+        sellerCache.sellerProfile = resolvedSellerProfile(
+            sellerId: product.sellerId,
+            storefrontProducts: filtered,
+            remoteProfiles: catalog.sellerProfiles
+        )
+    }
+
+    private var displayProduct: Product {
+        if let remote = catalog.products.first(where: { $0.id == product.id }) {
+            return remote.asStorefrontProduct(fallbackProduct: product)
+        }
+        return product
+    }
+
+    private var galleryImageReferences: [String] {
+        displayProduct.displayableImageReferences
     }
 
     private var featuredVideoURL: URL? {
-        product.demoVideoURL
+        displayProduct.demoVideoURL
     }
 
     private var featuredVideoLabel: String {
@@ -71,7 +105,7 @@ struct ProductDetailView: View {
     }
 
     private var mediaCount: Int {
-        product.imageNames.count + (featuredVideoURL == nil ? 0 : 1)
+        galleryImageReferences.count + (featuredVideoURL == nil ? 0 : 1)
     }
 
     private var isInCart: Bool {
@@ -245,7 +279,7 @@ struct ProductDetailView: View {
     private var productMediaHero: some View {
         ZStack(alignment: .bottomLeading) {
             TabView(selection: $selectedMediaIndex) {
-                ForEach(Array(product.imageNames.enumerated()), id: \.offset) { index, name in
+                ForEach(Array(galleryImageReferences.enumerated()), id: \.offset) { index, name in
                     productDetailImagePage(name: name, index: index)
                 }
 
@@ -295,7 +329,7 @@ struct ProductDetailView: View {
                 showFullscreenMedia = true
             }
         )
-        .accessibilityLabel("Product photo \(index + 1) of \(product.imageNames.count). Tap to view full screen.")
+        .accessibilityLabel("Product photo \(index + 1) of \(galleryImageReferences.count). Tap to view full screen.")
         .accessibilityAddTraits(.isButton)
         .tag(index)
     }
@@ -320,7 +354,7 @@ struct ProductDetailView: View {
             .padding(12)
             .accessibilityLabel("Open video full screen")
         }
-        .tag(product.imageNames.count)
+        .tag(galleryImageReferences.count)
     }
 
     @ViewBuilder
@@ -352,7 +386,7 @@ struct ProductDetailView: View {
                 .accessibilityLabel("View media full screen")
             }
 
-            if featuredVideoURL != nil, selectedMediaIndex == product.imageNames.count {
+            if featuredVideoURL != nil, selectedMediaIndex == galleryImageReferences.count {
                 MediaKindPill(label: featuredVideoLabel)
             }
         }
@@ -593,18 +627,23 @@ struct ProductDetailView: View {
         }
         .onAppear {
             selectedMediaIndex = 0
-            buyerEngagement.trackProductView(product)
-            localProducts.registerProductView(for: product.id)
             latestAverageRating = product.averageRating
             latestReviewCount = product.reviewCount
             Task { await loadReviews() }
+            // Deferred: these persist to disk and publish store changes, which re-renders
+            // the originating grid. Running them mid-push made the transition stutter.
+            Task {
+                try? await Task.sleep(for: .milliseconds(600))
+                buyerEngagement.trackProductView(product)
+                localProducts.registerProductView(for: product.id)
+            }
         }
         .onDisappear {
             toastDismissTask?.cancel()
         }
         .fullScreenCover(isPresented: $showFullscreenMedia) {
             ProductMediaFullscreenView(
-                product: product,
+                product: displayProduct,
                 initialIndex: selectedMediaIndex
             )
         }
@@ -706,7 +745,7 @@ struct ProductDetailView: View {
     private var watchHowItsMadeSection: some View {
         GlassCard(cornerRadius: 22, showsBorder: false) {
             Button {
-                selectedMediaIndex = product.imageNames.count
+                selectedMediaIndex = galleryImageReferences.count
                 showFullscreenMedia = true
             } label: {
                 HStack(spacing: 12) {
@@ -757,8 +796,12 @@ private struct ProductMediaFullscreenView: View {
         _selectedIndex = State(initialValue: initialIndex)
     }
 
+    private var galleryImageReferences: [String] {
+        product.displayableImageReferences
+    }
+
     private var mediaCount: Int {
-        product.imageNames.count + (product.demoVideoURL == nil ? 0 : 1)
+        galleryImageReferences.count + (product.demoVideoURL == nil ? 0 : 1)
     }
 
     var body: some View {
@@ -771,7 +814,7 @@ private struct ProductMediaFullscreenView: View {
                         .foregroundStyle(.white.opacity(0.85))
                 } else {
                     TabView(selection: $selectedIndex) {
-                        ForEach(Array(product.imageNames.enumerated()), id: \.offset) { index, name in
+                        ForEach(Array(galleryImageReferences.enumerated()), id: \.offset) { index, name in
                             ProductFullscreenZoomableImage(imageReference: name)
                                 .tag(index)
                         }
@@ -779,7 +822,7 @@ private struct ProductMediaFullscreenView: View {
                         if let url = product.demoVideoURL {
                             VideoPlayer(player: AVPlayer(url: url))
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .tag(product.imageNames.count)
+                                .tag(galleryImageReferences.count)
                         }
                     }
                     #if os(iOS) || os(visionOS)

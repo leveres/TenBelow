@@ -1825,7 +1825,7 @@ private struct SellerAgreementAcceptanceView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(TBTheme.deepSky)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 44, height: 44)
                         .background(.white.opacity(0.72), in: Circle())
                 }
                 .buttonStyle(.plain)

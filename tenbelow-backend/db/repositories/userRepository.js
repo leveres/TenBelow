@@ -3,6 +3,7 @@ import { sellerAccountComparable } from "../../domain/phase1/seller.js";
 import { getPrisma } from "../prisma/client.js";
 import { loadBuyersFromJson, loadSellersFromJson } from "./jsonStore.js";
 import { compareRecordSets } from "./compareUtils.js";
+import { upsertSellerAgreementAcceptanceToPrisma } from "./legalAgreementRepository.js";
 
 function toDate(value) {
   if (!value) return null;
@@ -85,14 +86,16 @@ export async function syncSellersToPrisma(sellers = loadSellersFromJson()) {
         sellerId,
         accepted: seller.sellerAgreement?.accepted === true,
         acceptedAt: toDate(seller.sellerAgreement?.acceptedAt),
-        version: seller.sellerAgreement?.version || "seller-agreement-2026-04-24",
+        version: seller.sellerAgreement?.version || seller.sellerAgreement?.documentId || "seller-agreement-2026-04-24",
       },
       update: {
         accepted: seller.sellerAgreement?.accepted === true,
         acceptedAt: toDate(seller.sellerAgreement?.acceptedAt),
-        version: seller.sellerAgreement?.version || "seller-agreement-2026-04-24",
+        version: seller.sellerAgreement?.version || seller.sellerAgreement?.documentId || "seller-agreement-2026-04-24",
       },
     });
+
+    await upsertSellerAgreementAcceptanceToPrisma(sellerId, seller);
 
     const membership = seller.membership || {};
     await prisma.sellerMembership.upsert({

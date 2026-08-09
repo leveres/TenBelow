@@ -47,6 +47,7 @@ model Seller {
   updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   agreement           SellerAgreement?
+  agreementAcceptances SellerAgreementAcceptance[]
   membership          SellerMembership?
   foundingAccess      FoundingCreatorAccess?
   profile             SellerProfile?
@@ -73,6 +74,56 @@ model SellerAgreement {
   seller Seller @relation(fields: [sellerId], references: [id], onDelete: Cascade)
 
   @@map("seller_agreements")
+}
+
+enum WelcomeEmailStatus {
+  pending
+  sent
+  failed
+}
+
+model LegalAgreementDocument {
+  id                     String   @id @db.VarChar(128)
+  agreementType          String   @default("seller_agreement") @map("agreement_type") @db.VarChar(64)
+  versionLabel           String   @default("1.0") @map("version_label") @db.VarChar(32)
+  effectiveDate          DateTime @map("effective_date") @db.Date
+  documentHash           String   @map("document_hash") @db.VarChar(128)
+  storagePath            String   @default("") @map("storage_path") @db.Text
+  publicPath             String   @default("") @map("public_path") @db.Text
+  isActiveForNewSellers  Boolean  @default(false) @map("is_active_for_new_sellers")
+  publishedAt            DateTime @map("published_at") @db.Timestamptz(6)
+  supersededAt           DateTime? @map("superseded_at") @db.Timestamptz(6)
+
+  acceptances SellerAgreementAcceptance[]
+
+  @@index([agreementType, isActiveForNewSellers])
+  @@map("legal_agreement_documents")
+}
+
+model SellerAgreementAcceptance {
+  id                      String             @id @default(uuid()) @db.Uuid
+  sellerId                String             @map("seller_id") @db.VarChar(24)
+  agreementType           String             @default("seller_agreement") @map("agreement_type") @db.VarChar(64)
+  documentId              String             @map("document_id") @db.VarChar(128)
+  version                 String             @db.VarChar(64)
+  documentHash            String             @map("document_hash") @db.VarChar(128)
+  acceptedAt              DateTime           @map("accepted_at") @db.Timestamptz(6)
+  sellerEmail             String             @default("") @map("seller_email") @db.VarChar(320)
+  sellerLegalName         String             @default("") @map("seller_legal_name") @db.VarChar(255)
+  source                  String             @default("seller_registration") @db.VarChar(64)
+  welcomeEmailStatus      WelcomeEmailStatus @default(pending) @map("welcome_email_status")
+  welcomeEmailSentAt      DateTime?          @map("welcome_email_sent_at") @db.Timestamptz(6)
+  welcomeEmailMessageId   String?            @map("welcome_email_message_id") @db.VarChar(255)
+  welcomeEmailLastError   String?            @map("welcome_email_last_error") @db.Text
+  welcomeEmailAttemptCount Int               @default(0) @map("welcome_email_attempt_count")
+
+  seller   Seller                 @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  document LegalAgreementDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@unique([sellerId, documentId])
+  @@index([sellerId])
+  @@index([welcomeEmailStatus])
+  @@map("seller_agreement_acceptances")
 }
 
 model SellerMembership {

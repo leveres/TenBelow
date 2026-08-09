@@ -64,22 +64,28 @@ final class LocalProductStore: ObservableObject {
 
     func saveDraft(_ draft: SellerProductDraft) {
         let existing = storedProducts.first(where: { $0.id == draft.id })
-        let fallbackImageNames = fallbackImageNames(for: draft, existing: existing)
-        let updatedProduct = StoredProduct(
-            draft: draft,
-            fallbackImageNames: fallbackImageNames,
-            existing: existing
-        )
+        let updatedProduct = upsertStoredProduct(for: draft)
+        persist()
+        refreshPublishedProducts()
+        recordEvents(for: updatedProduct, previous: existing)
+    }
 
-        if let existingIndex = storedProducts.firstIndex(where: { $0.id == draft.id }) {
-            storedProducts[existingIndex] = updatedProduct
-        } else {
-            storedProducts.insert(updatedProduct, at: 0)
+    func saveDrafts(_ drafts: [SellerProductDraft]) {
+        guard !drafts.isEmpty else { return }
+
+        var previousByID: [String: StoredProduct] = [:]
+        var updatedProducts: [StoredProduct] = []
+        for draft in drafts {
+            previousByID[draft.id] = storedProducts.first(where: { $0.id == draft.id })
+            updatedProducts.append(upsertStoredProduct(for: draft))
         }
 
         persist()
         refreshPublishedProducts()
-        recordEvents(for: updatedProduct, previous: existing)
+
+        for updatedProduct in updatedProducts {
+            recordEvents(for: updatedProduct, previous: previousByID[updatedProduct.id])
+        }
     }
 
     func removeDraft(productId: String) {
@@ -127,6 +133,24 @@ final class LocalProductStore: ObservableObject {
                 }
             }
         }
+    }
+
+    @discardableResult
+    private func upsertStoredProduct(for draft: SellerProductDraft) -> StoredProduct {
+        let existing = storedProducts.first(where: { $0.id == draft.id })
+        let updatedProduct = StoredProduct(
+            draft: draft,
+            fallbackImageNames: fallbackImageNames(for: draft, existing: existing),
+            existing: existing
+        )
+
+        if let existingIndex = storedProducts.firstIndex(where: { $0.id == draft.id }) {
+            storedProducts[existingIndex] = updatedProduct
+        } else {
+            storedProducts.insert(updatedProduct, at: 0)
+        }
+
+        return updatedProduct
     }
 
     private func fallbackImageNames(

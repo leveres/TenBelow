@@ -19,6 +19,7 @@ struct DropSubmitView: View {
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
 
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
+    @EnvironmentObject private var catalog: CatalogStore
 
     private let currentDrop: CurrentDropResponse?
     private let referenceDate: Date
@@ -99,7 +100,8 @@ struct DropSubmitView: View {
                             slotsRemaining: slotsRemaining,
                             isWindowOpen: isWindowOpen,
                             sellerPreviewMode: sellerPreviewMode,
-                            sellerSubscription: sellerSubscription
+                            sellerSubscription: sellerSubscription,
+                            catalog: catalog.products
                         )
                         catalogRefreshToken += 1
                     }
@@ -314,7 +316,11 @@ struct DropSubmitView: View {
                         },
                         onDelete: {
                             Task {
-                                await viewModel.deleteProduct(product, isWindowOpen: isWindowOpen)
+                                await viewModel.deleteProduct(
+                                    product,
+                                    isWindowOpen: isWindowOpen,
+                                    catalog: catalog.products
+                                )
                                 catalogRefreshToken += 1
                             }
                         }
@@ -420,7 +426,7 @@ struct DropSubmitView: View {
         if usesPreviewData {
             return
         }
-        await viewModel.loadSubmissions(sellerId: sellerId)
+        await viewModel.loadSubmissions(sellerId: sellerId, catalog: catalog.products)
     }
 }
 
@@ -453,7 +459,7 @@ private final class WeeklyDropPrepViewModel: ObservableObject {
         submissions = initialSubmissions
     }
 
-    func loadSubmissions(sellerId: String) async {
+    func loadSubmissions(sellerId: String, catalog: [RemoteProduct] = []) async {
         guard !sellerId.isEmpty else { return }
         isLoading = true
         if submissions == nil {
@@ -462,13 +468,32 @@ private final class WeeklyDropPrepViewModel: ObservableObject {
 
         do {
             let response = try await DropAPI.mySubmissions(sellerId: sellerId)
-            submissions = response
+            submissions = Self.filteredSubmissions(response, catalog: catalog)
             workspaceError = nil
         } catch {
             workspaceError = "Please try again in a moment."
         }
 
         isLoading = false
+    }
+
+    private static func filteredSubmissions(
+        _ response: SellerSubmissionsResponse,
+        catalog: [RemoteProduct]
+    ) -> SellerSubmissionsResponse {
+        guard !catalog.isEmpty else { return response }
+        let products = response.products.filter {
+            CatalogSeedPolicy.isEnrolledWeeklyDropProduct(id: $0.id, catalog: catalog)
+        }
+        return SellerSubmissionsResponse(
+            sellerId: response.sellerId,
+            weekId: response.weekId,
+            isActive: response.isActive,
+            nextDropAt: response.nextDropAt,
+            slotsUsed: products.count,
+            slotsMax: response.slotsMax,
+            products: products
+        )
     }
 
     func presentNewEditor(sellerId: String, stage: WeeklyDropEditorStage = .basics) {
@@ -493,7 +518,8 @@ private final class WeeklyDropPrepViewModel: ObservableObject {
         slotsRemaining: Int,
         isWindowOpen: Bool,
         sellerPreviewMode: Bool,
-        sellerSubscription: SellerSubscriptionStore
+        sellerSubscription: SellerSubscriptionStore,
+        catalog: [RemoteProduct] = []
     ) async throws {
         await sellerSubscription.refresh()
 
@@ -537,11 +563,11 @@ private final class WeeklyDropPrepViewModel: ObservableObject {
             )
         }
 
-        await loadSubmissions(sellerId: draft.sellerId)
+        await loadSubmissions(sellerId: draft.sellerId, catalog: catalog)
         editorContext = nil
     }
 
-    func deleteProduct(_ product: DropProduct, isWindowOpen: Bool) async {
+    func deleteProduct(_ product: DropProduct, isWindowOpen: Bool, catalog: [RemoteProduct] = []) async {
         guard isWindowOpen else {
             feedback = WeeklyDropFeedback(
                 style: .error,
@@ -561,7 +587,7 @@ private final class WeeklyDropPrepViewModel: ObservableObject {
                 title: "Drop product removed",
                 message: "\(product.name) was removed from this week's lineup."
             )
-            await loadSubmissions(sellerId: product.sellerId)
+            await loadSubmissions(sellerId: product.sellerId, catalog: catalog)
         } catch {
             feedback = WeeklyDropFeedback(
                 style: .error,
@@ -1801,7 +1827,7 @@ private struct WeeklyDropSubmissionPill: View {
                     Image(systemName: "pencil")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(TBTheme.deepSky)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
                         .background(.white.opacity(0.92), in: Circle())
                         .overlay(
                             Circle()

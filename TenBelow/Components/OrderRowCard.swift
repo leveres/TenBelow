@@ -341,7 +341,8 @@ struct OrderRowCard: View {
     private var orderAccessibilityLabel: String {
         var parts = [
             primaryTitle,
-            order.status.accessibilityTitle,
+            statusLabel,
+            progressTitle,
             subtitle.replacingOccurrences(of: "•", with: ","),
             "Total \(formatMoney(order.totalCents, order.currency))"
         ]
@@ -349,11 +350,5 @@ struct OrderRowCard: View {
             parts.insert("Cancellation requested", at: 1)
         }
         return parts.joined(separator: ", ")
-    }
-}
-
-private extension OrderStatus {
-    var accessibilityTitle: String {
-        rawValue.replacingOccurrences(of: "-", with: " ")
     }
 }

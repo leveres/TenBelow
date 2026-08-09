@@ -105,7 +105,7 @@ struct OrdersStatusBar: View {
                         .frame(minWidth: proxy.size.width, alignment: .center)
                     }
                 }
-                .frame(height: 32)
+                .frame(height: 44)
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
@@ -162,11 +162,14 @@ struct OrdersStatusBar: View {
             )
             .foregroundStyle(isSelected ? tint : Color.primary.opacity(0.75))
             .fixedSize(horizontal: true, vertical: false)
+            .frame(minHeight: 44)
             .contentShape(Capsule(style: .continuous))
             .transaction { $0.disablesAnimations = true }
             .animation(nil, value: isSelected)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(label) filter, \(value)")
+        .accessibilityHint(isSelected ? "Selected filter." : "Filters the order list.")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         #if os(iOS)
         .onAppear {

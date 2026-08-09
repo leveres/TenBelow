@@ -27,6 +27,7 @@ struct AddProductView: View {
     @State private var isLoadingCreatorClip = false
     @State private var isLoadingProductionPreview = false
     @State private var showRightsValidationMessage = false
+    @State private var visiblePhotoReferences: [String] = []
 
     init(
         title: String = "Add Product",
@@ -83,6 +84,10 @@ struct AddProductView: View {
         max(0, 6 - draft.imageURLStrings.count)
     }
 
+    private var isEditingProduct: Bool {
+        title.localizedCaseInsensitiveContains("edit")
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: TBTheme.spacingXL) {
@@ -95,12 +100,22 @@ struct AddProductView: View {
             }
             .padding(TBTheme.spacingLG)
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(TBFrostBackground())
         .navigationTitle(title)
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    dismiss()
+                }
+            }
+        }
         .onAppear {
+            draft.imageURLStrings = Product.displayableMediaReferences(in: draft.imageURLStrings)
+            refreshVisiblePhotoReferences()
             if selectedVideoURL == nil,
                let url = URL(string: draft.demoVideoURLString),
                !draft.demoVideoURLString.isEmpty {
@@ -136,11 +151,15 @@ struct AddProductView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Edit product details")
+            Text(isEditingProduct ? "Edit product details" : "Add product details")
                 .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundStyle(TBTheme.deepSky)
 
-            Text("Update title, price, shipping, and media in one place.")
+            Text(
+                isEditingProduct
+                    ? "Update title, price, shipping, and media in one place."
+                    : "Add title, price, shipping, and media in one place."
+            )
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineSpacing(2)
@@ -261,11 +280,13 @@ struct AddProductView: View {
                 .disabled(remainingPhotoSlots == 0 || isLoadingPhotos)
                 .opacity(remainingPhotoSlots == 0 ? 0.6 : 1)
 
-                if !draft.imageURLStrings.isEmpty || isLoadingPhotos {
+                if !visiblePhotoReferences.isEmpty || isLoadingPhotos {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
-                            ForEach(Array(draft.imageURLStrings.enumerated()), id: \.offset) { index, reference in
-                                productPhotoThumbnail(reference: reference, index: index)
+                            ForEach(visiblePhotoReferences, id: \.self) { reference in
+                                if let index = draft.imageURLStrings.firstIndex(of: reference) {
+                                    productPhotoThumbnail(reference: reference, index: index)
+                                }
                             }
                             ForEach(0..<loadingPhotoPlaceholderCount, id: \.self) { _ in
                                 productPhotoLoadingThumbnail
@@ -349,7 +370,7 @@ struct AddProductView: View {
                     .transition(.opacity)
                 }
             }
-            .animation(.spring(response: 0.32, dampingFraction: 0.88), value: draft.imageURLStrings)
+            .animation(.spring(response: 0.32, dampingFraction: 0.88), value: visiblePhotoReferences)
             .animation(.spring(response: 0.32, dampingFraction: 0.88), value: selectedVideoURL)
             .animation(.spring(response: 0.32, dampingFraction: 0.88), value: selectedProductionPreviewURL)
             .animation(.easeInOut(duration: 0.18), value: isLoadingPhotos)
@@ -523,9 +544,12 @@ struct AddProductView: View {
                     .foregroundStyle(.white)
                     .padding(7)
                     .background(.black.opacity(0.55), in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .padding(6)
+            .accessibilityLabel("Remove photo \(index + 1)")
         }
     }
 
@@ -606,6 +630,10 @@ struct AddProductView: View {
         )
     }
 
+    private func refreshVisiblePhotoReferences() {
+        visiblePhotoReferences = Product.displayableMediaReferences(in: draft.imageURLStrings)
+    }
+
     private func loadSelectedImages(from items: [PhotosPickerItem]) async {
         let availableSlots = remainingPhotoSlots
         guard availableSlots > 0 else {
@@ -626,21 +654,15 @@ struct AddProductView: View {
 
         for item in items.prefix(availableSlots) {
             guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            let fileExtension = item.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
-            let outputURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension(fileExtension)
-            do {
-                try data.write(to: outputURL, options: .atomic)
+            if let outputURL = await SellerProductMediaUploader.compressedPhotoTempURL(from: data) {
                 loadedReferences.append(outputURL.absoluteString)
-            } catch {
-                continue
             }
         }
 
         await MainActor.run {
             draft.imageURLStrings.append(contentsOf: loadedReferences)
             draft.imageURLStrings = Array(draft.imageURLStrings.prefix(6))
+            refreshVisiblePhotoReferences()
             mediaErrorMessage = items.count > availableSlots
                 ? "You can add up to 6 photos."
                 : nil
@@ -674,11 +696,16 @@ struct AddProductView: View {
             }
 
             let fileExtension = item.supportedContentTypes.first?.preferredFilenameExtension ?? "mov"
-            let outputURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension(fileExtension)
-
-            try data.write(to: outputURL, options: .atomic)
+            guard let outputURL = await SellerProductMediaUploader.videoTempURL(
+                from: data,
+                fileExtension: fileExtension
+            ) else {
+                await MainActor.run {
+                    isLoadingCreatorClip = false
+                    mediaErrorMessage = "We couldn't load that video clip."
+                }
+                return
+            }
 
             await MainActor.run {
                 mediaErrorMessage = nil
@@ -718,11 +745,16 @@ struct AddProductView: View {
             }
 
             let fileExtension = item.supportedContentTypes.first?.preferredFilenameExtension ?? "mov"
-            let outputURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension(fileExtension)
-
-            try data.write(to: outputURL, options: .atomic)
+            guard let outputURL = await SellerProductMediaUploader.videoTempURL(
+                from: data,
+                fileExtension: fileExtension
+            ) else {
+                await MainActor.run {
+                    isLoadingProductionPreview = false
+                    mediaErrorMessage = "We couldn't load that production preview clip."
+                }
+                return
+            }
 
             await MainActor.run {
                 mediaErrorMessage = nil
@@ -768,6 +800,7 @@ struct AddProductView: View {
         if let fileURL = Product.previewMediaURL(for: reference), fileURL.isFileURL {
             try? FileManager.default.removeItem(at: fileURL)
         }
+        refreshVisiblePhotoReferences()
         mediaErrorMessage = nil
     }
 }
@@ -971,6 +1004,7 @@ struct SellerProductsView: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(TBTheme.deepSky)
                 }
+                .accessibilityLabel("Add product")
             }
         }
         .sheet(isPresented: $isShowingAddSheet) {
@@ -983,9 +1017,11 @@ struct SellerProductsView: View {
                     restoreLocallyDeletedProductIfNeeded(submittedDraft.id)
                     productDrafts.insert(submittedDraft, at: 0)
                     persistDrafts()
-                    localProducts.saveDraft(submittedDraft)
                     markSubmissionStarted(for: submittedDraft.id)
-                    Task {
+                    Task(priority: .userInitiated) {
+                        await MainActor.run {
+                            localProducts.saveDraft(submittedDraft)
+                        }
                         await syncDraftToServer(submittedDraft, mediaSelection: mediaSelection)
                     }
                 }
@@ -1005,9 +1041,11 @@ struct SellerProductsView: View {
                         productDrafts.insert(submittedDraft, at: 0)
                     }
                     persistDrafts()
-                    localProducts.saveDraft(submittedDraft)
                     markSubmissionStarted(for: submittedDraft.id)
-                    Task {
+                    Task(priority: .userInitiated) {
+                        await MainActor.run {
+                            localProducts.saveDraft(submittedDraft)
+                        }
                         await syncDraftToServer(submittedDraft, mediaSelection: mediaSelection)
                     }
                 }
@@ -1304,7 +1342,6 @@ struct SellerProductsView: View {
 
         do {
             await MarketplaceAuthSession.syncAfterIdentityChange()
-            await catalog.load()
             let remote = try await SellerAPI.fetchSellerProducts(sellerId: seller.id)
             let remoteProductIDs = Set(remote.map(\.id))
             let draftsNeedingRetry = await MainActor.run {
@@ -1348,6 +1385,7 @@ struct SellerProductsView: View {
         let remoteById = Dictionary(uniqueKeysWithValues: visibleRemote.map { ($0.id, $0) })
         let remoteProductIDs = Set(remoteById.keys)
         var removedProductIDs = Set<String>()
+        var changedDrafts: [SellerProductDraft] = []
         var result = productDrafts.compactMap { draft -> SellerProductDraft? in
             guard !locallyDeletedProductIDs.contains(draft.id) else { return nil }
             if remoteProductIDs.contains(draft.id) {
@@ -1361,17 +1399,30 @@ struct SellerProductsView: View {
         }
         for i in result.indices {
             if let r = remoteById[result[i].id] {
+                let previousStatus = result[i].marketplaceStatus
+                let previousNotes = result[i].serverReviewNotes
+                let previousImages = result[i].imageURLStrings
                 result[i].marketplaceStatus = SellerMarketplaceStatus.fromServerProduct(r)
                 let trimmed = r.reviewNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 result[i].serverReviewNotes = trimmed.isEmpty ? nil : trimmed
+                if !r.imageURLs.isEmpty {
+                    result[i].applyRemoteMedia(from: r)
+                }
                 productIDsAwaitingServerConfirmation.remove(result[i].id)
+                if result[i].marketplaceStatus != previousStatus
+                    || result[i].serverReviewNotes != previousNotes
+                    || result[i].imageURLStrings != previousImages {
+                    changedDrafts.append(result[i])
+                }
             } else if result[i].marketplaceStatus == .pendingReview {
                 productIDsAwaitingServerConfirmation.insert(result[i].id)
             }
         }
         let localIds = Set(result.map(\.id))
         for r in visibleRemote where !localIds.contains(r.id) {
-            result.append(SellerProductDraft.fromRemoteProduct(r))
+            let imported = SellerProductDraft.fromRemoteProduct(r)
+            result.append(imported)
+            changedDrafts.append(imported)
             productIDsAwaitingServerConfirmation.remove(r.id)
         }
         productDrafts = result.sorted {
@@ -1382,8 +1433,8 @@ struct SellerProductsView: View {
             localProducts.removeDraft(productId: productId)
             catalog.removeRemoteProduct(productId: productId)
         }
-        for d in productDrafts {
-            localProducts.saveDraft(d)
+        if !changedDrafts.isEmpty {
+            localProducts.saveDrafts(changedDrafts)
         }
     }
 
@@ -1405,24 +1456,35 @@ struct SellerProductsView: View {
 
         let liveById = Dictionary(uniqueKeysWithValues: liveSellerProducts.map { ($0.id, $0) })
         var didChange = false
+        var changedDrafts: [SellerProductDraft] = []
         var result = productDrafts
 
         for index in result.indices {
             guard let remote = liveById[result[index].id] else { continue }
             let nextStatus = SellerMarketplaceStatus.fromServerProduct(remote)
+            var draftChanged = false
             if result[index].marketplaceStatus != nextStatus || result[index].serverReviewNotes != nil {
                 result[index].marketplaceStatus = nextStatus
                 result[index].serverReviewNotes = nil
+                draftChanged = true
+            }
+            if !remote.imageURLs.isEmpty {
+                let previousImages = result[index].imageURLStrings
+                result[index].applyRemoteMedia(from: remote)
+                if result[index].imageURLStrings != previousImages {
+                    draftChanged = true
+                }
+            }
+            if draftChanged {
                 didChange = true
+                changedDrafts.append(result[index])
             }
         }
 
         guard didChange else { return false }
         productDrafts = result
         persistDrafts()
-        for draft in productDrafts {
-            localProducts.saveDraft(draft)
-        }
+        localProducts.saveDrafts(changedDrafts)
         return true
     }
 
@@ -1461,7 +1523,6 @@ struct SellerProductsView: View {
         persistDrafts()
         localProducts.removeDraft(productId: draft.id)
         catalog.removeRemoteProduct(productId: draft.id)
-        catalogRefreshToken += 1
         if selectedDraft?.id == draft.id {
             selectedDraft = nil
         }
@@ -1480,9 +1541,6 @@ struct SellerProductsView: View {
                 productId: productId,
                 reason: reason.rawValue
             )
-            await MainActor.run {
-                catalogRefreshToken += 1
-            }
         } catch {
             await MainActor.run {
                 let details = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1510,7 +1568,6 @@ struct SellerProductsView: View {
                 productDrafts.insert(submittedDraft, at: 0)
             }
             persistDrafts()
-            localProducts.saveDraft(submittedDraft)
         }
 
         let fallbackProduct = products.first(where: { $0.id == draft.id })
@@ -1570,6 +1627,7 @@ struct SellerProductsView: View {
                 product: request
             )
             await MainActor.run {
+                syncedDraft.applyRemoteMedia(from: remoteProduct)
                 syncedDraft.marketplaceStatus = SellerMarketplaceStatus.fromServerProduct(remoteProduct)
                 let trimmed = remoteProduct.reviewNotes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 syncedDraft.serverReviewNotes = trimmed.isEmpty ? nil : trimmed
@@ -1579,7 +1637,6 @@ struct SellerProductsView: View {
                 persistDrafts()
                 localProducts.saveDraft(syncedDraft)
                 catalog.upsertRemoteProduct(remoteProduct)
-                catalogRefreshToken += 1
                 markSubmissionFinished(for: draft.id)
                 productIDsAwaitingServerConfirmation.remove(draft.id)
                 syncMessage = syncSummaryMessage(for: syncedDraft.marketplaceStatus)
@@ -1587,6 +1644,11 @@ struct SellerProductsView: View {
         } catch {
             await MainActor.run {
                 markSubmissionFinished(for: draft.id)
+                if error is DecodingError {
+                    syncMessage = "Saved on this device. The server returned an unexpected response. Open the listing and save again."
+                    return
+                }
+
                 let details = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
                 if details.isEmpty || details == "The operation couldn’t be completed." {
                     syncMessage = "Saved on this device. Marketplace submission failed for now."
@@ -1707,19 +1769,19 @@ struct SellerProductsView: View {
         guard !trimmedReferences.isEmpty else { return [] }
 
         var uploadedURLs: [String] = []
-        for (index, reference) in trimmedReferences.prefix(6).enumerated() {
+        var nextUploadSlot = 0
+
+        for reference in trimmedReferences.prefix(6) {
             if let remoteURL = Product.mediaURL(for: reference) {
                 uploadedURLs.append(remoteURL.absoluteString)
                 continue
             }
 
-            guard let localURL = Product.previewMediaURL(for: reference), localURL.isFileURL else {
-                uploadedURLs.append(reference)
-                continue
-            }
-
-            guard let imageData = try? Data(contentsOf: localURL) else {
-                uploadedURLs.append(reference)
+            guard let localURL = Product.previewMediaURL(for: reference),
+                  localURL.isFileURL,
+                  FileManager.default.fileExists(atPath: localURL.path),
+                  let imageData = try? await SellerProductMediaUploader.loadFileData(from: localURL)
+            else {
                 continue
             }
 
@@ -1730,18 +1792,19 @@ struct SellerProductsView: View {
                     sellerId: seller.id,
                     productId: draft.id,
                     mediaKind: "image",
-                    slot: "\(index)",
+                    slot: "\(nextUploadSlot)",
                     fileExtension: fileExtension,
                     contentType: imageContentType(for: fileExtension),
                     data: imageData
                 )
                 uploadedURLs.append(url)
+                nextUploadSlot += 1
             } catch {
-                uploadedURLs.append(reference)
+                continue
             }
         }
 
-        return uploadedURLs
+        return Product.persistableMediaReferences(uploadedURLs)
     }
 
     private func uploadVideoIfNeeded(
@@ -1751,7 +1814,10 @@ struct SellerProductsView: View {
         mediaKind: String
     ) async -> String {
         guard let selectedVideoURL else { return fallbackURLString }
-        guard selectedVideoURL.isFileURL, let videoData = try? Data(contentsOf: selectedVideoURL) else {
+        guard selectedVideoURL.isFileURL else {
+            return selectedVideoURL.absoluteString
+        }
+        guard let videoData = try? await SellerProductMediaUploader.loadFileData(from: selectedVideoURL) else {
             return selectedVideoURL.absoluteString
         }
 
@@ -2008,6 +2074,19 @@ struct SellerProductDraft: Identifiable, Codable {
             referenceFlags: rightsReferenceFlags
         )
         reviewReason = ProductRightsReview.reviewReason(referenceFlags: rightsReferenceFlags)
+    }
+
+    /// Replace local draft media with the server catalog row after upload/approval.
+    mutating func applyRemoteMedia(from remote: RemoteProduct) {
+        if !remote.imageURLs.isEmpty {
+            imageURLStrings = remote.imageURLs
+        }
+        if let demoVideoURL = remote.demoVideoURL, !demoVideoURL.isEmpty {
+            demoVideoURLString = demoVideoURL
+        }
+        if let productionPreviewURL = remote.productionPreviewURL, !productionPreviewURL.isEmpty {
+            productionPreviewURLString = productionPreviewURL
+        }
     }
 }
 
@@ -2405,9 +2484,14 @@ struct ShippingSettingsView: View {
                 }
 
                 if let saveMessage {
-                    Text(saveMessage)
+                    Label(
+                        saveMessage,
+                        systemImage: saveMessage.contains("Couldn't")
+                            ? "exclamationmark.triangle.fill"
+                            : "checkmark.circle.fill"
+                    )
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(saveMessage.contains("Couldn't") ? Color.orange : Color.green)
                 }
             }
             .padding(.horizontal, TBTheme.spacingLG)
@@ -2420,7 +2504,10 @@ struct ShippingSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .safeAreaInset(edge: .bottom) {
-            SellerSettingsSaveBar(title: isSaving ? "Saving…" : "Save Shipping Settings") {
+            SellerSettingsSaveBar(
+                title: isSaving ? "Saving…" : "Save Shipping Settings",
+                isEnabled: !isSaving
+            ) {
                 saveSettings()
             }
         }
@@ -2529,9 +2616,14 @@ struct SellerPoliciesView: View {
                 }
 
                 if let saveMessage {
-                    Text(saveMessage)
+                    Label(
+                        saveMessage,
+                        systemImage: saveMessage.contains("Couldn't")
+                            ? "exclamationmark.triangle.fill"
+                            : "checkmark.circle.fill"
+                    )
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(saveMessage.contains("Couldn't") ? Color.orange : Color.green)
                 }
             }
             .padding(.horizontal, TBTheme.spacingLG)
@@ -2544,7 +2636,10 @@ struct SellerPoliciesView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .safeAreaInset(edge: .bottom) {
-            SellerSettingsSaveBar(title: isSaving ? "Saving…" : "Save Policies") {
+            SellerSettingsSaveBar(
+                title: isSaving ? "Saving…" : "Save Policies",
+                isEnabled: !isSaving
+            ) {
                 savePolicies()
             }
         }
@@ -2612,7 +2707,9 @@ struct SupportView: View {
                         subtitle: "Reach the team directly for account or listing questions.",
                         icon: "envelope.fill"
                     ) {
-                        openURL(URL(string: "mailto:\(AppConstants.reportListingEmail)?subject=TenBelow%20Seller%20Support")!)
+                        if let url = AppConstants.supportMailtoURL {
+                            openURL(url)
+                        }
                     }
 
                     NavigationLink {
@@ -2636,16 +2733,12 @@ struct SupportView: View {
                     .buttonStyle(.plain)
 
                     NavigationLink {
-                        InAppPolicyBrowser(url: AppConstants.ipPolicyURL)
-                    } label: {
-                        supportLinkRow(title: "IP Policy", subtitle: "Know what can and can’t be listed")
-                    }
-                    .buttonStyle(.plain)
-
-                    NavigationLink {
                         LegalDocumentView(document: .dmcaPolicy)
                     } label: {
-                        supportLinkRow(title: "DMCA", subtitle: "Report infringement or review copyright policy")
+                        supportLinkRow(
+                            title: "Copyright & IP Policy",
+                            subtitle: "Know what can be listed and how infringement reports work"
+                        )
                     }
                     .buttonStyle(.plain)
 
@@ -4034,6 +4127,7 @@ private struct SellerSettingsStepperField: View {
 
 private struct SellerSettingsSaveBar: View {
     let title: String
+    var isEnabled = true
     let action: () -> Void
 
     var body: some View {
@@ -4054,6 +4148,8 @@ private struct SellerSettingsSaveBar: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
+            .disabled(!isEnabled)
+            .opacity(isEnabled ? 1 : 0.72)
             .padding(.horizontal, TBTheme.spacingLG)
             .padding(.top, 10)
             .padding(.bottom, 10)

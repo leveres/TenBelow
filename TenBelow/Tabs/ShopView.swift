@@ -21,8 +21,7 @@ struct ShopView: View {
     @State private var selectedHighlight: ShopBrowseHighlight = .everything
     @State private var selectedSort: ShopSortOption = .recommended
     @State private var selectedSellerId: String?
-    @State private var cachedShopSnapshot = ShopSnapshot()
-    @State private var cachedShopSnapshotVersion: Int?
+    @State private var shopSnapshotCache = ShopSnapshotCache()
 
     private var shopGridColumns: [GridItem] {
         let spacing = TopLevelHeaderMetrics.shopGridSpacing
@@ -40,11 +39,23 @@ struct ShopView: View {
         var sellerFilterOptions: [(id: String, name: String)] = []
     }
 
+    /// Reference-type memo slot so a cache miss is filled during the same body evaluation.
+    /// The previous `@State` cache was only written by an async task, so on a miss every
+    /// snapshot consumer (grid, filters, sheets) recomputed the full filter pipeline.
+    private final class ShopSnapshotCache {
+        var snapshot = ShopSnapshot()
+        var version: Int?
+    }
+
     private var shopSnapshot: ShopSnapshot {
-        if cachedShopSnapshotVersion == shopSnapshotVersion {
-            return cachedShopSnapshot
+        let version = shopSnapshotVersion
+        if shopSnapshotCache.version == version {
+            return shopSnapshotCache.snapshot
         }
-        return computeShopSnapshot()
+        let snapshot = computeShopSnapshot()
+        shopSnapshotCache.snapshot = snapshot
+        shopSnapshotCache.version = version
+        return snapshot
     }
 
     private var displayedProducts: [Product] {
@@ -92,6 +103,8 @@ struct ShopView: View {
                                     anchor: .bottom
                                 )
                                 .padding(.bottom, TopLevelHeaderMetrics.shopTitleBottomTuck)
+                                .accessibilityLabel("Shop")
+                                .accessibilityAddTraits(.isHeader)
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
 
@@ -208,10 +221,6 @@ struct ShopView: View {
                     sellers: shopSnapshot.sellerFilterOptions,
                     savedCount: savedCount
                 )
-            }
-            .task(id: shopSnapshotVersion) {
-                cachedShopSnapshot = computeShopSnapshot()
-                cachedShopSnapshotVersion = shopSnapshotVersion
             }
         }
     }

@@ -24,6 +24,11 @@ private struct MarketplaceAuthSessionResponse: Decodable {
     let sellerId: String?
 }
 
+private struct MarketplaceSessionTokenClaims: Decodable {
+    let role: String?
+    let sellerId: String?
+}
+
 enum MarketplaceAuthSessionError: LocalizedError {
     case sellerSessionUnavailable
 
@@ -257,20 +262,66 @@ enum MarketplaceAuthSession {
     }
 
     private static func refreshSellerToken(sellerId: String, email: String?) async {
-        guard sellerBearerToken() != nil else {
+        guard let storedToken = sellerBearerToken() else {
             clearSellerSession()
             return
         }
 
+        // The signed token is the source of truth for the immutable account ID. Public
+        // profile handles may differ (for example account "steven", handle "@stege").
+        // Older app state could accidentally persist the handle as sellerSellerId.
+        let tokenSellerId = sellerIdClaim(from: storedToken) ?? sellerId
+
         do {
             let response: MarketplaceAuthSessionResponse = try await issueSession(
                 path: "auth/seller-session",
-                body: SellerSessionRequest(sellerId: sellerId, email: email),
+                body: SellerSessionRequest(sellerId: tokenSellerId, email: email),
                 includeSellerAuth: true
             )
             storeSellerSessionToken(response.token)
+            reconcileLocalSellerIdentity(
+                canonicalSellerId: response.sellerId ?? tokenSellerId
+            )
         } catch {
             clearSellerSession()
+        }
+    }
+
+    private static func sellerIdClaim(from token: String) -> String? {
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard segments.count == 3 else { return nil }
+
+        var payload = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let paddingCount = (4 - payload.count % 4) % 4
+        payload.append(String(repeating: "=", count: paddingCount))
+
+        guard let data = Data(base64Encoded: payload),
+              let claims = try? JSONDecoder().decode(MarketplaceSessionTokenClaims.self, from: data),
+              claims.role == "seller"
+        else {
+            return nil
+        }
+
+        let sellerId = claims.sellerId?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return sellerId.isEmpty ? nil : sellerId
+    }
+
+    private static func reconcileLocalSellerIdentity(canonicalSellerId: String) {
+        let canonical = canonicalSellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !canonical.isEmpty else { return }
+
+        let defaults = UserDefaults.standard
+        let stored = defaults.string(forKey: "sellerSellerId")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard stored != canonical else { return }
+
+        defaults.set(canonical, forKey: "sellerSellerId")
+
+        if let profile = SellerProfile.locallyStoredProfile(), profile.id != canonical {
+            profile.replacingAccountID(with: canonical).storeLocally()
         }
     }
 

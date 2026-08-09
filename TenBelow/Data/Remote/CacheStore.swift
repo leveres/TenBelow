@@ -12,7 +12,9 @@ enum CacheStore {
             let data = try JSONEncoder().encode(object)
             try data.write(to: url, options: .atomic)
         } catch {
+            #if DEBUG
             print("[CacheStore] Failed to write \(fileName): \(error)")
+            #endif
         }
     }
 

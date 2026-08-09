@@ -1,0 +1,203 @@
+SELLER AGREEMENT
+
+Effective Date: April 24, 2026
+
+This Seller Agreement governs participation by sellers and creators on the TenBelow marketplace operated by Innovative Codeworks LLC, doing business as TenBelow. In this Agreement, “TenBelow,” “Company,” “we,” “us,” and “our” mean Innovative Codeworks LLC. “Seller,” “Creator,” and “you” mean any individual or business approved to list, promote, or sell products through TenBelow.
+
+By applying to sell, creating a seller account, onboarding to payout services, uploading listings, accepting orders, receiving payouts, or otherwise participating as a seller or creator on TenBelow, you agree to be bound by this Seller Agreement, the Terms of Service, the Privacy Policy, the Exchange Policy, and any other seller-facing rules or platform requirements made available by TenBelow.
+
+Seller membership fees help support the operation, growth, improvement, and promotion of the TenBelow platform, including seller tools, buyer-facing improvements, and marketplace marketing initiatives, as determined by TenBelow in its discretion.
+
+1. Seller Eligibility and Approval
+
+To sell on TenBelow, you must:
+- be at least eighteen (18) years old or the age of legal majority in your jurisdiction;
+- have legal authority to enter into this Agreement;
+- provide accurate onboarding, payout, verification, and tax-related information as requested;
+- have the legal right to market, display, and sell the products and content you submit to TenBelow.
+
+Seller participation on TenBelow is limited and subject to TenBelow approval. TenBelow may approve, deny, pause, suspend, limit, or revoke seller access at its discretion.
+
+2. Nature of Seller Participation
+
+TenBelow provides marketplace infrastructure, storefront tools, listing tools, order tools, payout coordination, optional promotional opportunities, and related services. Unless TenBelow expressly states otherwise in writing, TenBelow is not the manufacturer of your products, is not responsible for your inventory, and does not assume your obligations relating to product design, production, labeling, shipping, fulfillment, warranties, taxes, safety, or legal compliance.
+
+You are solely responsible for the products you list and sell through the platform.
+
+3. Seller Responsibilities
+
+As a seller, you agree to:
+- provide truthful, complete, and current seller and storefront information;
+- list only products you have the legal right to sell;
+- maintain accurate titles, descriptions, photos, videos, pricing, materials, dimensions, and shipping timelines;
+- package and ship products reasonably and safely;
+- fulfill accepted orders within the timeframe represented to buyers;
+- respond to TenBelow support inquiries, exchange requests, and seller-side operational requests in a timely and professional manner;
+- comply with all applicable laws, including consumer protection, product safety, intellectual property, advertising, tax, and shipping laws;
+- avoid deceptive, misleading, abusive, fraudulent, or unlawful conduct.
+
+4. Listing Standards
+
+All listings must accurately reflect what the buyer will receive. A seller may not exaggerate product quality, use inaccurate or stolen images, misstate compatibility, conceal important limitations, or present mockups that materially misrepresent the actual item.
+
+If a product is 3D printed, custom made, made to order, modified, or subject to normal production variation, you must clearly disclose relevant characteristics that a reasonable buyer would want to know before purchasing.
+
+Listings may be submitted for TenBelow review before becoming visible in the marketplace. TenBelow may approve, reject, archive, remove, edit, hide, suspend, or return listings for revision when they are incomplete, inaccurate, misleading, low quality, duplicative, unsafe, infringing, inconsistent with marketplace standards, or otherwise risky for buyers or the platform. Admin review decisions may include notes or reasons visible to the seller.
+
+5. Higher-Risk Product Categories
+
+Certain product categories may present elevated safety, compliance, or marketplace-liability risk, including products involving lighting, electrical components, batteries, charging functions, internal or external wiring, heat-producing elements, powered decorative features, or similar characteristics.
+
+If you list any higher-risk product, you must provide accurate and complete information sufficient for a reasonable buyer to understand:
+- how the product is powered;
+- whether it uses batteries, USB power, charging hardware, or external power sources;
+- relevant materials and components where safety may be affected;
+- intended use and any important limitations;
+- foreseeable heat, charging, electrical, burn, or misuse risks where applicable;
+- clear operating, setup, and care instructions where reasonably necessary;
+- and any warning, restriction, or disclosure needed to prevent the listing from being misleading.
+
+TenBelow may require additional documentation, instructions, warning language, sourcing details, component details, certification information, or other supporting materials before allowing higher-risk products to be listed or remain active.
+
+TenBelow may prohibit or restrict certain higher-risk categories at its discretion and may remove, reject, or suspend listings where it believes a product may create safety concerns, legal exposure, or marketplace-integrity issues.
+
+6. Prohibited Products and Conduct
+
+You may not list, advertise, or sell products that are unlawful, dangerous, counterfeit, copied without authorization, infringing, deceptive, recalled, stolen, or otherwise prohibited by TenBelow.
+
+No seller may list, promote, request, sell, trade, arrange, or attempt to route through TenBelow any product or activity that is illegal under United States law. This includes, without limitation, ghost guns, firearm parts, weapon components, unserialized weapons, explosives, ammunition, dangerous devices, controlled substances, stolen goods, counterfeit goods, recalled goods, or any item designed to cause harm or evade law enforcement, safety, or regulatory requirements.
+
+You may not:
+- misuse brand names, logos, entertainment properties, team marks, characters, or other protected material without authorization;
+- submit false shipping information;
+- submit false inventory or product details;
+- manipulate orders, reviews, or exchange claims;
+- evade platform fees or platform rules;
+- use the platform for fraudulent or abusive conduct.
+
+7. Seller Content and Platform License
+
+You retain ownership of your original seller content, including listing photos, product descriptions, storefront branding, creator bio, product videos, and related materials, subject to the rights granted to TenBelow.
+
+By uploading or submitting content to TenBelow, you grant Innovative Codeworks LLC a worldwide, non-exclusive, royalty-free, sublicensable license to host, store, reproduce, adapt, display, distribute, publish, repost, and otherwise use that content in connection with operating, improving, securing, moderating, and marketing TenBelow.
+
+This includes use inside the app, on TenBelow social media channels, in creator spotlights, in featured campaigns, in launch materials, in emails, and in related promotional efforts.
+
+You represent and warrant that you own or control all rights necessary to upload your content and sell your products, and that neither your content nor your products infringe the rights of any third party.
+
+8. Seller Onboarding, Verification, and Payouts
+
+To sell on TenBelow, you may be required to complete account verification, payout onboarding, tax-related setup, and related compliance steps through TenBelow and/or its payment partners.
+
+You agree to provide accurate information for payout and verification purposes and to keep that information current. TenBelow may restrict selling privileges, hold payouts, or pause listings where onboarding, verification, tax setup, or payout eligibility is incomplete, inaccurate, or under review.
+
+Payout timing may vary based on payment processing, order status, disputes, approved exchanges, risk review, chargebacks, policy compliance, or technical issues. TenBelow may hold, delay, reverse, or offset payouts where necessary to address marketplace risk, legal requirements, fraud concerns, or seller noncompliance.
+
+9. Orders and Fulfillment
+
+When a buyer places an order for one of your products and the transaction is accepted through the platform, you are responsible for fulfilling that order in accordance with your listing terms, platform rules, applicable law, and this Agreement.
+
+You must ship orders within the stated timeframe. You may not mark an order as shipped before it has actually shipped, and you may not provide false tracking information.
+
+You are responsible for correct item selection, reasonable packaging, shipment preparation, product accuracy, and sending the correct quantity, variation, and version of the product ordered.
+
+10. Exchanges and Buyer Claims
+
+TenBelow operates on an exchange-first model for eligible delivered-item issues. Sellers agree to comply with the Exchange Policy and all related operational instructions issued by TenBelow.
+
+A buyer may request one exchange per purchased item for qualifying issues such as damage, defect, incorrect item, or material mismatch with the listing. TenBelow reviews exchange requests first and may request seller input before making a final determination.
+
+If an exchange request relating to your order is forwarded to you, you must review it promptly and respond within the timeframe required by TenBelow. Your response must be honest, supported by the available evidence, and professional.
+
+TenBelow may make the final determination on whether an exchange is approved, denied, or requires additional information. Sellers agree to comply with TenBelow’s exchange decisions and to fulfill approved replacement obligations within the timeframe directed by TenBelow.
+
+Where the approved exchange involves seller fault, listing inaccuracy, shipment damage attributable to packaging or fulfillment, or a defective or incorrect item, the seller is responsible for the replacement item and applicable seller-side obligations associated with that approved remedy.
+
+11. Refunds and Non-Exchange Outcomes
+
+Because many TenBelow items are creator-made, made to order, or 3D printed, TenBelow’s standard remedy for eligible delivered-item issues is exchange or replacement rather than refund. Sellers may not advertise refund promises or policies that conflict with TenBelow’s platform structure unless expressly approved in writing by TenBelow.
+
+Refunds may still be required in limited circumstances, including where required by law, where an order cannot be fulfilled or replaced, where a shipping-delay cancellation must be honored, where a seller fails to comply with an approved remedy, or where TenBelow determines that a refund is necessary to resolve a valid claim, marketplace failure, or legal obligation.
+
+TenBelow may process or direct refunds, reversals, or payout offsets where necessary to comply with law, resolve a valid dispute, protect users, or maintain marketplace integrity.
+
+12. Custom Requests
+
+TenBelow may allow sellers to opt into custom request functionality. If you enable that feature, you are responsible for reviewing, responding to, and managing custom-request opportunities in a lawful and professional manner.
+
+Custom requests are subject to the same rules as normal product listings. You may not accept, quote, design, make, ship, or arrange any custom product that is illegal, unsafe, counterfeit, infringing, stolen, weapon-related, controlled, dangerous, or otherwise prohibited by TenBelow’s policies or United States law.
+
+Buyer descriptions, reference images, seller responses, request status changes, and related request information may be reviewed by TenBelow admin personnel for moderation, safety, audit, dispute, and legal compliance purposes. If a buyer requests a prohibited or suspicious item, you should decline the request and may report it to TenBelow.
+
+TenBelow does not guarantee that any custom request will result in a sale, paid project, or completed order. TenBelow may moderate, pause, remove, or route custom request activity where necessary.
+
+13. Drops and Special Release Features
+
+TenBelow may provide special release or promotional opportunities such as Weekly Drops or other featured release experiences. Participation in these features is subject to platform rules, editorial discretion, and operational capacity.
+
+TenBelow may limit slots, review submissions, reject submissions, or remove participation where necessary. Inclusion in any featured or special-release experience is not guaranteed.
+
+14. Product Safety and Compliance
+
+You are solely responsible for ensuring that your products comply with all applicable laws, regulations, warnings, safety requirements, labeling requirements, and marketplace rules. You may not list unsafe, recalled, unlawfully labeled, electrically hazardous, fire-prone, noncompliant, or otherwise dangerous products on TenBelow.
+
+This responsibility is especially important for products that may present elevated safety risk, including products involving lighting, electrical components, batteries, charging functions, internal or external wiring, heat-producing elements, or similar characteristics.
+
+You may not market a higher-risk product as safe, certified, child-safe, nursery-safe, fire-safe, or otherwise risk-free unless you have a lawful and supportable basis for that claim.
+
+If you learn that a listed or sold product may present a safety issue, electrical issue, overheating issue, charging issue, defect trend, recall-related concern, or other risk of injury, fire, burn, shock, or property damage, you must immediately notify TenBelow and fully cooperate with any removal, customer notification, exchange, refund, or corrective steps required by TenBelow or law.
+
+TenBelow reserves the right to remove or reject listings, suspend access, hold payouts, require corrective labeling, require additional documentation, or terminate seller participation where TenBelow believes a product may create unreasonable risk, legal exposure, consumer harm, or marketplace integrity concerns.
+
+15. Marketing, Promotion, and Visibility
+
+TenBelow may feature your storefront, products, creator identity, and content through editorial or promotional placements, including creator spotlights, app placements, featured releases, social reposts, launch campaigns, and related promotional efforts.
+
+Promotional placement is discretionary and may be based on listing quality, marketplace fit, buyer response, product quality, policy compliance, engagement, fulfillment quality, and business priorities. TenBelow does not guarantee traffic, impressions, sales, placement, or exposure.
+
+If you promote your TenBelow listings through social media or external channels, you must do so truthfully and in compliance with applicable advertising law.
+
+16. Taxes and Reporting
+
+You are solely responsible for determining, reporting, and remitting taxes arising from your sales activity to the extent required by law and not otherwise handled by TenBelow or its payment partners. You are also responsible for providing any information reasonably requested for tax reporting, payment reporting, verification, or compliance purposes.
+
+17. Suspension, Removal, and Termination
+
+TenBelow may suspend, restrict, remove, or terminate your seller account, listings, storefront, payouts, or access to seller features at any time, with or without prior notice, if TenBelow believes you have violated this Agreement, created legal or operational risk, harmed buyers, infringed rights, engaged in fraud, failed to cooperate with exchange review, or acted inconsistently with the integrity of the marketplace.
+
+TenBelow may also remove individual listings, reduce visibility, pause product sales, hold payouts, archive products, delete or disable seller accounts, remove a deleted seller’s active products from the marketplace catalog, or impose other seller restrictions short of full termination. TenBelow may retain historical records related to orders, exchanges, reviews, payments, audit logs, support issues, and security events where needed for legal, accounting, dispute-resolution, or safety reasons.
+
+If TenBelow monitors, discovers, or receives a credible report that a seller account is involved with illegal products, ghost guns, gun parts, weapon components, dangerous devices, controlled substances, stolen goods, counterfeit goods, or other prohibited activity, TenBelow may permanently ban the seller from the app, delete or disable the account, remove all related listings, block future seller participation, preserve relevant records, and cooperate with law enforcement or regulatory authorities where appropriate.
+
+18. Disclaimers
+
+TENBELOW IS PROVIDED ON AN “AS IS” AND “AS AVAILABLE” BASIS TO THE MAXIMUM EXTENT PERMITTED BY LAW. INNOVATIVE CODEWORKS LLC DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT, ACCURACY, RELIABILITY, SECURITY, AND AVAILABILITY.
+
+TENBELOW DOES NOT GUARANTEE ANY PARTICULAR LEVEL OF SALES, TRAFFIC, CONVERSION, USER GROWTH, PLATFORM AVAILABILITY, OR PROMOTIONAL EXPOSURE.
+
+19. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, INNOVATIVE CODEWORKS LLC, TENBELOW, AND THEIR AFFILIATES, MEMBERS, MANAGERS, OFFICERS, EMPLOYEES, CONTRACTORS, AND AGENTS SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, DATA, GOODWILL, BUSINESS, OR OPPORTUNITY ARISING OUT OF OR RELATING TO YOUR SELLER PARTICIPATION, YOUR USE OF TENBELOW, ANY BUYER OR SELLER DISPUTE, OR ANY PLATFORM INTERRUPTION OR ENFORCEMENT ACTION.
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, TENBELOW’S TOTAL LIABILITY FOR ANY CLAIM ARISING OUT OF OR RELATING TO THIS AGREEMENT SHALL NOT EXCEED THE GREATER OF ONE HUNDRED U.S. DOLLARS (US $100.00) OR THE AMOUNT PAID BY YOU DIRECTLY TO TENBELOW IN THE TWELVE (12) MONTHS PRECEDING THE EVENT GIVING RISE TO THE CLAIM.
+
+20. Indemnification
+
+You agree to indemnify, defend, and hold harmless Innovative Codeworks LLC, TenBelow, and their affiliates, members, managers, officers, employees, contractors, and agents from and against any claims, liabilities, damages, losses, judgments, fines, penalties, costs, and expenses, including reasonable attorneys’ fees, arising out of or relating to your products, listings, storefront, content, marketing, shipping, customer interactions, exchange-related conduct, violation of law, violation of this Agreement, or infringement of any third-party right.
+
+21. Governing Law and Venue
+
+This Agreement is governed by the laws of the Commonwealth of Pennsylvania, without regard to conflict-of-law principles. Any dispute arising out of or relating to this Agreement or your participation as a seller on TenBelow shall be brought exclusively in the state or federal courts located in Pennsylvania, and you consent to personal jurisdiction and venue in those courts.
+
+22. Changes to This Agreement
+
+TenBelow may update this Seller Agreement from time to time. Revised versions become effective when posted in the app, made available through the platform, or otherwise communicated to sellers. Continued seller participation after an update constitutes acceptance of the revised Agreement.
+
+23. Contact
+
+Innovative Codeworks LLC
+Doing Business As: TenBelow
+Founder: Steven LeVere
+admin@innovativecodeworks.com
+
+By selling on TenBelow, you acknowledge that you have read, understood, and agreed to this Seller Agreement.

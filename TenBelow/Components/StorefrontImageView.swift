@@ -35,7 +35,7 @@ private final class RemoteImageLoader: ObservableObject {
         do {
             let data = try await loadData(from: url)
             let uiImage = try await Task.detached(priority: .userInitiated) {
-                guard let decodedImage = UIImage(data: data) else {
+                guard let decodedImage = SellerProductMediaUploader.decodeImage(data: data, maxPixelSize: 1024) else {
                     throw URLError(.cannotDecodeContentData)
                 }
                 return decodedImage
@@ -217,9 +217,15 @@ private struct CachedRemoteImage<Placeholder: View>: View {
 
     @StateObject private var loader = RemoteImageLoader()
 
+    /// Synchronous cache read so already-loaded images render on the first frame
+    /// instead of flashing the placeholder during navigation pushes.
+    private var displayedImage: UIImage? {
+        loader.image ?? RemoteImageLoader.cache.object(forKey: url as NSURL)
+    }
+
     var body: some View {
         Group {
-            if let image = loader.image {
+            if let image = displayedImage {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)

@@ -26,14 +26,21 @@ struct PublicSellerProfileView: View {
     @State private var showShareSheet = false
     @State private var showCustomOrderSheet = false
     #endif
+    @State private var profileCache = ProfileCache()
 
     private let productsPerPage = 4
 
-    private var storefrontProducts: [Product] {
-        resolvedStorefrontProducts(
-            remoteProducts: catalog.products,
-            fallbackProducts: localProducts.products
-        )
+    /// Body reads `resolvedSeller` / `sellerProducts` many times per render, and each
+    /// uncached resolution re-merges the catalog and re-sorts. Memoized per revision so a
+    /// push renders with one resolution pass.
+    private final class ProfileCache {
+        var key: String?
+        var sellerProducts: [Product] = []
+        var resolvedSeller: SellerProfile?
+    }
+
+    private var profileSnapshotKey: String {
+        "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(seller.id)"
     }
 
     private var brandTheme: StorefrontBrandTheme {
@@ -41,17 +48,32 @@ struct PublicSellerProfileView: View {
     }
 
     private var sellerProducts: [Product] {
+        refreshProfileCacheIfNeeded()
+        return profileCache.sellerProducts
+    }
+
+    private var resolvedSeller: SellerProfile {
+        refreshProfileCacheIfNeeded()
+        return profileCache.resolvedSeller ?? seller
+    }
+
+    private func refreshProfileCacheIfNeeded() {
+        let key = profileSnapshotKey
+        guard profileCache.key != key else { return }
+
         let fromPassedCatalog = products.filter { $0.sellerId == seller.id }
-        let fromStorefrontCatalog = storefrontProducts.filter { $0.sellerId == seller.id }
         let base: [Product]
         if !fromPassedCatalog.isEmpty {
             base = fromPassedCatalog
-        } else if !fromStorefrontCatalog.isEmpty {
-            base = fromStorefrontCatalog
         } else {
-            base = []
+            let storefrontProducts = resolvedStorefrontProducts(
+                remoteProducts: catalog.products,
+                fallbackProducts: localProducts.products
+            )
+            base = storefrontProducts.filter { $0.sellerId == seller.id }
         }
-        return base.sorted { lhs, rhs in
+
+        let sorted = base.sorted { lhs, rhs in
             let lhsIsPreview = previewDraftIDs.contains(lhs.id)
             let rhsIsPreview = previewDraftIDs.contains(rhs.id)
             if lhsIsPreview != rhsIsPreview {
@@ -62,15 +84,16 @@ struct PublicSellerProfileView: View {
             }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
-    }
 
-    private var resolvedSeller: SellerProfile {
         let resolved = resolvedSellerProfile(
             sellerId: seller.id,
-            storefrontProducts: sellerProducts,
+            storefrontProducts: sorted,
             remoteProfiles: catalog.sellerProfiles
         )
-        return resolved?.mergingFallback(seller) ?? seller
+
+        profileCache.key = key
+        profileCache.sellerProducts = sorted
+        profileCache.resolvedSeller = resolved?.mergingFallback(seller) ?? seller
     }
 
     private var totalProductPages: Int {

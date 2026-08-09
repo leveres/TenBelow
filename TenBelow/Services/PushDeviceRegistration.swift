@@ -35,7 +35,9 @@ enum PushDeviceRegistration {
             try await postRegistration(payload)
             UserDefaults.standard.set("\(userKey)|\(deviceTokenHex)", forKey: lastUploadedKey)
         } catch {
+            #if DEBUG
             print("Push device registration failed: \(error.localizedDescription)")
+            #endif
         }
         #endif
     }

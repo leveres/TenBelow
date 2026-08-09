@@ -91,8 +91,8 @@ struct OrdersView: View {
         static let headerSpacing: CGFloat = 0
         static let sectionSpacing: CGFloat = 4
         static let dateFilterChipWidth: CGFloat = 132
-        static let dateFilterChipHeight: CGFloat = 26
-        static let dateFilterClearButtonWidth: CGFloat = 22
+        static let dateFilterChipHeight: CGFloat = 44
+        static let dateFilterClearButtonWidth: CGFloat = 44
     }
 
     @EnvironmentObject private var orderStore: OrderStore
@@ -263,6 +263,8 @@ struct OrdersView: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: HeroMetrics.titleImageHeight)
                             .scaleEffect(HeroMetrics.titleImageScale)
+                            .accessibilityLabel("Orders")
+                            .accessibilityAddTraits(.isHeader)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
 
@@ -331,11 +333,13 @@ struct OrdersView: View {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .background(Color.white.opacity(0.65), in: Circle())
                     .frame(
                         width: HeroMetrics.dateFilterClearButtonWidth,
                         height: HeroMetrics.dateFilterClearButtonWidth
                     )
-                    .background(Color.white.opacity(0.65), in: Circle())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(PlainChipButtonStyle())
             .opacity(selectedDateFilter == .allTime ? 0 : 1)

@@ -15,7 +15,6 @@ struct ReceiptView: View {
     var onDismiss: () -> Void
 
     @Environment(\.openURL) private var openURL
-    @AppStorage("buyerEmail") private var buyerEmail = ""
     @State private var showExchangePolicyBrowser = false
 
     private var itemsBySeller: [(sellerId: String, items: [CartItem])] {
@@ -49,18 +48,21 @@ struct ReceiptView: View {
                             ForEach(itemsBySeller, id: \.sellerId) { group in
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text("From \(group.sellerId.replacingOccurrences(of: "seller_", with: "Seller #"))")
-                                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                        .font(.caption.weight(.semibold))
+                                        .fontDesign(.rounded)
                                         .foregroundStyle(TBTheme.skyBlue)
 
                                     ForEach(group.items) { item in
                                         HStack {
                                             Text(item.product.name)
-                                                .font(.system(size: 15, weight: .medium, design: .rounded))
+                                                .font(.body.weight(.medium))
+                                                .fontDesign(.rounded)
                                                 .foregroundStyle(TBTheme.deepSky)
-                                                .lineLimit(1)
+                                                .lineLimit(2)
                                             Spacer()
                                             Text("\(item.quantity) × \(Money.format(cents: item.product.priceCents))")
-                                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                                .font(.subheadline.weight(.medium))
+                                                .fontDesign(.rounded)
                                                 .foregroundStyle(.secondary)
                                         }
                                     }
@@ -75,20 +77,24 @@ struct ReceiptView: View {
 
                             HStack {
                                 Text("Subtotal")
-                                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                                    .font(.subheadline.weight(.medium))
+                                    .fontDesign(.rounded)
                                     .foregroundStyle(.secondary)
                                 Spacer()
                                 Text(Money.format(cents: subtotalCents))
-                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                    .font(.subheadline.weight(.semibold))
+                                    .fontDesign(.rounded)
                             }
 
                             HStack {
                                 Text("Shipping")
-                                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                                    .font(.subheadline.weight(.medium))
+                                    .fontDesign(.rounded)
                                     .foregroundStyle(.secondary)
                                 Spacer()
                                 Text(shippingCents == 0 ? "Free" : Money.format(cents: shippingCents))
-                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                    .font(.subheadline.weight(.semibold))
+                                    .fontDesign(.rounded)
                                     .foregroundStyle(shippingCents == 0 ? .green : TBTheme.deepSky)
                             }
 
@@ -96,11 +102,13 @@ struct ReceiptView: View {
 
                             HStack {
                                 Text("Total")
-                                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                                    .font(.headline)
+                                    .fontDesign(.rounded)
                                     .foregroundStyle(TBTheme.deepSky)
                                 Spacer()
                                 Text(Money.format(cents: totalCents))
-                                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                                    .font(.title3.bold())
+                                    .fontDesign(.rounded)
                                     .foregroundStyle(TBTheme.icyBlue)
                             }
                         }
@@ -121,7 +129,8 @@ struct ReceiptView: View {
                     onDismiss()
                 } label: {
                     Text("Done")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .font(.body.weight(.semibold))
+                        .fontDesign(.rounded)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
                 }
@@ -148,14 +157,17 @@ struct ReceiptView: View {
                     .font(.system(size: 56))
                     .foregroundStyle(.green)
             }
+            .accessibilityHidden(true)
 
             VStack(spacing: 4) {
                 Text("Order confirmed!")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .font(.title2.bold())
+                    .fontDesign(.rounded)
                     .foregroundStyle(TBTheme.deepSky)
 
                 Text("Order #\(orderId)")
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .font(.subheadline.weight(.medium))
+                    .fontDesign(.rounded)
                     .foregroundStyle(.secondary)
             }
         }
@@ -165,17 +177,20 @@ struct ReceiptView: View {
     private var receiptDetails: some View {
         VStack(spacing: 6) {
             Text("A receipt has been emailed to you.")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .font(.subheadline.weight(.medium))
+                .fontDesign(.rounded)
                 .foregroundStyle(.secondary)
 
             if itemsBySeller.count > 1 {
                 Text("Items may ship separately from different sellers.")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .font(.caption.weight(.medium))
+                    .fontDesign(.rounded)
                     .foregroundStyle(.tertiary)
             }
 
             Text("View order status in the Orders tab.")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .font(.caption.weight(.medium))
+                .fontDesign(.rounded)
                 .foregroundStyle(TBTheme.icyBlue)
         }
         .multilineTextAlignment(.center)
@@ -188,20 +203,20 @@ struct ReceiptView: View {
                 #if os(iOS)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 #endif
-                if let url = AppConstants.exchangeRequestMailtoURL(orderId: orderId, buyerEmail: buyerEmail) {
-                    openURL(url)
-                }
+                showExchangePolicyBrowser = true
             } label: {
-                Label("Request an exchange", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                Label("How exchanges work", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.body.weight(.semibold))
+                    .fontDesign(.rounded)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .tint(TBTheme.icyBlue)
 
-            Text("We handle changes as exchanges per our policy, not cash refunds.")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+            Text("After delivery, request an eligible exchange from the order details screen in Orders.")
+                .font(.caption.weight(.medium))
+                .fontDesign(.rounded)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -211,15 +226,20 @@ struct ReceiptView: View {
     private var policyLinks: some View {
         HStack(spacing: 16) {
             Button("Exchange policy") { showExchangePolicyBrowser = true }
-            Text("·").foregroundStyle(.tertiary)
+                .frame(minHeight: 44)
+            Text("·")
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
             Button("Contact support") {
                 if let url = AppConstants.supportMailtoURL {
                     openURL(url)
                 }
             }
+            .frame(minHeight: 44)
         }
-        .font(.system(size: 12, weight: .medium, design: .rounded))
-        .foregroundStyle(.secondary)
+        .font(.caption.weight(.medium))
+        .fontDesign(.rounded)
+        .foregroundStyle(TBTheme.icyBlue)
     }
 }
 

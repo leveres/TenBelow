@@ -24,7 +24,7 @@ struct ToolbarIconBubble<Content: View>: View {
 
     private var bubbleCore: some View {
         content
-            .frame(width: 42, height: 42)
+            .frame(width: 44, height: 44)
             .background {
                 Circle()
                     .fill(.ultraThinMaterial)

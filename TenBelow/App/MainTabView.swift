@@ -42,6 +42,7 @@ struct MainTabView: View {
     @State private var activeNotificationBanner: AppNotification?
     @State private var lastPresentedNotificationID: String?
     @State private var notificationBannerDismissTask: Task<Void, Never>?
+    @State private var catalogRefreshDebounceTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -82,6 +83,9 @@ struct MainTabView: View {
         .animation(.easeInOut(duration: 0.5), value: shouldDisplayLoadingOverlay)
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: activeNotificationBanner?.id)
         .task {
+            #if DEBUG
+            AppConstants.refreshDebugBackendBaseURLOverrideCache()
+            #endif
             guard !hasPerformedInitialRefresh else { return }
             hasPerformedInitialRefresh = true
             await refreshCatalog(force: true)
@@ -89,6 +93,9 @@ struct MainTabView: View {
             hasCompletedInitialLoad = true
         }
         .onAppear {
+            #if DEBUG
+            AppConstants.refreshDebugBackendBaseURLOverrideCache()
+            #endif
             lastPresentedNotificationID = notifications.currentNotifications.first?.id
             if shouldShowHomeEntrySplash {
                 shouldShowHomeEntrySplash = false
@@ -115,7 +122,12 @@ struct MainTabView: View {
             Task { await refreshDropStatusIfNeeded() }
         }
         .onChange(of: catalogRefreshToken) { _, _ in
-            Task { await refreshCatalog(force: true) }
+            catalogRefreshDebounceTask?.cancel()
+            catalogRefreshDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                await refreshCatalog(force: true)
+            }
         }
         .onChange(of: notifications.currentNotifications.first?.id) { _, newValue in
             presentNotificationBannerIfNeeded(newNotificationID: newValue)
@@ -126,6 +138,9 @@ struct MainTabView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
+            #if DEBUG
+            AppConstants.refreshDebugBackendBaseURLOverrideCache()
+            #endif
             Task { await refreshCatalog() }
             Task { await refreshDropStatusIfNeeded() }
             Task { await refreshSellerOrdersForTabBadgeIfNeeded() }
@@ -398,6 +413,8 @@ private struct InAppNotificationBanner: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 28, height: 28)
                     .background(.white.opacity(0.64), in: Circle())
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Dismiss notification")

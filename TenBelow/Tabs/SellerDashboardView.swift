@@ -26,25 +26,49 @@ struct SellerDashboardView: View {
         _seller = State(initialValue: seller)
     }
 
-    private var storefrontProducts: [Product] {
-        resolvedStorefrontProducts(
-            remoteProducts: catalog.products,
-            fallbackProducts: localProducts.products
-        )
+    @State private var dashboardCache = DashboardCatalogCache()
+
+    /// Memoized per catalog revision: `resolvedCurrentSeller` is read all over the
+    /// dashboard body, and each uncached read re-merged the whole catalog.
+    private final class DashboardCatalogCache {
+        var key: String?
+        var baseSeller: SellerProfile?
+        var sellerProducts: [Product] = []
+        var resolvedCurrentSeller: SellerProfile?
     }
 
     private var sellerProducts: [Product] {
-        let currentSellerProducts = storefrontProducts.filter { $0.sellerId == seller.id }
-        return currentSellerProducts.isEmpty ? products : currentSellerProducts
+        refreshDashboardCacheIfNeeded()
+        return dashboardCache.sellerProducts
     }
 
     private var resolvedCurrentSeller: SellerProfile {
+        refreshDashboardCacheIfNeeded()
+        return dashboardCache.resolvedCurrentSeller ?? seller
+    }
+
+    private func refreshDashboardCacheIfNeeded() {
+        // `seller` participates via mergingFallback, so it is part of the cache identity.
+        let key = "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(seller.id)"
+        guard dashboardCache.key != key || dashboardCache.baseSeller != seller else { return }
+
+        let storefrontProducts = resolvedStorefrontProducts(
+            remoteProducts: catalog.products,
+            fallbackProducts: localProducts.products
+        )
+        let currentSellerProducts = storefrontProducts.filter { $0.sellerId == seller.id }
+        let resolvedProducts = currentSellerProducts.isEmpty ? products : currentSellerProducts
+
         let resolved = resolvedSellerProfile(
             sellerId: seller.id,
-            storefrontProducts: sellerProducts,
+            storefrontProducts: resolvedProducts,
             remoteProfiles: catalog.sellerProfiles
         )
-        return resolved?.mergingFallback(seller) ?? seller
+
+        dashboardCache.key = key
+        dashboardCache.baseSeller = seller
+        dashboardCache.sellerProducts = resolvedProducts
+        dashboardCache.resolvedCurrentSeller = resolved?.mergingFallback(seller) ?? seller
     }
 
     private var messageThreadCount: Int {
@@ -62,20 +86,22 @@ struct SellerDashboardView: View {
     }
 
     private var sellerProfileFingerprint: String {
-        [
-            resolvedCurrentSeller.displayName,
-            resolvedCurrentSeller.handle,
-            resolvedCurrentSeller.location,
-            resolvedCurrentSeller.processingTime,
-            resolvedCurrentSeller.materials.joined(separator: ","),
-            "\(resolvedCurrentSeller.shipsInDays.lowerBound)",
-            "\(resolvedCurrentSeller.shipsInDays.upperBound)",
-            resolvedCurrentSeller.avatarURL?.absoluteString ?? "",
-            resolvedCurrentSeller.bannerURL?.absoluteString ?? "",
-            resolvedCurrentSeller.websiteURL?.absoluteString ?? "",
-            "\(resolvedCurrentSeller.productCount)",
-            "\(resolvedCurrentSeller.pageViewCount)",
-            "\(resolvedCurrentSeller.likeCount)"
+        // Resolve once: each access re-runs the full catalog merge and profile resolution.
+        let current = resolvedCurrentSeller
+        return [
+            current.displayName,
+            current.handle,
+            current.location,
+            current.processingTime,
+            current.materials.joined(separator: ","),
+            "\(current.shipsInDays.lowerBound)",
+            "\(current.shipsInDays.upperBound)",
+            current.avatarURL?.absoluteString ?? "",
+            current.bannerURL?.absoluteString ?? "",
+            current.websiteURL?.absoluteString ?? "",
+            "\(current.productCount)",
+            "\(current.pageViewCount)",
+            "\(current.likeCount)"
         ].joined(separator: "|")
     }
 
@@ -944,36 +970,57 @@ private struct SellerStoresDirectoryView: View {
     @EnvironmentObject private var catalog: CatalogStore
 
     @State private var currentStorePage = 0
+    @State private var directoryCache = DirectoryCache()
 
     let currentSellerID: String
 
     private let profilesPerPage = 3
 
+    /// Memoized per catalog revision: building the directory resolves every profile and
+    /// filters the catalog per seller, which is too slow to repeat on every body pass.
+    private final class DirectoryCache {
+        var key: Int?
+        var storefrontProducts: [Product] = []
+        var sellerProfiles: [SellerProfile] = []
+    }
+
     private var storefrontProducts: [Product] {
-        resolvedStorefrontProducts(
+        refreshDirectoryCacheIfNeeded()
+        return directoryCache.storefrontProducts
+    }
+
+    private var sellerProfiles: [SellerProfile] {
+        refreshDirectoryCacheIfNeeded()
+        return directoryCache.sellerProfiles
+    }
+
+    private func refreshDirectoryCacheIfNeeded() {
+        let key = catalog.contentRevision
+        guard directoryCache.key != key else { return }
+
+        let products = resolvedStorefrontProducts(
             remoteProducts: catalog.products,
             fallbackProducts: []
         )
         .filter { !CatalogSeedPolicy.isSeedSeller($0.sellerId) }
-    }
 
-    private var sellerProfiles: [SellerProfile] {
+        let productsBySeller = Dictionary(grouping: products, by: \.sellerId)
         var profilesByID: [String: SellerProfile] = [:]
 
         for profile in catalog.sellerProfiles where !CatalogSeedPolicy.isSeedSeller(profile.id) {
             profilesByID[profile.id] = profile.applyingStorefrontProducts(
-                storefrontProducts.filter { $0.sellerId == profile.id }
+                productsBySeller[profile.id] ?? []
             )
         }
 
         for (sellerId, profile) in resolvedSellerProfilesByID(
-            storefrontProducts: storefrontProducts,
+            storefrontProducts: products,
             remoteProfiles: catalog.sellerProfiles
         ) where !CatalogSeedPolicy.isSeedSeller(sellerId) {
             profilesByID[sellerId] = profile.mergingFallback(profilesByID[sellerId])
         }
 
-        return profilesByID.values.sorted { lhs, rhs in
+        let sorted = profilesByID.values.sorted { lhs, rhs in
             if lhs.id == currentSellerID { return true }
             if rhs.id == currentSellerID { return false }
             if lhs.productCount == rhs.productCount {
@@ -981,6 +1028,10 @@ private struct SellerStoresDirectoryView: View {
             }
             return lhs.productCount > rhs.productCount
         }
+
+        directoryCache.key = key
+        directoryCache.storefrontProducts = products
+        directoryCache.sellerProfiles = sorted
     }
 
     private var totalStorePages: Int {
@@ -1098,7 +1149,7 @@ private struct SellerStoresDirectoryView: View {
                     Text("\(page + 1)")
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(page == currentStorePage ? .white : TBTheme.deepSky)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
                         .background(
                             Capsule(style: .continuous)
                                 .fill(page == currentStorePage ? TBTheme.accent : Color.white.opacity(0.86))
@@ -1109,6 +1160,8 @@ private struct SellerStoresDirectoryView: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Store page \(page + 1)")
+                .accessibilityAddTraits(page == currentStorePage ? .isSelected : [])
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)

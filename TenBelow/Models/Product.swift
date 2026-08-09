@@ -167,21 +167,57 @@ extension Product {
     }
 
     var primaryImageReference: String? {
-        imageNames.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        displayableImageReferences.first
     }
 
-    static func mediaURL(for reference: String?) -> URL? {
+    /// Image references that can actually be rendered (remote URLs, existing local files, or bundled assets).
+    var displayableImageReferences: [String] {
+        Self.displayableMediaReferences(in: imageNames)
+    }
+
+    nonisolated static func displayableMediaReferences(in references: [String]) -> [String] {
+        references.filter(isDisplayableMediaReference)
+    }
+
+    nonisolated static func isDisplayableMediaReference(_ reference: String) -> Bool {
+        let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        guard let url = previewMediaURL(for: trimmed) else { return false }
+        if url.isFileURL {
+            return FileManager.default.fileExists(atPath: url.path)
+        }
+        return mediaURL(for: trimmed) != nil
+    }
+
+    /// Keep only server-safe media references for catalog sync (https, `/media/`, or existing local files pending upload).
+    nonisolated static func persistableMediaReferences(_ references: [String]) -> [String] {
+        references
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { reference in
+                guard !reference.isEmpty else { return false }
+                if mediaURL(for: reference) != nil {
+                    return true
+                }
+                if let local = previewMediaURL(for: reference), local.isFileURL {
+                    return FileManager.default.fileExists(atPath: local.path)
+                }
+                return false
+            }
+    }
+
+    nonisolated static func mediaURL(for reference: String?) -> URL? {
         resolvedHTTPMediaURL(for: reference, allowFileURLs: false)
     }
 
     /// Same references as `imageNames` / `imageURLStrings`, but includes local `file://` URLs so previews can load before upload.
-    static func previewMediaURL(for reference: String?) -> URL? {
+    nonisolated static func previewMediaURL(for reference: String?) -> URL? {
         resolvedHTTPMediaURL(for: reference, allowFileURLs: true)
     }
 
     /// Builds a loadable URL for catalog image references: absolute http(s)/file, or host-relative `/media/...` against `AppConstants.backendBaseURL`.
     /// Rewrites `localhost` / `127.0.0.1` to the configured API host when they differ (common when the API base uses a LAN IP but stored URLs still say localhost).
-    private static func resolvedHTTPMediaURL(for reference: String?, allowFileURLs: Bool) -> URL? {
+    nonisolated private static func resolvedHTTPMediaURL(for reference: String?, allowFileURLs: Bool) -> URL? {
         let trimmed = reference?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else { return nil }
 
@@ -202,7 +238,7 @@ extension Product {
         return nil
     }
 
-    private static func rewriteLocalhostMediaURLIfNeeded(_ url: URL) -> URL {
+    nonisolated private static func rewriteLocalhostMediaURLIfNeeded(_ url: URL) -> URL {
         guard let configured = AppConstants.backendBaseURL,
               let configuredHost = configured.host?.lowercased(),
               let urlHost = url.host?.lowercased(),

@@ -61,6 +61,17 @@ private struct SellerFixedContentHeightKey: PreferenceKey {
     }
 }
 
+/// Reference-type memo slot stored in `@State`; safe to fill during body evaluation.
+private final class DropCatalogCache {
+    var snapshot: DropCatalogSnapshot?
+}
+
+private struct DropCatalogSnapshot {
+    let key: String
+    let products: [Product]
+    let sellerProfilesByID: [String: SellerProfile]
+}
+
 struct DropView: View {
     @EnvironmentObject private var cart: CartStore
     @EnvironmentObject private var catalog: CatalogStore
@@ -69,6 +80,7 @@ struct DropView: View {
     @AppStorage("userRole") private var userRole = ""
     @AppStorage("sellerSellerId") private var sellerId = ""
     @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
+    @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
     @AppStorage("weeklyDropPreviewMode") private var weeklyDropPreviewModeRaw = WeeklyDropPreviewMode.liveData.rawValue
     @State private var showCart = false
     @State private var dropResponse: CurrentDropResponse?
@@ -89,6 +101,7 @@ struct DropView: View {
     @State private var sellerFixedContentHeight: CGFloat = 0
     /// Off by default; turn on from Settings → Developer (DEBUG) to preview the buyer Drop lineup without live data.
     @AppStorage("buyerDropPreviewMode") private var buyerDropPreviewMode = false
+    @State private var catalogCache = DropCatalogCache()
     private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let previewDateFormatter = ISO8601DateFormatter()
 
@@ -101,11 +114,15 @@ struct DropView: View {
     }
 
     private var effectiveDropResponse: CurrentDropResponse? {
-        previewCurrentDropResponse ?? dropResponse
+        // Sellers always use live drop data; preview modes are buyer-layout tooling only.
+        if isSeller {
+            return dropResponse
+        }
+        return previewCurrentDropResponse ?? dropResponse
     }
 
     private var effectiveSellerSubmissions: SellerSubmissionsResponse? {
-        previewSellerSubmissions ?? sellerSubmissions
+        sellerSubmissions
     }
 
     private var isActive: Bool { effectiveDropResponse?.active == true }
@@ -115,67 +132,92 @@ struct DropView: View {
             .filter { $0.priceCents >= DropConstants.minPriceCents }
             .filter { CatalogSeedPolicy.isRealDropProduct($0) }
     }
+    /// Buyer-layout preview samples only. Never mirror live marketplace inventory here.
     private var buyerPreviewDropProducts: [DropProduct] {
         #if DEBUG
-        let source = resolvedStorefrontProducts(
-            remoteProducts: catalog.products,
-            fallbackProducts: localProducts.products
-        )
-        .filter { CatalogSeedPolicy.isRealStorefrontProduct($0) }
-
-        return source.enumerated().map { entry in
-            let index = entry.offset
-            let product = entry.element
-            return DropProduct(
-                id: "buyer-preview-drop-\(index)-\(product.id)",
-                sellerId: product.sellerId,
-                name: product.name,
-                priceCents: max(product.priceCents, DropConstants.minPriceCents),
-                previousPriceCents: product.previousPriceCents,
-                category: product.category.rawValue,
-                imageURLs: product.imageNames,
-                demoVideoURL: product.demoVideoURL?.absoluteString,
-                productionPreviewURL: product.productionPreviewURL?.absoluteString,
-                headline: "Preview release",
-                story: "A preview of the premium Friday lineup.",
-                bestUseCase: "Buyer-facing preview data",
-                material: product.material,
-                durabilityNote: product.durabilityNote,
-                careWarnings: product.careWarnings,
-                shipsInMinDays: product.shipsInDays.lowerBound,
-                shipsInMaxDays: product.shipsInDays.upperBound,
-                approvalStatus: .approved,
-                reviewNotes: nil,
-                reviewedAt: nil,
-                submittedAt: "preview",
-                slotNumber: index + 1
-            )
-        }
+        return Self.debugBuyerPreviewDropProducts
         #else
         return []
         #endif
     }
+
+    #if DEBUG
+    private static let debugBuyerPreviewDropProducts: [DropProduct] = [
+        DropProduct(
+            id: "debug-preview-drop-1",
+            sellerId: "preview_seller",
+            name: "Sample Drop Item",
+            priceCents: 1_299,
+            previousPriceCents: 1_499,
+            category: Category.desk.rawValue,
+            imageURLs: ["products_image"],
+            demoVideoURL: nil,
+            productionPreviewURL: nil,
+            headline: "Sample Friday release",
+            story: "Buyer preview layout only — not a real seller listing.",
+            bestUseCase: "Preview data",
+            material: "PLA+",
+            durabilityNote: "Everyday use",
+            careWarnings: ["Handle with care."],
+            shipsInMinDays: 2,
+            shipsInMaxDays: 4,
+            approvalStatus: .approved,
+            reviewNotes: nil,
+            reviewedAt: nil,
+            submittedAt: "preview",
+            slotNumber: 1
+        ),
+    ]
+    #endif
     private var shouldShowBuyerDropPreview: Bool {
         if isUsingWeeklyDropPreview {
             return false
         }
         return !isSeller && !isActive && !buyerPreviewDropProducts.isEmpty && buyerDropPreviewMode
     }
+    /// Memoized per catalog revision: the 1 Hz countdown timer re-evaluates this view's body
+    /// every second, so full catalog merges and profile resolution here caused steady stutter.
     private var storefrontProducts: [Product] {
-        resolvedStorefrontProducts(
-            remoteProducts: catalog.products,
-            fallbackProducts: localProducts.products
-        )
+        catalogSnapshot.products
     }
 
     private var sellerProfilesByID: [String: SellerProfile] {
-        resolvedSellerProfilesByID(
-            storefrontProducts: storefrontProducts,
-            remoteProfiles: catalog.sellerProfiles
+        catalogSnapshot.sellerProfilesByID
+    }
+
+    private var catalogSnapshot: DropCatalogSnapshot {
+        let key = "\(catalog.contentRevision)|\(localProducts.productsRevision)"
+        if let cached = catalogCache.snapshot, cached.key == key {
+            return cached
+        }
+
+        let products = resolvedStorefrontProducts(
+            remoteProducts: catalog.products,
+            fallbackProducts: localProducts.products
         )
+        let snapshot = DropCatalogSnapshot(
+            key: key,
+            products: products,
+            sellerProfilesByID: resolvedSellerProfilesByID(
+                storefrontProducts: products,
+                remoteProfiles: catalog.sellerProfiles
+            )
+        )
+        catalogCache.snapshot = snapshot
+        return snapshot
     }
     private var isSeller: Bool { userRole == "seller" && !sellerId.isEmpty }
-    private var sellerSubmissionProducts: [DropProduct] { effectiveSellerSubmissions?.products ?? [] }
+    private var sellerSubmissionProducts: [DropProduct] {
+        let submissions = effectiveSellerSubmissions?.products ?? []
+        guard !submissions.isEmpty else { return [] }
+
+        // Marketplace listings must never appear in Weekly Drop unless the server enrolled them (`isDrop`).
+        guard !catalog.products.isEmpty else { return submissions }
+
+        return submissions.filter {
+            CatalogSeedPolicy.isEnrolledWeeklyDropProduct(id: $0.id, catalog: catalog.products)
+        }
+    }
     private var sellerHistoryWeeks: [SellerDropHistoryWeek] { sellerDropHistory?.weeks ?? [] }
     private var sellerDisplayHistoryWeeks: [SellerDropHistoryWeek] {
         var weeks = sellerHistoryWeeks
@@ -216,10 +258,10 @@ struct DropView: View {
             || sellerSubscription.hasActiveSubscription
     }
     private var submissionWindowOpen: Bool {
-        if effectiveSellerSubmissions?.isActive == true {
+        if sellerSubmissions?.isActive == true {
             return true
         }
-        return WeekendDropManager.isSubmissionWindowOpen(now: countdownNow, currentDrop: effectiveDropResponse)
+        return WeekendDropManager.isSubmissionWindowOpen(now: countdownNow, currentDrop: dropResponse)
     }
     private var buyerLiveBoardState: WeekendDropState {
         WeekendDropManager.state(
@@ -364,7 +406,7 @@ struct DropView: View {
                     currentDrop: effectiveDropResponse,
                     referenceDate: countdownNow,
                     initialSubmissions: effectiveSellerSubmissions,
-                    usesPreviewData: isUsingWeeklyDropPreview
+                    usesPreviewData: isUsingWeeklyDropPreview && !isSeller
                 )
             }
             .navigationDestination(item: $selectedDropProduct) { product in
@@ -381,6 +423,9 @@ struct DropView: View {
             .onAppear {
                 isDropVisible = true
                 previewAnchorNow = countdownNow
+                if isSeller, weeklyDropPreviewMode != .liveData {
+                    weeklyDropPreviewModeRaw = WeeklyDropPreviewMode.liveData.rawValue
+                }
                 #if !DEBUG
                 if weeklyDropPreviewMode != .liveData {
                     weeklyDropPreviewModeRaw = WeeklyDropPreviewMode.liveData.rawValue
@@ -396,6 +441,14 @@ struct DropView: View {
             .onChange(of: weeklyDropPreviewModeRaw) { _, _ in
                 previewAnchorNow = countdownNow
                 buyerProductsPage = 0
+            }
+            .onChange(of: catalogRefreshToken) { _, _ in
+                guard isSeller else { return }
+                Task { await loadDropIfNeeded(force: true) }
+            }
+            .onChange(of: catalog.contentRevision) { _, _ in
+                guard isSeller else { return }
+                Task { await loadDropIfNeeded(force: true) }
             }
         }
     }
@@ -634,7 +687,9 @@ struct DropView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, DropLayoutMetrics.sellerTitleCardOverlap)
 
-            weeklyDropPreviewBadge
+            if !isSeller {
+                weeklyDropPreviewBadge
+            }
             sellerHeroCard
 
             if let errorMessage {
@@ -1354,52 +1409,6 @@ struct DropView: View {
             endsAt: previewDateFormatter.string(from: endDate),
             products: previewProducts(startDate: startDate),
             nextDropAt: nextDropAt.map(previewDateFormatter.string(from:))
-        )
-    }
-
-    private var previewSellerSubmissions: SellerSubmissionsResponse? {
-        guard isUsingWeeklyDropPreview else { return nil }
-
-        let resolvedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "seller_preview"
-            : sellerId
-
-        let baseProducts = Array(buyerPreviewDropProducts.prefix(3)).enumerated().map { entry in
-            let product = entry.element
-            return DropProduct(
-                id: "seller-preview-\(weeklyDropPreviewMode.rawValue)-\(entry.offset)-\(product.id)",
-                sellerId: resolvedSellerId,
-                name: product.name,
-                priceCents: product.priceCents,
-                previousPriceCents: product.previousPriceCents,
-                category: product.category,
-                imageURLs: product.imageURLs,
-                demoVideoURL: product.demoVideoURL,
-                productionPreviewURL: product.productionPreviewURL,
-                headline: product.headline,
-                story: product.story,
-                bestUseCase: product.bestUseCase,
-                material: product.material,
-                durabilityNote: product.durabilityNote,
-                careWarnings: product.careWarnings,
-                shipsInMinDays: product.shipsInMinDays,
-                shipsInMaxDays: product.shipsInMaxDays,
-                approvalStatus: product.approvalStatus,
-                reviewNotes: product.reviewNotes,
-                reviewedAt: product.reviewedAt,
-                submittedAt: product.submittedAt,
-                slotNumber: entry.offset + 1
-            )
-        }
-
-        return SellerSubmissionsResponse(
-            sellerId: resolvedSellerId,
-            weekId: "preview-\(weeklyDropPreviewMode.rawValue)",
-            isActive: weeklyDropPreviewMode == .thursdayPreview,
-            nextDropAt: previewCurrentDropResponse?.nextDropAt,
-            slotsUsed: min(baseProducts.count, DropConstants.maxSlotsPerSeller),
-            slotsMax: DropConstants.maxSlotsPerSeller,
-            products: baseProducts
         )
     }
 

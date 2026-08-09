@@ -11,43 +11,49 @@ struct SettingsView: View {
     @AppStorage("userRole") private var userRole = ""
     @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
     @AppStorage("sellerAccountCreated") private var sellerAccountCreated = false
-    @AppStorage("sellerSellerId") private var sellerSellerId = ""
     @AppStorage("sellerEmail") private var sellerEmail = ""
     @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
+    @State private var isConfirmingSellerSignOut = false
+    @State private var isConfirmingSellerAccountDeletion = false
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
                 let metrics = SettingsScreenMetrics.resolved(for: proxy.size.height)
 
-                VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
-                    settingsTitle(height: metrics.titleHeight)
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
+                        settingsTitle(height: metrics.titleHeight)
 
-                    if userRole == "seller" {
-                        settingsSection("Seller membership") {
-                            settingsNavigationRow(
-                                title: "Manage seller membership",
-                                systemImage: "creditcard",
-                                rowHeight: metrics.rowHeight
-                            ) {
-                                SellerSubscriptionView()
-                                    .environmentObject(sellerSubscription)
+                        if userRole == "seller" {
+                            settingsSection("Seller membership") {
+                                settingsNavigationRow(
+                                    title: "Membership and billing",
+                                    systemImage: "creditcard",
+                                    rowHeight: metrics.rowHeight
+                                ) {
+                                    SellerSubscriptionView()
+                                        .environmentObject(sellerSubscription)
+                                }
                             }
                         }
+
+                        sellerAccountSection(rowHeight: metrics.rowHeight)
+                        accountSection(rowHeight: metrics.rowHeight)
+                        legalSection(rowHeight: metrics.compactRowHeight)
+
+                        Spacer(minLength: 0)
                     }
-
-                    sellerAccountSection(rowHeight: metrics.rowHeight, footerFontSize: metrics.footerFontSize)
-                    accountSection(rowHeight: metrics.rowHeight)
-                    #if DEBUG
-                    developerSection(rowHeight: metrics.rowHeight)
-                    #endif
-                    legalSection(rowHeight: metrics.compactRowHeight)
-
-                    Spacer(minLength: 0)
+                    .padding(.horizontal, metrics.horizontalPadding)
+                    .padding(.top, metrics.topPadding)
+                    .padding(
+                        .bottom,
+                        metrics.bottomPadding
+                            + TopLevelHeaderMetrics.homeFloatingTabBarClearance
+                            + proxy.safeAreaInsets.bottom
+                    )
+                    .frame(minHeight: proxy.size.height, alignment: .top)
                 }
-                .padding(.horizontal, metrics.horizontalPadding)
-                .padding(.top, metrics.topPadding)
-                .padding(.bottom, metrics.bottomPadding)
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                .frame(width: proxy.size.width, height: proxy.size.height)
                 .background(TBFrostBackground())
             }
             .background(TBFrostBackground())
@@ -58,6 +64,30 @@ struct SettingsView: View {
             .task(id: userRole) {
                 guard userRole == "seller" else { return }
                 await sellerSubscription.refresh()
+            }
+            .confirmationDialog(
+                "Sign out of your seller account?",
+                isPresented: $isConfirmingSellerSignOut,
+                titleVisibility: .visible
+            ) {
+                Button("Sign out", role: .destructive) {
+                    signOutSeller()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes the seller session from this device. Your storefront remains active.")
+            }
+            .confirmationDialog(
+                "Request seller account deletion?",
+                isPresented: $isConfirmingSellerAccountDeletion,
+                titleVisibility: .visible
+            ) {
+                Button("Continue", role: .destructive) {
+                    requestSellerAccountDeletion()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("TenBelow will open Mail so you can submit and confirm your deletion request.")
             }
         }
     }
@@ -77,45 +107,35 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
                 .scaleEffect(1.10)
+                .accessibilityLabel("Settings")
+                .accessibilityAddTraits(.isHeader)
         }
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    private func sellerAccountSection(rowHeight: CGFloat, footerFontSize: CGFloat) -> some View {
+    private func sellerAccountSection(rowHeight: CGFloat) -> some View {
         settingsSection("Seller account") {
             if userRole == "seller" {
-                if !sellerSellerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    settingsStaticRow(title: sellerSellerId, systemImage: "person.text.rectangle", rowHeight: rowHeight)
-                }
-
                 if !sellerEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     settingsStaticRow(title: sellerEmail, systemImage: "envelope", rowHeight: rowHeight)
                 }
 
                 settingsButtonRow(
-                    title: "Sign out of seller account",
+                    title: "Sign out",
                     systemImage: "rectangle.portrait.and.arrow.right",
                     isDestructive: true,
                     rowHeight: rowHeight,
-                    action: signOutSeller
+                    action: { isConfirmingSellerSignOut = true }
                 )
 
                 settingsButtonRow(
-                    title: "Request seller account deletion",
+                    title: "Request account deletion",
                     systemImage: "trash",
                     isDestructive: true,
                     rowHeight: rowHeight,
-                    action: requestSellerAccountDeletion
+                    action: { isConfirmingSellerAccountDeletion = true }
                 )
 
-                Text("Seller sign-out only removes this device's seller session. Your shop stays on TenBelow.")
-                    .font(.system(size: footerFontSize, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
-                    .padding(.top, -2)
-                    .padding(.bottom, 2)
             } else {
                 settingsNavigationRow(title: "Sign in as seller", systemImage: "storefront", rowHeight: rowHeight) {
                     RolePickerView(startInSellerAccount: true, sellerEntryMode: .signIn)
@@ -158,31 +178,21 @@ struct SettingsView: View {
         }
     }
 
-    #if DEBUG
-    private func developerSection(rowHeight: CGFloat) -> some View {
-        settingsSection("Developer") {
-            settingsNavigationRow(title: "Stripe & checkout tools", systemImage: "hammer", rowHeight: rowHeight) {
-                DeveloperSettingsView()
-            }
-        }
-    }
-    #endif
-
     private func legalSection(rowHeight: CGFloat) -> some View {
         settingsSection("Legal") {
-            settingsNavigationRow(title: "View terms of service", rowHeight: rowHeight) {
+            settingsNavigationRow(title: "Terms of Service", rowHeight: rowHeight) {
                 LegalDocumentView(document: .termsOfService)
             }
-            settingsNavigationRow(title: "View privacy policy", rowHeight: rowHeight) {
+            settingsNavigationRow(title: "Privacy Policy", rowHeight: rowHeight) {
                 LegalDocumentView(document: .privacyPolicy)
             }
-            settingsNavigationRow(title: "View DMCA policy", rowHeight: rowHeight) {
+            settingsNavigationRow(title: "DMCA Policy", rowHeight: rowHeight) {
                 LegalDocumentView(document: .dmcaPolicy)
             }
-            settingsNavigationRow(title: "View seller agreement", rowHeight: rowHeight) {
+            settingsNavigationRow(title: "Seller Agreement", rowHeight: rowHeight) {
                 LegalDocumentView(document: .sellerAgreement)
             }
-            settingsNavigationRow(title: "View exchange policy", rowHeight: rowHeight) {
+            settingsNavigationRow(title: "Exchange Policy", rowHeight: rowHeight) {
                 LegalDocumentView(document: .exchangePolicy)
             }
         }
@@ -194,7 +204,8 @@ struct SettingsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .font(.subheadline.weight(.semibold))
+                .fontDesign(.rounded)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
 
@@ -258,7 +269,8 @@ struct SettingsView: View {
             }
 
             Text(title)
-                .font(.system(size: 18, weight: .regular, design: .rounded))
+                .font(.body)
+                .fontDesign(.rounded)
                 .foregroundStyle(foregroundColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
@@ -318,7 +330,6 @@ private struct SettingsScreenMetrics {
     let titleHeight: CGFloat
     let rowHeight: CGFloat
     let compactRowHeight: CGFloat
-    let footerFontSize: CGFloat
 
     static func resolved(for height: CGFloat) -> SettingsScreenMetrics {
         if height < 720 {
@@ -326,11 +337,10 @@ private struct SettingsScreenMetrics {
                 topPadding: 2,
                 bottomPadding: 8,
                 horizontalPadding: 12,
-                sectionSpacing: 8,
-                titleHeight: 76,
+                sectionSpacing: 6,
+                titleHeight: 64,
                 rowHeight: 44,
-                compactRowHeight: 40,
-                footerFontSize: 11
+                compactRowHeight: 44
             )
         }
 
@@ -338,11 +348,10 @@ private struct SettingsScreenMetrics {
             topPadding: 6,
             bottomPadding: 10,
             horizontalPadding: 14,
-            sectionSpacing: 8,
-            titleHeight: 82,
+            sectionSpacing: 6,
+            titleHeight: 68,
             rowHeight: 46,
-            compactRowHeight: 42,
-            footerFontSize: 12
+            compactRowHeight: 44
         )
     }
 }

@@ -211,7 +211,7 @@ struct NotificationSettingsView: View {
                 .font(.tbCaption)
                 .foregroundStyle(TBTheme.deepSky)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .frame(minHeight: 44)
                 .background(TBTheme.skyLight.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)

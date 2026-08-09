@@ -82,6 +82,18 @@ import {
   normalizeInquiryThread,
   upsertInquiryThread,
 } from "./sellerInquiry.js";
+import {
+  buildSellerAgreementAcceptanceRecord,
+  getActiveSellerAgreementDocument,
+  getSellerAgreementDocument,
+  normalizeSellerAgreementFields,
+  normalizeSellerWelcomeEmailFields,
+} from "./legal/sellerAgreementDocuments.js";
+import { deliverSellerWelcomeEmailIfNeeded, queueSellerWelcomeEmail } from "./services/sellerOnboardingEmail.js";
+import {
+  syncLegalAgreementDocumentsToPrisma,
+  upsertSellerAgreementAcceptanceToPrisma,
+} from "./db/repositories/legalAgreementRepository.js";
 
 const app = express();
 const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || "").trim();
@@ -527,6 +539,21 @@ function asISODateOrNull(value) {
   return parsed.toISOString();
 }
 
+function asProductISODateOrNull(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const appleReferenceDateOffsetSeconds = 978_307_200;
+    const milliseconds =
+      Math.abs(value) >= 100_000_000_000
+        ? value
+        : (value < appleReferenceDateOffsetSeconds
+            ? value + appleReferenceDateOffsetSeconds
+            : value) * 1000;
+    const parsedNumericDate = new Date(milliseconds);
+    return Number.isNaN(parsedNumericDate.getTime()) ? null : parsedNumericDate.toISOString();
+  }
+  return asISODateOrNull(value);
+}
+
 function normalizeFoundingCreatorFields(record = {}) {
   const creatorBadge = String(record.creatorBadge || "Founding Creator").trim() || "Founding Creator";
   const startsAt = asISODateOrNull(record.foundingCreatorAccessStartsAt);
@@ -678,7 +705,7 @@ function normalizeCatalogProduct(product = {}) {
     rightsOwnershipType: product.rightsOwnershipType ? String(product.rightsOwnershipType).trim() : null,
     rightsReferenceFlags: normalizeRightsReferenceFlags(product.rightsReferenceFlags),
     rightsCertificationAccepted: product.rightsCertificationAccepted === true,
-    rightsCertificationAcceptedAt: product.rightsCertificationAcceptedAt || null,
+    rightsCertificationAcceptedAt: asProductISODateOrNull(product.rightsCertificationAcceptedAt),
     requiresManualReview: product.requiresManualReview === true,
     reviewReason: product.reviewReason ? String(product.reviewReason).trim() : null,
   };
@@ -1857,11 +1884,8 @@ function normalizeSellerRecord(record = {}, sellerId = "") {
       country: String(record.shippingOrigin?.country || "").trim(),
       state: String(record.shippingOrigin?.state || "").trim(),
     },
-    sellerAgreement: {
-      accepted: record.sellerAgreement?.accepted === true,
-      acceptedAt: record.sellerAgreement?.acceptedAt || null,
-      version: record.sellerAgreement?.version || "seller-agreement-2026-04-24",
-    },
+    sellerAgreement: normalizeSellerAgreementFields(record),
+    welcomeEmail: normalizeSellerWelcomeEmailFields(record),
     sellerPoliciesAcknowledged: record.sellerPoliciesAcknowledged === true,
     membership: normalizeMembership(record.membership),
     isFoundingCreator: founding.isFoundingCreator,
@@ -2303,19 +2327,26 @@ function emailRecipientsList(to) {
     .filter(Boolean);
 }
 
-async function sendTransactionalEmail({ to, subject, html }) {
+async function sendTransactionalEmail({ to, subject, html, attachments = [], idempotencyKey = "" }) {
   const recipients = emailRecipientsList(to);
   if (!recipients.length) {
     throw new Error("No email recipient provided");
   }
 
   if (resend) {
-    const resendResult = await resend.emails.send({
+    const resendPayload = {
       from: EMAIL_FROM,
       to: recipients,
       subject,
       html,
-    });
+    };
+    if (Array.isArray(attachments) && attachments.length) {
+      resendPayload.attachments = attachments;
+    }
+    const resendOptions = idempotencyKey
+      ? { headers: { "Idempotency-Key": String(idempotencyKey).slice(0, 256) } }
+      : undefined;
+    const resendResult = await resend.emails.send(resendPayload, resendOptions);
     if (resendResult?.error) {
       const resendMessage =
         resendResult.error?.message ||
@@ -2326,7 +2357,7 @@ async function sendTransactionalEmail({ to, subject, html }) {
     if (resendResult?.data?.id) {
       console.log(`Resend message accepted → ${resendResult.data.id}`);
     }
-    return recipients;
+    return { recipients, messageId: resendResult?.data?.id || null };
   }
 
   if (smtpConfigured) {
@@ -2347,6 +2378,13 @@ async function sendTransactionalEmail({ to, subject, html }) {
       to: recipients.join(", "),
       subject,
       html,
+      attachments: Array.isArray(attachments)
+        ? attachments.map((attachment) => ({
+            filename: attachment.filename,
+            content: attachment.content,
+            encoding: attachment.content ? "base64" : undefined,
+          }))
+        : undefined,
     });
     if (process.env.NODE_ENV !== "production") {
       try {
@@ -2358,12 +2396,21 @@ async function sendTransactionalEmail({ to, subject, html }) {
         // ignore preview URL generation failures
       }
     }
-    return recipients;
+    return { recipients, messageId: smtpInfo?.messageId || null };
   }
 
   throw new Error(
     "No transactional email provider configured. Set RESEND_API_KEY or SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS."
   );
+}
+
+function sellerWelcomeEmailDeliveryArgs() {
+  return {
+    loadSellersFile,
+    saveSellersFile,
+    sendTransactionalEmail,
+    upsertSellerAgreementAcceptanceToPrisma,
+  };
 }
 
 async function sendBuyerAccountUpdateConfirmation({
@@ -5485,6 +5532,58 @@ app.get("/product-reviews", publicReadLimiter, (req, res) => {
   }
 });
 
+app.get("/legal/seller-agreement/:documentId", async (req, res) => {
+  try {
+    const documentId = String(req.params.documentId || "").trim();
+    const document = getSellerAgreementDocument(documentId);
+    if (!document) {
+      return res.status(404).json({ error: "Seller agreement document not found" });
+    }
+
+    const format = String(req.query.format || "").trim().toLowerCase();
+    if (format === "pdf" && document.pdfAvailable) {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${document.id}.pdf"`
+      );
+      return res.send(readFileSync(document.pdfPath));
+    }
+
+    if (format === "txt") {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.send(document.content);
+    }
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TenBelow Seller Agreement ${escapeHtml(document.versionLabel)}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background:#edf6ff; color:#123; margin:0; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+    .card { background:#fff; border:1px solid #d9ecff; border-radius:18px; padding:24px; white-space:pre-wrap; line-height:1.6; }
+    .meta { margin-bottom: 16px; color:#456; font-size: 14px; }
+    a { color:#1f7fd4; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="meta">TenBelow Seller Agreement · Version ${escapeHtml(document.versionLabel)} · Document ID ${escapeHtml(document.id)}</p>
+    <div class="card">${escapeHtml(document.content)}</div>
+    ${document.pdfAvailable ? `<p><a href="/legal/seller-agreement/${encodeURIComponent(document.id)}?format=pdf">Download PDF</a></p>` : ""}
+  </main>
+</body>
+</html>`);
+  } catch (err) {
+    console.error("legal seller agreement fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/create-seller-account", requireAppClient, async (req, res) => {
   try {
     const rawSellerId = String(req.body.sellerId || "").trim().toLowerCase();
@@ -5513,6 +5612,14 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
     const sellers = loadSellersFile();
     if (sellers[sellerId]) return res.status(409).json({ error: "Seller already exists" });
 
+    const agreementDocument = getActiveSellerAgreementDocument();
+    const acceptance = buildSellerAgreementAcceptanceRecord({
+      sellerId,
+      email,
+      legalName,
+      document: agreementDocument,
+    });
+
     let account = null;
     let onboardingUrl = "";
     if (isStripeConnectConfigured()) {
@@ -5534,16 +5641,16 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
         country: shippingOriginCountry,
         state: shippingOriginState,
       },
-      sellerAgreement: {
-        accepted: true,
-        acceptedAt: new Date().toISOString(),
-        version: "seller-agreement-2026-04-24",
-      },
+      sellerAgreement: acceptance.sellerAgreement,
+      welcomeEmail: acceptance.welcomeEmail,
       sellerPoliciesAcknowledged: true,
       membership: normalizeMembership(),
       profile: normalizeSellerPublicProfile({}, sellerId, businessName || sellerId),
     };
     saveSellersFile(sellers);
+    upsertSellerAgreementAcceptanceToPrisma(sellerId, sellers[sellerId]).catch((syncErr) => {
+      console.warn("seller agreement prisma sync warning:", syncErr?.message || syncErr);
+    });
 
     if (account?.id) {
       const link = await stripe.accountLinks.create({
@@ -5568,6 +5675,11 @@ app.post("/create-seller-account", requireAppClient, async (req, res) => {
       token,
       payoutSetupPending: !account?.id,
       payoutSetupMessage: account?.id ? null : STRIPE_CONNECT_SETUP_MESSAGE,
+    });
+
+    queueSellerWelcomeEmail({
+      sellerId,
+      ...sellerWelcomeEmailDeliveryArgs(),
     });
   } catch (err) {
     console.error("create-seller-account error:", err);
@@ -6294,7 +6406,10 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
       careWarnings: body.careWarnings,
       shipsInMinDays: body.shipsInMinDays,
       shipsInMaxDays: body.shipsInMaxDays,
-      isDrop: body.isDrop,
+      isDrop: false,
+      dropHeadline: "",
+      dropStory: "",
+      dropBestUseCase: "",
       isActive: false,
       isApproved: false,
       approvalStatus: "submitted",
@@ -6319,8 +6434,20 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
           ...nextProduct,
           id: productId,
           sellerId,
+          isDrop: false,
+          dropHeadline: "",
+          dropStory: "",
+          dropBestUseCase: "",
         })
-      : nextProduct;
+      : normalizeCatalogProduct({
+          ...nextProduct,
+          isDrop: false,
+          dropHeadline: "",
+          dropStory: "",
+          dropBestUseCase: "",
+        });
+
+    removeProductDropEntries(productId, sellerId);
 
     const updatedProducts = [...existingProducts];
     if (existingIndex >= 0) {
@@ -6677,6 +6804,13 @@ app.get("/admin/accounts", adminMutationLimiter, requireAdmin, async (req, res) 
             acceptedAt: null,
             version: null,
           },
+          welcomeEmail: sellerRecord.welcomeEmail || {
+            status: "pending",
+            sentAt: null,
+            messageId: null,
+            lastError: null,
+            attemptCount: 0,
+          },
           sellerPoliciesAcknowledged: sellerRecord.sellerPoliciesAcknowledged === true,
           createdAt: profile.joinedAt || null,
           updatedAt: sellerRecord.membership?.lastSyncedAt || null,
@@ -6717,6 +6851,38 @@ app.get("/admin/accounts", adminMutationLimiter, requireAdmin, async (req, res) 
     res.json({ kind: kind === "buyers" ? "buyers" : "sellers", ...paginateAdminAccounts(accounts, page, pageSize) });
   } catch (err) {
     console.error("admin accounts fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/sellers/:sellerId/resend-welcome-email", adminMutationLimiter, requireAdmin, async (req, res) => {
+  try {
+    const sellerId = String(req.params.sellerId || "").trim();
+    const sellers = loadSellersFile();
+    if (!sellers[sellerId]) {
+      return res.status(404).json({ error: "Seller account not found" });
+    }
+
+    const result = await deliverSellerWelcomeEmailIfNeeded({
+      sellerId,
+      ...sellerWelcomeEmailDeliveryArgs(),
+    });
+
+    if (result.skipped && result.reason === "already_sent") {
+      return res.json({ ok: true, alreadySent: true, sellerId });
+    }
+    if (result.sent) {
+      auditLog(auditContext(req, { action: "admin_seller_welcome_email_sent", sellerId, messageId: result.messageId || null }));
+      return res.json({ ok: true, sent: true, sellerId, messageId: result.messageId || null });
+    }
+
+    return res.status(502).json({
+      error: result.error || "Welcome email delivery failed",
+      sellerId,
+      status: sellers[sellerId]?.welcomeEmail?.status || "failed",
+    });
+  } catch (err) {
+    console.error("admin resend welcome email error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -7539,6 +7705,40 @@ function dropEntriesForWeek(weekData = {}) {
     .filter((entry) => entry.productId && entry.sellerId);
 }
 
+function removeProductDropEntries(productId, sellerId = "") {
+  const normalizedProductId = String(productId || "").trim();
+  const normalizedSellerId = String(sellerId || "").trim();
+  if (!normalizedProductId) {
+    return false;
+  }
+
+  const drops = loadDropsFile();
+  let changed = false;
+
+  for (const weekData of Object.values(drops)) {
+    const entries = dropEntriesForWeek(weekData);
+    const filtered = entries.filter((entry) => {
+      if (entry.productId !== normalizedProductId) {
+        return true;
+      }
+      if (normalizedSellerId && entry.sellerId !== normalizedSellerId) {
+        return true;
+      }
+      changed = true;
+      return false;
+    });
+    if (filtered.length !== entries.length) {
+      weekData.entries = filtered;
+    }
+  }
+
+  if (changed) {
+    saveDropsFile(drops);
+  }
+
+  return changed;
+}
+
 function buildDropProduct(product = {}, entry = {}, index = 0) {
   const normalizedProduct = normalizeCatalogProduct(product);
   return {
@@ -8268,7 +8468,15 @@ app.get("/drop/history/:sellerId", requireAppClient, requireAuthenticatedSeller,
         const products = sellerEntries
           .map((entry, index) => {
             const product = productsById.get(entry.productId);
-            if (!product || product.sellerId !== normalizedSellerId) return null;
+            if (
+              !product ||
+              product.sellerId !== normalizedSellerId ||
+              product.isDrop !== true ||
+              product.isApproved !== true ||
+              String(product.approvalStatus || "").trim().toLowerCase() !== "approved"
+            ) {
+              return null;
+            }
             return buildDropProduct(product, entry, index);
           })
           .filter(Boolean);
@@ -8497,6 +8705,12 @@ async function startServer() {
     } catch (err) {
       console.error("Phase 1 Prisma bootstrap sync failed:", err.message || err);
     }
+  }
+
+  if (isPrismaConfigured()) {
+    syncLegalAgreementDocumentsToPrisma().catch((err) => {
+      console.warn("Legal agreement document sync skipped:", err?.message || err);
+    });
   }
 
   app.listen(PORT, () => {

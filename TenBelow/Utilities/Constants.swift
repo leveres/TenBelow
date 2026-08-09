@@ -2,8 +2,8 @@ import Foundation
 
 enum AppConstants {
     /// Injected via target build settings → `Info.plist` (`$(TENBELOW_*)`). For App Store Release, set HTTPS production URL, `pk_live_…`, and an app API key that matches the backend.
-    private static let backendBaseURLInfoKey = "TENBELOW_BACKEND_BASE_URL"
-    private static let stripePublishableKeyInfoKey = "TENBELOW_STRIPE_PUBLISHABLE_KEY"
+    private nonisolated static let backendBaseURLInfoKey = "TENBELOW_BACKEND_BASE_URL"
+    private nonisolated static let stripePublishableKeyInfoKey = "TENBELOW_STRIPE_PUBLISHABLE_KEY"
     private nonisolated static let appAPIKeyInfoKey = "TENBELOW_APP_API_KEY"
 
     // MARK: - Shipping
@@ -28,17 +28,6 @@ enum AppConstants {
     /// Buyer support — exchange requests and general help (opens Mail via `mailto:`).
     static let supportEmail = "admin@innovativecodeworks.com"
 
-    // MARK: - Legal (web mirrors)
-
-    /// Optional public web mirrors. Buyer checkout/cart present Terms, Privacy, and Exchange in-app via `LegalDocumentSheet`.
-    /// Keep these URLs accurate if any flow still loads them in a browser (for example seller IP policy).
-    static let termsURL           = URL(string: "https://tenbelow.com/terms")!
-    static let privacyPolicyURL   = URL(string: "https://tenbelow.com/privacy")!
-    static let exchangePolicyURL  = URL(string: "https://tenbelow.com/exchanges")!
-    static let ipPolicyURL        = URL(string: "https://tenbelow.com/ip-policy")!
-    static let dmcaURL            = URL(string: "https://tenbelow.com/dmca")!
-    static let sellerAgreementURL = URL(string: "https://tenbelow.com/seller-agreement")!
-
     // MARK: - Seller Subscription
 
     static let sellerSubscriptionProductID = "com.innovativecodeworks.com.TenBelow.seller.monthly"
@@ -47,25 +36,45 @@ enum AppConstants {
 
     // MARK: - Stripe (replace with your publishable key from dashboard.stripe.com)
 
-    static var backendBaseURL: URL? {
+    #if DEBUG
+    nonisolated(unsafe) private static var debugBackendBaseURLOverrideSnapshot: String?
+
+    /// Keeps DEBUG LAN overrides available to `backendBaseURL` from background media loaders without touching `UserDefaults` off the main actor.
+    @MainActor
+    static func refreshDebugBackendBaseURLOverrideCache() {
+        let rawValue = configurationValue(for: backendBaseURLInfoKey)
+        let stored = UserDefaults.standard.string(forKey: debugBackendBaseURLOverrideKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let stored, !stored.isEmpty, let url = validBackendURL(from: stored) else {
+            debugBackendBaseURLOverrideSnapshot = nil
+            return
+        }
+
+        if shouldIgnoreDebugBackendOverride(url, configuredBackendValue: rawValue) {
+            UserDefaults.standard.removeObject(forKey: debugBackendBaseURLOverrideKey)
+            debugBackendBaseURLOverrideSnapshot = nil
+        } else {
+            debugBackendBaseURLOverrideSnapshot = stored
+        }
+    }
+    #endif
+
+    nonisolated static var backendBaseURL: URL? {
         let rawValue = configurationValue(for: backendBaseURLInfoKey)
         #if DEBUG
-        if let override = UserDefaults.standard.string(forKey: debugBackendBaseURLOverrideKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
+        if let override = debugBackendBaseURLOverrideSnapshot,
            !override.isEmpty,
-           let url = validBackendURL(from: override) {
-            if shouldIgnoreDebugBackendOverride(url, configuredBackendValue: rawValue) {
-                UserDefaults.standard.removeObject(forKey: debugBackendBaseURLOverrideKey)
-            } else {
-                return url
-            }
+           let url = validBackendURL(from: override),
+           !shouldIgnoreDebugBackendOverride(url, configuredBackendValue: rawValue) {
+            return url
         }
         #endif
         return validBackendURL(from: rawValue)
     }
 
     /// Parses backend base URL from build settings or overrides; applies Release vs Debug rules (HTTP allowed in DEBUG).
-    private static func validBackendURL(from rawValue: String) -> URL? {
+    nonisolated private static func validBackendURL(from rawValue: String) -> URL? {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               !isPlaceholderConfigurationValue(trimmed),
@@ -88,7 +97,7 @@ enum AppConstants {
     }
 
     #if DEBUG
-    private static func shouldIgnoreDebugBackendOverride(_ overrideURL: URL, configuredBackendValue: String) -> Bool {
+    nonisolated private static func shouldIgnoreDebugBackendOverride(_ overrideURL: URL, configuredBackendValue: String) -> Bool {
         guard configuredBackendValue.contains("tenbelow.onrender.com") else { return false }
         return overrideURL.scheme?.lowercased() != "https"
     }
@@ -140,7 +149,7 @@ enum AppConstants {
     static let testingModeUserDefaultsKey = "tb.testingModeEnabled"
 
     /// DEBUG-only: override plist `TENBELOW_BACKEND_BASE_URL` (e.g. `http://192.168.1.12:3000`) so a physical device can reach the Mac running `tenbelow-backend`.
-    static let debugBackendBaseURLOverrideKey = "tb.debugBackendBaseURLOverride"
+    nonisolated static let debugBackendBaseURLOverrideKey = "tb.debugBackendBaseURLOverride"
 
     #if DEBUG
     /// Applies `CommandLine.arguments` flags used by `TenBelowUITests` (call once at launch, before stores read config).
@@ -226,21 +235,6 @@ enum AppConstants {
         return components.url
     }
 
-    /// Pre-filled exchange request. No backend is required; your team handles the thread in your inbox.
-    static func exchangeRequestMailtoURL(orderId: String, buyerEmail: String?) -> URL? {
-        let subject = "TenBelow exchange request — \(orderId)"
-        var body = "Order ID: \(orderId)\n\n"
-        if let email = buyerEmail?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
-            body += "Email on order: \(email)\n\n"
-        }
-        body += "Item(s) to exchange:\n\nDesired replacement:\n\nReason for exchange:\n"
-        guard var components = URLComponents(string: "mailto:\(supportEmail)") else { return nil }
-        components.queryItems = [
-            URLQueryItem(name: "subject", value: subject),
-            URLQueryItem(name: "body", value: body),
-        ]
-        return components.url
-    }
 }
 
 enum TopLevelChromeMetrics {

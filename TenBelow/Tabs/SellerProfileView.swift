@@ -391,8 +391,8 @@ struct SellerProfileView: View {
                     Task { await openDashboard() }
                 } label: {
                     Label(
-                        AppConstants.isStripeConfigured ? "View Stripe dashboard" : "Stripe dashboard coming soon",
-                        systemImage: AppConstants.isStripeConfigured ? "chart.bar.fill" : "clock"
+                        AppConstants.isStripeConfigured ? "View Stripe dashboard" : "Stripe dashboard unavailable",
+                        systemImage: AppConstants.isStripeConfigured ? "chart.bar.fill" : "exclamationmark.circle"
                     )
                         .font(.headline)
                         .frame(maxWidth: .infinity)
@@ -403,7 +403,7 @@ struct SellerProfileView: View {
                 .opacity(AppConstants.isStripeConfigured ? 1 : 0.78)
 
                 if !AppConstants.isStripeConfigured {
-                    Text("Connect Stripe first to enable seller payouts and dashboard access.")
+                    Text("Seller payout tools are temporarily unavailable. Try again later.")
                         .font(.tbCaption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

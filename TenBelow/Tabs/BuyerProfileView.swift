@@ -15,6 +15,8 @@ struct BuyerProfileView: View {
 
     @State private var showBuyerAccountSetup = false
     @State private var showBuyerSignIn = false
+    @State private var isConfirmingSignOut = false
+    @State private var isConfirmingAccountDeletion = false
 
     private var isAccountHolder: Bool {
         buyerAccountCreated && !buyerFullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -171,7 +173,7 @@ struct BuyerProfileView: View {
                                     .font(.tbBodyStrong)
                                     .foregroundStyle(TBTheme.deepSky)
                                 Button {
-                                    if let url = URL(string: "mailto:\(AppConstants.supportEmail)") {
+                                    if let url = AppConstants.supportMailtoURL {
                                         openURL(url)
                                     }
                                 } label: {
@@ -184,14 +186,14 @@ struct BuyerProfileView: View {
                             }
 
                             Button {
-                                signOutBuyer()
+                                isConfirmingSignOut = true
                             } label: {
                                 Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                             }
                             .buttonStyle(SecondaryCTAButtonStyle())
 
                             Button {
-                                requestAccountDeletion()
+                                isConfirmingAccountDeletion = true
                             } label: {
                                 Label("Request account deletion", systemImage: "trash")
                             }
@@ -202,7 +204,7 @@ struct BuyerProfileView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 24)
+            .padding(.bottom, TopLevelHeaderMetrics.homeFloatingTabBarClearance + 24)
         }
         .frame(maxWidth: .infinity)
         .background(TBFrostBackground())
@@ -219,6 +221,30 @@ struct BuyerProfileView: View {
             NavigationStack {
                 BuyerSignInView()
             }
+        }
+        .confirmationDialog(
+            "Sign out of your buyer account?",
+            isPresented: $isConfirmingSignOut,
+            titleVisibility: .visible
+        ) {
+            Button("Sign out", role: .destructive) {
+                signOutBuyer()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your saved buyer session will be removed from this device.")
+        }
+        .confirmationDialog(
+            "Request account deletion?",
+            isPresented: $isConfirmingAccountDeletion,
+            titleVisibility: .visible
+        ) {
+            Button("Continue", role: .destructive) {
+                requestAccountDeletion()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("TenBelow will open Mail so you can submit and confirm your deletion request.")
         }
         .task(id: buyerEmail) {
             guard buyerAccountCreated else { return }
@@ -298,7 +324,6 @@ struct BuyerProfileView: View {
             // Match home header: bound height only so the wide mark keeps its aspect ratio and stays fully visible.
             .frame(height: 96)
             .frame(maxWidth: .infinity)
-            .accessibilityHidden(true)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Guest TenBelow account")
     }
