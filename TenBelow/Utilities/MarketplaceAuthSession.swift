@@ -24,7 +24,7 @@ private struct MarketplaceAuthSessionResponse: Decodable {
     let sellerId: String?
 }
 
-private struct MarketplaceSessionTokenClaims: Decodable {
+private struct MarketplaceSessionTokenClaims {
     let role: String?
     let sellerId: String?
     let exp: TimeInterval?
@@ -338,11 +338,26 @@ enum MarketplaceAuthSession {
         let paddingCount = (4 - payload.count % 4) % 4
         payload.append(String(repeating: "=", count: paddingCount))
 
-        guard let data = Data(base64Encoded: payload) else { return nil }
-        return try? JSONDecoder().decode(MarketplaceSessionTokenClaims.self, from: data)
+        guard let data = Data(base64Encoded: payload),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+
+        let role = json["role"] as? String
+        let sellerId = json["sellerId"] as? String
+        let exp: TimeInterval? = {
+            if let number = json["exp"] as? NSNumber {
+                return number.doubleValue
+            }
+            if let intValue = json["exp"] as? Int {
+                return TimeInterval(intValue)
+            }
+            return nil
+        }()
+
+        return MarketplaceSessionTokenClaims(role: role, sellerId: sellerId, exp: exp)
     }
 
-    private static func sellerIdClaim(from token: String) -> String? {
+    private nonisolated static func sellerIdClaim(from token: String) -> String? {
         guard let claims = tokenClaims(from: token),
               claims.role == "seller"
         else {
