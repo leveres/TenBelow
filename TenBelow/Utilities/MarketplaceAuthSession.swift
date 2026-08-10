@@ -27,6 +27,7 @@ private struct MarketplaceAuthSessionResponse: Decodable {
 private struct MarketplaceSessionTokenClaims: Decodable {
     let role: String?
     let sellerId: String?
+    let exp: TimeInterval?
 }
 
 enum MarketplaceAuthSessionError: LocalizedError {
@@ -36,8 +37,8 @@ enum MarketplaceAuthSessionError: LocalizedError {
         switch self {
         case .sellerSessionUnavailable:
             return """
-            Could not sign in as your seller account on the server. Open Settings, confirm you are in Seller mode, \
-            and use the same seller id and email you registered with while online.
+            Could not connect your seller account to the server. Check your internet connection, then open \
+            Settings → Sign in as seller if this keeps happening.
             """
         }
     }
@@ -47,6 +48,7 @@ enum MarketplaceAuthSession {
     private nonisolated static let buyerTokenKey = "auth.buyerToken"
     private nonisolated static let sellerTokenKey = "auth.sellerToken"
     private nonisolated static let hasMigratedTokenStorageKey = "auth.didMigrateTokensToKeychain"
+    private nonisolated static let tokenRefreshLeewaySeconds: TimeInterval = 120
 
     nonisolated static func applyAuthenticatedUserAuth(to request: inout URLRequest) {
         migrateTokensToKeychainIfNeeded()
@@ -55,9 +57,11 @@ enum MarketplaceAuthSession {
     }
 
     /// Seller-only writes (profile, products, media). Never falls back to a buyer token.
-    nonisolated static func applySellerAuth(to request: inout URLRequest) {
+    nonisolated static func applySellerAuth(to request: inout URLRequest, token overrideToken: String? = nil) {
         migrateTokensToKeychainIfNeeded()
-        guard let token = sellerBearerToken() else { return }
+        let token = overrideToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? sellerBearerToken()
+        guard let token, !token.isEmpty else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
@@ -89,7 +93,7 @@ enum MarketplaceAuthSession {
         guard !email.isEmpty else { return false }
         let token = KeychainTokenStore.string(for: buyerTokenKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return !token.isEmpty
+        return !token.isEmpty && !isTokenExpired(token)
     }
 
     nonisolated static var hasAuthenticatedSession: Bool {
@@ -100,7 +104,8 @@ enum MarketplaceAuthSession {
         migrateTokensToKeychainIfNeeded()
         let token = KeychainTokenStore.string(for: sellerTokenKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return token.isEmpty ? nil : token
+        guard !token.isEmpty, !isTokenExpired(token, leeway: 0) else { return nil }
+        return token
     }
 
     static func clearBuyerSession() {
@@ -129,7 +134,7 @@ enum MarketplaceAuthSession {
         UserDefaults.standard.removeObject(forKey: sellerTokenKey)
     }
 
-    /// Call before any seller write (profile, products, media). Refreshes the seller JWT when possible.
+    /// Call before any seller write (profile, products, media). Refreshes or bootstraps the seller JWT when possible.
     static func ensureSellerSessionReady() async throws {
         guard AppConstants.isBackendConfigured else {
             throw MarketplaceAuthSessionError.sellerSessionUnavailable
@@ -237,14 +242,13 @@ enum MarketplaceAuthSession {
         let defaults = UserDefaults.standard
         let role = defaults.string(forKey: "userRole") ?? ""
 
-        if role == "seller",
-           let token = KeychainTokenStore.string(for: sellerTokenKey),
-           !token.isEmpty {
+        if role == "seller", let token = sellerBearerToken() {
             return token
         }
 
         if let token = KeychainTokenStore.string(for: buyerTokenKey),
-           !token.isEmpty {
+           !token.isEmpty,
+           !isTokenExpired(token) {
             return token
         }
 
@@ -273,32 +277,58 @@ enum MarketplaceAuthSession {
     }
 
     private static func refreshSellerToken(sellerId: String, email: String?) async {
-        guard let storedToken = sellerBearerToken() else {
-            clearSellerSession()
-            return
-        }
+        let storedRawToken = KeychainTokenStore.string(for: sellerTokenKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let tokenSellerId = sellerIdClaim(from: storedRawToken) ?? sellerId
 
-        // The signed token is the source of truth for the immutable account ID. Public
-        // profile handles may differ (for example account "steven", handle "@stege").
-        // Older app state could accidentally persist the handle as sellerSellerId.
-        let tokenSellerId = sellerIdClaim(from: storedToken) ?? sellerId
+        if !storedRawToken.isEmpty, !isTokenExpired(storedRawToken, leeway: 0) {
+            if !shouldRefreshSellerToken(storedRawToken) {
+                reconcileLocalSellerIdentity(canonicalSellerId: tokenSellerId)
+                return
+            }
+
+            do {
+                let response: MarketplaceAuthSessionResponse = try await issueSession(
+                    path: "auth/seller-session",
+                    body: SellerSessionRequest(sellerId: tokenSellerId, email: email),
+                    sellerAuthToken: storedRawToken
+                )
+                storeSellerSessionToken(response.token)
+                reconcileLocalSellerIdentity(
+                    canonicalSellerId: response.sellerId ?? tokenSellerId
+                )
+                return
+            } catch {
+                // Fall through to bootstrap when refresh fails (expired token, network blip, etc.).
+            }
+        }
 
         do {
             let response: MarketplaceAuthSessionResponse = try await issueSession(
-                path: "auth/seller-session",
-                body: SellerSessionRequest(sellerId: tokenSellerId, email: email),
-                includeSellerAuth: true
+                path: "auth/seller-session-bootstrap",
+                body: SellerSessionRequest(sellerId: tokenSellerId, email: email)
             )
             storeSellerSessionToken(response.token)
             reconcileLocalSellerIdentity(
                 canonicalSellerId: response.sellerId ?? tokenSellerId
             )
+        } catch let urlError as URLError where urlError.code == .notConnectedToInternet || urlError.code == .networkConnectionLost || urlError.code == .timedOut {
+            // Stay signed in locally when offline; seller tools can retry when connectivity returns.
         } catch {
-            // Keep the existing JWT when refresh fails so seller tools keep working offline or after transient errors.
+            clearSellerSession()
         }
     }
 
-    private static func sellerIdClaim(from token: String) -> String? {
+    private nonisolated static func isTokenExpired(_ token: String, leeway: TimeInterval = 0) -> Bool {
+        guard let exp = tokenClaims(from: token)?.exp else { return false }
+        return Date(timeIntervalSince1970: exp).timeIntervalSinceNow <= leeway
+    }
+
+    private nonisolated static func shouldRefreshSellerToken(_ token: String) -> Bool {
+        isTokenExpired(token, leeway: tokenRefreshLeewaySeconds)
+    }
+
+    private nonisolated static func tokenClaims(from token: String) -> MarketplaceSessionTokenClaims? {
         let segments = token.split(separator: ".", omittingEmptySubsequences: false)
         guard segments.count == 3 else { return nil }
 
@@ -308,8 +338,12 @@ enum MarketplaceAuthSession {
         let paddingCount = (4 - payload.count % 4) % 4
         payload.append(String(repeating: "=", count: paddingCount))
 
-        guard let data = Data(base64Encoded: payload),
-              let claims = try? JSONDecoder().decode(MarketplaceSessionTokenClaims.self, from: data),
+        guard let data = Data(base64Encoded: payload) else { return nil }
+        return try? JSONDecoder().decode(MarketplaceSessionTokenClaims.self, from: data)
+    }
+
+    private static func sellerIdClaim(from token: String) -> String? {
+        guard let claims = tokenClaims(from: token),
               claims.role == "seller"
         else {
             return nil
@@ -339,15 +373,15 @@ enum MarketplaceAuthSession {
     private static func issueSession<T: Encodable, U: Decodable>(
         path: String,
         body: T,
-        includeSellerAuth: Bool = false
+        sellerAuthToken: String? = nil
     ) async throws -> U {
         let url = CheckoutAPI.baseURL.appendingPathComponent(path)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         AppConstants.applyAppClientAuth(to: &request)
-        if includeSellerAuth {
-            applySellerAuth(to: &request)
+        if let sellerAuthToken {
+            applySellerAuth(to: &request, token: sellerAuthToken)
         }
         request.httpBody = try JSONEncoder().encode(body)
 

@@ -52,6 +52,9 @@ struct AppRootView: View {
         #if os(iOS)
         .task(id: "\(userRole)|\(sellerSellerId)|\(buyerEmail)|\(buyerAccountCreated)") {
             await MarketplaceAuthSession.syncAfterIdentityChange()
+            if userRole == "seller" {
+                _ = try? await MarketplaceAuthSession.ensureSellerSessionReady()
+            }
             await PushDeviceRegistration.syncAfterIdentityChange()
         }
         .task(id: notificationPromptFingerprint) {

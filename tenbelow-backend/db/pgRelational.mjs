@@ -1,4 +1,5 @@
 import { getPool, isPgEnabled } from "./pgDocuments.mjs";
+import { isPgRelationalMirrorEnabled } from "./pgRelationalPolicy.js";
 
 function asText(value, fallback = "") {
   if (value == null) return fallback;
@@ -54,6 +55,7 @@ function membershipStatusForSeller(seller = {}) {
 }
 
 export async function ensureRelationalSchema() {
+  if (!isPgRelationalMirrorEnabled()) return;
   const pool = getPool();
   if (!pool) return;
   await pool.query(`
@@ -393,7 +395,7 @@ function sellerMediaRowsFromSellers(sellers = {}) {
 }
 
 export async function upsertRelationalForManagedDocument(key, payload) {
-  if (!isPgEnabled()) return;
+  if (!isPgEnabled() || !isPgRelationalMirrorEnabled()) return;
   const pool = getPool();
   if (!pool) return;
   await ensureRelationalSchema();
@@ -652,7 +654,7 @@ export async function upsertRelationalForManagedDocument(key, payload) {
 }
 
 export async function recordSellerMediaUpload(entry = {}) {
-  if (!isPgEnabled()) return;
+  if (!isPgEnabled() || !isPgRelationalMirrorEnabled()) return;
   const pool = getPool();
   if (!pool) return;
   await ensureRelationalSchema();

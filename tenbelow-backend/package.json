@@ -6,6 +6,7 @@
     "start": "node server.js",
     "start:production": "npm run prisma:migrate:deploy && npm run sync:legal-documents && node server.js",
     "setup:postgres:phase1": "node scripts/setup-postgres-phase1.mjs",
+    "repair:prisma:phase1": "node scripts/repair-prisma-phase1-schema.mjs",
     "dev": "node --watch server.js",
     "check": "node --check server.js",
     "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://127.0.0.1:5432/tenbelow} prisma generate",

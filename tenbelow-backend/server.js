@@ -3393,6 +3393,44 @@ app.post(
   }
 );
 
+function resolveSellerAccountForSession({ sellerId, email }) {
+  const sellers = loadSellersFile();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedSellerId = String(sellerId || "").trim();
+
+  if (normalizedSellerId && sellers[normalizedSellerId]) {
+    const seller = sellers[normalizedSellerId];
+    const accountEmail = String(seller.email || "").trim().toLowerCase();
+    if (normalizedEmail && accountEmail && accountEmail !== normalizedEmail) {
+      return {
+        error: "Seller email does not match this account",
+        status: 403,
+      };
+    }
+    return {
+      sellerId: normalizedSellerId,
+      seller,
+      sellerEmail: accountEmail || normalizedEmail,
+    };
+  }
+
+  if (normalizedEmail) {
+    const entry = Object.entries(sellers).find(([, candidate]) =>
+      String(candidate.email || "").trim().toLowerCase() === normalizedEmail
+    );
+    if (entry) {
+      const [resolvedSellerId, seller] = entry;
+      return {
+        sellerId: resolvedSellerId,
+        seller,
+        sellerEmail: normalizedEmail,
+      };
+    }
+  }
+
+  return { error: "Seller account not found", status: 404 };
+}
+
 app.post("/auth/seller-session", authLimiter, requireAppClient, requireAuthenticatedSeller, (req, res) => {
   try {
     const sellerId = String(req.body?.sellerId || "").trim();
@@ -3409,32 +3447,65 @@ app.post("/auth/seller-session", authLimiter, requireAppClient, requireAuthentic
       return res.status(403).json({ error: "Seller session refresh denied" });
     }
 
-    const sellers = loadSellersFile();
-    const seller = sellers[sellerId];
-    if (!seller) {
-      return res.status(404).json({ error: "Seller not found" });
-    }
-
-    if (seller.email && email && String(seller.email).trim().toLowerCase() !== email) {
-      auditOwnershipMismatch(req, {
-        scope: "seller_session_email_check",
-        expectedSellerId: sellerId,
-        expectedEmail: String(seller.email).trim().toLowerCase(),
-        actualEmail: email,
-      });
-      return res.status(403).json({ error: "Seller email does not match this account" });
+    const resolved = resolveSellerAccountForSession({ sellerId, email });
+    if (resolved.error) {
+      if (resolved.status === 403) {
+        auditOwnershipMismatch(req, {
+          scope: "seller_session_email_check",
+          expectedSellerId: sellerId,
+          expectedEmail: email,
+        });
+      }
+      return res.status(resolved.status).json({ error: resolved.error });
     }
 
     const token = issueUserSessionToken({
       role: "seller",
-      sellerId,
-      sellerEmail: email || String(seller.email || "").trim().toLowerCase(),
+      sellerId: resolved.sellerId,
+      sellerEmail: resolved.sellerEmail,
     });
 
     res.json({
       token,
       role: "seller",
-      sellerId,
+      sellerId: resolved.sellerId,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Re-issue a seller JWT from stored app identity (seller id + email), like buyer-session. */
+app.post("/auth/seller-session-bootstrap", authLimiter, requireAppClient, (req, res) => {
+  try {
+    const sellerId = String(req.body?.sellerId || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!sellerId && !email) {
+      return res.status(400).json({ error: "sellerId or email is required" });
+    }
+
+    const resolved = resolveSellerAccountForSession({ sellerId, email });
+    if (resolved.error) {
+      if (resolved.status === 403) {
+        auditOwnershipMismatch(req, {
+          scope: "seller_session_bootstrap_email_check",
+          expectedSellerId: sellerId,
+          expectedEmail: email,
+        });
+      }
+      return res.status(resolved.status).json({ error: resolved.error });
+    }
+
+    const token = issueUserSessionToken({
+      role: "seller",
+      sellerId: resolved.sellerId,
+      sellerEmail: resolved.sellerEmail,
+    });
+
+    res.json({
+      token,
+      role: "seller",
+      sellerId: resolved.sellerId,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

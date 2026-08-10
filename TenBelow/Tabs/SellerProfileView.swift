@@ -447,11 +447,14 @@ struct SellerProfileView: View {
             businessName: businessName
         )
         do {
-            try await SellerAPI.createAccount(
+            let response = try await SellerAPI.createAccount(
                 sellerId: sellerId,
                 email: sellerEmail,
                 businessName: businessName.isEmpty ? nil : businessName
             )
+            if let token = response.token, !token.isEmpty {
+                MarketplaceAuthSession.storeSellerSessionToken(token)
+            }
             sellerPreviewMode = false
             accountCreated = true
             userRole = "seller"

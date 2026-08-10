@@ -145,7 +145,7 @@ struct MainTabView: View {
             Task { await refreshDropStatusIfNeeded() }
             Task { await refreshSellerOrdersForTabBadgeIfNeeded() }
             if userRole == "seller" {
-                Task { await MarketplaceAuthSession.syncAfterIdentityChange() }
+                Task { _ = try? await MarketplaceAuthSession.ensureSellerSessionReady() }
             }
             Task { await PushDeviceRegistration.syncAfterIdentityChange() }
         }

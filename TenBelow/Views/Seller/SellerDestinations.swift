@@ -3142,6 +3142,7 @@ struct EditSellerProfileView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var catalog: CatalogStore
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
     @AppStorage("sellerBusinessName") private var storedBusinessName = ""
@@ -3191,6 +3192,10 @@ struct EditSellerProfileView: View {
         #endif
         .task {
             await refreshSellerSessionReadiness()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await refreshSellerSessionReadiness() }
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 10) {

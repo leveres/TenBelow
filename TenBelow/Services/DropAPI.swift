@@ -155,7 +155,7 @@ enum DropAPI {
 
         var apiError = failure(from: data, statusCode: http.statusCode)
         if apiError.isSellerSessionRequired {
-            await MarketplaceAuthSession.syncAfterIdentityChange()
+            _ = try? await MarketplaceAuthSession.ensureSellerSessionReady()
             if MarketplaceAuthSession.hasActiveSellerSession {
                 let (retryData, retryHTTP) = try await send(build())
                 if (200...299).contains(retryHTTP.statusCode) {

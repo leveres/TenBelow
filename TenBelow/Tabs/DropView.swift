@@ -73,6 +73,7 @@ private struct DropCatalogSnapshot {
 }
 
 struct DropView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var cart: CartStore
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
@@ -448,6 +449,10 @@ struct DropView: View {
             }
             .onChange(of: catalog.contentRevision) { _, _ in
                 guard isSeller else { return }
+                Task { await loadDropIfNeeded(force: true) }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active, isSeller else { return }
                 Task { await loadDropIfNeeded(force: true) }
             }
         }
@@ -1237,13 +1242,22 @@ struct DropView: View {
         }
 
         if isSeller {
-            let resolvedSellerId = MarketplaceAuthSession.authenticatedSellerId() ?? sellerId
             do {
                 try await MarketplaceAuthSession.ensureSellerSessionReady()
+                let resolvedSellerId = MarketplaceAuthSession.authenticatedSellerId() ?? sellerId
                 sellerSubmissions = try await DropAPI.mySubmissions(sellerId: resolvedSellerId)
+
+                sellerDropHistory = try await DropAPI.history(sellerId: resolvedSellerId)
+                if selectedHistoryWeekId == nil {
+                    selectedHistoryWeekId = sellerDropHistory?.weeks.first?.weekId
+                }
             } catch {
+                let resolvedSellerId = MarketplaceAuthSession.authenticatedSellerId() ?? sellerId
                 if sellerSubmissions == nil {
                     sellerSubmissions = emptySellerSubmissions(for: resolvedSellerId)
+                }
+                if sellerDropHistory == nil {
+                    sellerDropHistory = SellerDropHistoryResponse(sellerId: resolvedSellerId, weeks: [])
                 }
                 if errorMessage == nil {
                     if let dropError = error as? DropAPIError, dropError.isSellerSessionRequired {
@@ -1251,17 +1265,6 @@ struct DropView: View {
                     } else if !MarketplaceAuthSession.hasActiveSellerSession {
                         errorMessage = "Sign in to your seller account in Settings to manage Weekly Drop submissions."
                     }
-                }
-            }
-
-            do {
-                sellerDropHistory = try await DropAPI.history(sellerId: resolvedSellerId)
-                if selectedHistoryWeekId == nil {
-                    selectedHistoryWeekId = sellerDropHistory?.weeks.first?.weekId
-                }
-            } catch {
-                if sellerDropHistory == nil {
-                    sellerDropHistory = SellerDropHistoryResponse(sellerId: resolvedSellerId, weeks: [])
                 }
             }
         }

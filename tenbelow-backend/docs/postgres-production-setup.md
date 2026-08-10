@@ -15,18 +15,22 @@ You already have a database (e.g. `tenbelow_postgres_prod`). Confirm in the dash
 
 ---
 
-## 2. Wire `DATABASE_URL` on the web service
+## 2. Wire environment on the web service
 
 Dashboard → **tenbelow-backend** → **Environment**:
 
 | Variable | Value | Notes |
 |----------|--------|--------|
 | `DATABASE_URL` | **Internal Database URL** from the Postgres page | Same region as the web service |
-| `PG_READS` | `0` | Keep JSON as read source (already in `render.yaml`) |
+| `PG_READS` | `0` | Keep JSON as read source |
 | `PRISMA_SYNC` | `1` | After JSON writes, update Phase 1 Prisma tables |
-| `PRISMA_BOOTSTRAP_SYNC` | `1` | On each deploy/restart, sync JSON → Prisma (safe at current scale) |
+| `PRISMA_BOOTSTRAP_SYNC` | **unset or `0`** | Do **not** run full JSON sync on every boot (use repair script once) |
+| `PG_RELATIONAL_MIRROR` | **unset or `0`** | Legacy mirror DDL conflicts with Prisma — leave off |
 
 Do **not** set `PG_READS=1` until after a planned maintenance cutover.
+
+**Start command:** `npm run start:production`  
+(runs `prisma migrate deploy` → `sync:legal-documents` → `node server.js`)
 
 **Save** → Render redeploys the web service.
 
@@ -40,20 +44,31 @@ For commands run **on your Mac**, use the **External Database URL** from the sam
 
 ---
 
-## 3. Deploy applies schema automatically
+## 3. If you see `The column 'email' does not exist` on boot
 
-After the latest backend deploy, each start runs:
+Production Postgres was likely baselined while the old **pgRelational** mirror tables were present. Those tables use the same names (`buyers`, `sellers`, `products`, …) but a different shape than Prisma Phase 1.
 
-1. `npm run prisma:generate` (build)
-2. `prisma migrate deploy` (start)
-3. Phase 1 bootstrap sync (if `PRISMA_BOOTSTRAP_SYNC=1`)
-4. `node server.js`
+**Fix once** (Render Shell, after backup):
 
-No manual migration step on Render unless bootstrap fails (see troubleshooting).
+```bash
+cd ~/project/src/tenbelow-backend   # path shown in Render shell
+CONFIRM_REPAIR=1 STRICT=1 npm run repair:prisma:phase1
+```
+
+This script:
+
+1. Drops conflicting Prisma/legacy mirror tables (keeps `tb_documents`)
+2. Re-applies Prisma migrations from scratch
+3. Re-seeds legal agreement documents
+4. Syncs JSON → Prisma and verifies
+
+Then set env as in section 2 and redeploy. You should **not** need `PRISMA_BOOTSTRAP_SYNC=1` afterward.
+
+See [postgres-backup-restore.md](./postgres-backup-restore.md) before running repair.
 
 ---
 
-## 4. First-time bootstrap (if DB is empty)
+## 4. First-time setup (empty DB, no legacy mirror)
 
 ### Option A — from your Mac (uses repo `data/` or `BACKEND_DATA_DIR`)
 
@@ -64,21 +79,16 @@ export DATABASE_SSL_REQUIRE=1
 STRICT=1 npm run setup:postgres:phase1
 ```
 
-This runs: migrate → connect test → sync from local JSON → verify.
-
-Production JSON lives on Render disk (`/var/data`), not in git. For **production data**, use Option B.
-
 ### Option B — on Render (production JSON on disk)
 
-Dashboard → **tenbelow-backend** → **Shell**:
+After deploy with `start:production`:
 
 ```bash
-cd ~/project/src/tenbelow-backend   # path may vary; use repo root shown in shell
 npm run sync:prisma:phase1
 STRICT=1 npm run verify:prisma:phase1
 ```
 
-Or rely on `PRISMA_BOOTSTRAP_SYNC=1` after deploy (reads JSON from `/var/data`).
+Production JSON lives on Render disk (`/var/data`), not in git.
 
 ---
 
@@ -94,7 +104,6 @@ Look for:
 
 - `checks.databaseUrlConfigured`: `true`
 - `checks.postgresReachable`: `true`
-- Existing checks: disk, Stripe, email, auth
 
 ### Phase 1 JSON vs Prisma (Render shell or local with external URL)
 
@@ -109,12 +118,6 @@ All sections should be **OK**:
 - `categories`
 - `products`
 - `productVariants`
-
-### Legacy mirror (optional)
-
-```bash
-curl -s -H "X-Admin-Key: $ADMIN_API_KEY" https://tenbelow.onrender.com/admin/pg-relational-health | jq .
-```
 
 ### Marketplace smoke
 
@@ -131,10 +134,10 @@ BASE_URL=https://tenbelow.onrender.com npm run smoke:core
 | Checkout / orders | Unchanged — still JSON |
 | API URLs & responses | Unchanged |
 | iOS app | Unchanged |
-| `pgRelational.mjs` | Still runs as temporary mirror when `DATABASE_URL` is set |
 | Source of truth | JSON on persistent disk |
+| Legacy `pgRelational.mjs` | Off by default when `DATABASE_URL` + Prisma are active |
 
-Postgres is a **validated mirror** for Phase 1; the app does not read orders or checkout from Postgres yet.
+Postgres is a **validated mirror** for Phase 1 and seller legal/welcome email; the app does not read orders or checkout from Postgres yet.
 
 ---
 
@@ -142,8 +145,9 @@ Postgres is a **validated mirror** for Phase 1; the app does not read orders or 
 
 | Symptom | Fix |
 |---------|-----|
+| `The column 'email' does not exist` on bootstrap sync | Run `CONFIRM_REPAIR=1 npm run repair:prisma:phase1` (section 3) |
+| `legal_agreement_documents does not exist` | Ensure start command is `npm run start:production`; or run `npm run sync:legal-documents` in shell |
 | `Can't reach database server` from Mac | Use **External** URL + `DATABASE_SSL_REQUIRE=1` |
-| `Can't reach database server` on Render | Use **Internal** URL on web service, same region |
 | Verify mismatches after deploy | Run `npm run sync:prisma:phase1` in Render shell |
 | `postgresReachable: false` on `/ready` | Check `DATABASE_URL`, Postgres status, redeploy |
 | Password rotated | Update `DATABASE_URL` on web service |
@@ -153,11 +157,12 @@ Postgres is a **validated mirror** for Phase 1; the app does not read orders or 
 ## 8. Backups
 
 - Enable Render Postgres automatic backups
-- Before major migration: `pg_dump` — see [postgres-backup-restore.md](./postgres-backup-restore.md)
+- Before schema repair: `pg_dump` — see [postgres-backup-restore.md](./postgres-backup-restore.md)
 
 ---
 
 ## Related
 
 - [postgres-migration-phase1.md](./postgres-migration-phase1.md)
+- [seller-welcome-email-setup.md](./seller-welcome-email-setup.md)
 - [runbook.md](./runbook.md)
