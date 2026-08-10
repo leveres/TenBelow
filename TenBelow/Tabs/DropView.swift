@@ -115,16 +115,55 @@ struct DropView: View {
     }
 
     private var effectiveDropResponse: CurrentDropResponse? {
-        // Sellers always use live drop data; preview modes are buyer-layout tooling only.
-        if isSeller {
-            return dropResponse
+        if isUsingWeeklyDropPreview, let preview = previewCurrentDropResponse {
+            return preview
         }
-        return previewCurrentDropResponse ?? dropResponse
+        return dropResponse
     }
 
     private var effectiveSellerSubmissions: SellerSubmissionsResponse? {
-        sellerSubmissions
+        #if DEBUG
+        if isSeller, isUsingWeeklyDropPreview, let preview = previewSellerSubmissions {
+            return preview
+        }
+        #endif
+        return sellerSubmissions
     }
+
+    #if DEBUG
+    /// Mock seller submission state for the Weekly Drop preview menu (eye icon).
+    private var previewSellerSubmissions: SellerSubmissionsResponse? {
+        guard isSeller, isUsingWeeklyDropPreview else { return nil }
+
+        let resolvedSellerId = MarketplaceAuthSession.authenticatedSellerId() ?? sellerId
+        guard !resolvedSellerId.isEmpty else { return nil }
+
+        switch weeklyDropPreviewMode {
+        case .thursdayPreview:
+            return SellerSubmissionsResponse(
+                sellerId: resolvedSellerId,
+                weekId: effectiveDropResponse?.weekId ?? "preview-thursday",
+                isActive: true,
+                nextDropAt: effectiveDropResponse?.nextDropAt,
+                slotsUsed: sellerSubmissions?.slotsUsed ?? 0,
+                slotsMax: sellerSubmissions?.slotsMax ?? DropConstants.maxSlotsPerSeller,
+                products: sellerSubmissions?.products ?? []
+            )
+        case .fridaySubmitting, .weekendLive:
+            return SellerSubmissionsResponse(
+                sellerId: resolvedSellerId,
+                weekId: effectiveDropResponse?.weekId ?? "preview-live",
+                isActive: false,
+                nextDropAt: nil,
+                slotsUsed: sellerSubmissions?.slotsUsed ?? 0,
+                slotsMax: sellerSubmissions?.slotsMax ?? DropConstants.maxSlotsPerSeller,
+                products: sellerSubmissions?.products ?? []
+            )
+        case .liveData, .beforeFriday, .closed:
+            return nil
+        }
+    }
+    #endif
 
     private var isActive: Bool { effectiveDropResponse?.active == true }
     private var dropProducts: [DropProduct] { effectiveDropResponse?.products ?? [] }
@@ -259,7 +298,12 @@ struct DropView: View {
             || sellerSubscription.hasActiveSubscription
     }
     private var submissionWindowOpen: Bool {
-        if sellerSubmissions?.isActive == true {
+        #if DEBUG
+        if isSeller, isUsingWeeklyDropPreview, weeklyDropPreviewMode == .thursdayPreview {
+            return true
+        }
+        #endif
+        if effectiveSellerSubmissions?.isActive == true {
             return true
         }
         return WeekendDropManager.isSubmissionWindowOpen(now: countdownNow, currentDrop: dropResponse)
@@ -407,7 +451,7 @@ struct DropView: View {
                     currentDrop: effectiveDropResponse,
                     referenceDate: countdownNow,
                     initialSubmissions: effectiveSellerSubmissions,
-                    usesPreviewData: isUsingWeeklyDropPreview && !isSeller
+                    usesPreviewData: isUsingWeeklyDropPreview
                 )
             }
             .navigationDestination(item: $selectedDropProduct) { product in
@@ -424,9 +468,6 @@ struct DropView: View {
             .onAppear {
                 isDropVisible = true
                 previewAnchorNow = countdownNow
-                if isSeller, weeklyDropPreviewMode != .liveData {
-                    weeklyDropPreviewModeRaw = WeeklyDropPreviewMode.liveData.rawValue
-                }
                 #if !DEBUG
                 if weeklyDropPreviewMode != .liveData {
                     weeklyDropPreviewModeRaw = WeeklyDropPreviewMode.liveData.rawValue
@@ -692,7 +733,7 @@ struct DropView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, DropLayoutMetrics.sellerTitleCardOverlap)
 
-            if !isSeller {
+            if isUsingWeeklyDropPreview {
                 weeklyDropPreviewBadge
             }
             sellerHeroCard
