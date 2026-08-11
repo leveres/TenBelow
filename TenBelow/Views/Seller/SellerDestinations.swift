@@ -7,10 +7,12 @@ import UIKit
 
 struct AddProductView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
 
     let title: String
+    let persistsComposerDraft: Bool
     let onSave: (SellerProductDraft, SellerProductMediaSelection) -> Void
 
     @State private var draft: SellerProductDraft
@@ -32,9 +34,11 @@ struct AddProductView: View {
     init(
         title: String = "Add Product",
         initialDraft: SellerProductDraft = .new(),
+        persistsComposerDraft: Bool = false,
         onSave: @escaping (SellerProductDraft, SellerProductMediaSelection) -> Void = { _, _ in }
     ) {
         self.title = title
+        self.persistsComposerDraft = persistsComposerDraft
         self.onSave = onSave
         _draft = State(initialValue: initialDraft)
     }
@@ -88,6 +92,32 @@ struct AddProductView: View {
         title.localizedCaseInsensitiveContains("edit")
     }
 
+    private var composerAutosaveFingerprint: String {
+        [
+            draft.id,
+            draft.name,
+            draft.priceText,
+            draft.category.rawValue,
+            draft.imageURLStrings.joined(separator: "|"),
+            draft.demoVideoURLString,
+            draft.productionPreviewURLString,
+            draft.material,
+            draft.productionNote,
+            draft.durabilityNote,
+            draft.careWarningsText,
+            String(draft.shipsInMinDays),
+            String(draft.shipsInMaxDays),
+            draft.rightsOwnershipType ?? "",
+            draft.rightsReferenceFlags.joined(separator: ","),
+            draft.rightsCertificationAccepted ? "1" : "0",
+        ].joined(separator: "§")
+    }
+
+    private func persistComposerDraftIfNeeded() {
+        guard persistsComposerDraft, !isEditingProduct else { return }
+        SellerProductComposerDraftStore.saveShop(draft: draft)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: TBTheme.spacingXL) {
@@ -136,6 +166,16 @@ struct AddProductView: View {
         }
         .onChange(of: selectedProductionPreviewItem) { _, item in
             Task { await loadSelectedProductionPreview(from: item) }
+        }
+        .onChange(of: composerAutosaveFingerprint) { _, _ in
+            persistComposerDraftIfNeeded()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .background || phase == .inactive else { return }
+            persistComposerDraftIfNeeded()
+        }
+        .onDisappear {
+            persistComposerDraftIfNeeded()
         }
         .sheet(isPresented: $isShowingVideoPreview) {
             if let selectedVideoURL {
@@ -926,6 +966,9 @@ struct SellerProductsView: View {
     @State private var productDrafts: [SellerProductDraft]
     @State private var selectedDraft: SellerProductDraft?
     @State private var isShowingAddSheet = false
+    @State private var isShowingComposerResumeDialog = false
+    @State private var addProductInitialDraft: SellerProductDraft?
+    @State private var savedShopComposer: ShopProductComposerDraft?
     @State private var hasPresentedInitialAdd = false
     @State private var syncMessage: String?
     @State private var pendingDeleteDraft: SellerProductDraft?
@@ -956,6 +999,11 @@ struct SellerProductsView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: TBTheme.spacingLG) {
                 headerCard
+
+                if let saved = savedShopComposer, saved.draft.hasComposerProgress {
+                    shopComposerResumeCard(saved)
+                }
+
                 inventorySnapshotCard
 
                 if let syncMessage {
@@ -1011,8 +1059,11 @@ struct SellerProductsView: View {
             NavigationStack {
                 AddProductView(
                     title: "Add Product",
-                    initialDraft: .new(sellerId: seller.id)
+                    initialDraft: addProductInitialDraft ?? .new(sellerId: seller.id),
+                    persistsComposerDraft: true
                 ) { savedDraft, mediaSelection in
+                    SellerProductComposerDraftStore.clearShop(sellerId: seller.id)
+                    refreshSavedShopComposer()
                     let submittedDraft = draftForMarketplaceSubmission(savedDraft)
                     restoreLocallyDeletedProductIfNeeded(submittedDraft.id)
                     productDrafts.insert(submittedDraft, at: 0)
@@ -1052,13 +1103,35 @@ struct SellerProductsView: View {
             }
         }
         .onAppear {
+            refreshSavedShopComposer()
             guard startInAddMode, !hasPresentedInitialAdd else { return }
             hasPresentedInitialAdd = true
             Task { await presentAddProductFlow() }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
+            refreshSavedShopComposer()
             Task { await refreshInventoryFromServer() }
+        }
+        .confirmationDialog(
+            "Continue your product?",
+            isPresented: $isShowingComposerResumeDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Continue where I left off") {
+                if let saved = SellerProductComposerDraftStore.loadShop(sellerId: seller.id) {
+                    openAddProductSheet(restoredDraft: saved.draft)
+                } else {
+                    openAddProductSheet()
+                }
+            }
+            Button("Start a new product", role: .destructive) {
+                SellerProductComposerDraftStore.clearShop(sellerId: seller.id)
+                openAddProductSheet()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You have an unfinished shop listing. Continue editing it or begin a fresh product.")
         }
         .confirmationDialog(
             "Delete product?",
@@ -1084,8 +1157,59 @@ struct SellerProductsView: View {
         }
     }
 
+    private func openAddProductSheet(restoredDraft: SellerProductDraft? = nil) {
+        addProductInitialDraft = restoredDraft ?? .new(sellerId: seller.id)
+        isShowingAddSheet = true
+    }
+
+    private func refreshSavedShopComposer() {
+        savedShopComposer = SellerProductComposerDraftStore.loadShop(sellerId: seller.id)
+    }
+
+    private func shopComposerResumeCard(_ saved: ShopProductComposerDraft) -> some View {
+        GlassCard(cornerRadius: 22) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Pick up where you left off")
+                    .font(.tbHeadline)
+                    .foregroundStyle(TBTheme.deepSky)
+
+                Text(
+                    saved.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? "You have an unfinished shop listing ready to keep editing."
+                        : "Continue \"\(saved.draft.name)\" or start a new product."
+                )
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button("Continue") {
+                        openAddProductSheet(restoredDraft: saved.draft)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(TBTheme.skyBlue)
+
+                    Button("Start new") {
+                        SellerProductComposerDraftStore.clearShop(sellerId: seller.id)
+                        refreshSavedShopComposer()
+                        openAddProductSheet()
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+    }
+
     private func presentAddProductFlow() async {
-        await MainActor.run { isShowingAddSheet = true }
+        await MainActor.run {
+            guard !sellerPreviewMode else { return }
+            if let saved = SellerProductComposerDraftStore.loadShop(sellerId: seller.id),
+               saved.draft.hasComposerProgress {
+                isShowingComposerResumeDialog = true
+            } else {
+                openAddProductSheet()
+            }
+        }
 
         guard !sellerPreviewMode else { return }
         await MarketplaceAuthSession.syncAfterIdentityChange()

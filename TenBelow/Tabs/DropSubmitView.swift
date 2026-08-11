@@ -14,6 +14,7 @@ import UIKit
 #endif
 
 struct DropSubmitView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sellerSellerId") private var sellerId = ""
     @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
@@ -26,6 +27,8 @@ struct DropSubmitView: View {
     private let usesPreviewData: Bool
 
     @StateObject private var viewModel: WeeklyDropPrepViewModel
+    @State private var savedWeeklyDropComposer: WeeklyDropComposerDraft?
+    @State private var isShowingDropComposerResumeDialog = false
     init(
         currentDrop: CurrentDropResponse? = nil,
         referenceDate: Date = .now,
@@ -90,6 +93,10 @@ struct DropSubmitView: View {
             NavigationStack {
                 WeeklyDropEditorView(
                     context: context,
+                    persistsComposerDraft: {
+                        if case .create = context.mode { return true }
+                        return false
+                    }(),
                     isWindowOpen: isWindowOpen,
                     slotsRemaining: slotsRemaining,
                     isSubmitting: viewModel.isSubmitting,
@@ -124,6 +131,30 @@ struct DropSubmitView: View {
         }
         .task {
             await reloadWorkspace()
+            refreshSavedComposer()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            refreshSavedComposer()
+        }
+        .confirmationDialog(
+            "Continue your drop product?",
+            isPresented: $isShowingDropComposerResumeDialog,
+            titleVisibility: .visible
+        ) {
+            Button("Continue where I left off") {
+                if let saved = savedWeeklyDropComposer {
+                    viewModel.presentNewEditor(sellerId: sellerId, restored: saved)
+                }
+            }
+            Button("Start a new product", role: .destructive) {
+                SellerProductComposerDraftStore.clearWeeklyDrop(sellerId: sellerId)
+                refreshSavedComposer()
+                viewModel.presentNewEditor(sellerId: sellerId)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You have an unfinished Weekly Drop listing. Continue editing it or begin a fresh product.")
         }
     }
 
@@ -169,6 +200,13 @@ struct DropSubmitView: View {
                                 actionTitle: nil,
                                 action: nil
                             )
+                        }
+
+                        if let saved = savedWeeklyDropComposer,
+                           saved.isCreateMode,
+                           saved.draft.hasComposerProgress,
+                           viewModel.editorContext == nil {
+                            weeklyDropComposerResumeCard(saved)
                         }
 
                         lineupSectionHeader(compactLayout: compactLayout)
@@ -272,7 +310,7 @@ struct DropSubmitView: View {
     private func lineupActionControl(compactLayout: Bool) -> some View {
         if isWindowOpen && slotsRemaining > 0 {
             Button {
-                viewModel.presentNewEditor(sellerId: sellerId)
+                handleAddDropProduct()
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "plus.circle.fill")
@@ -358,10 +396,44 @@ struct DropSubmitView: View {
 
     private func handleHeroAction() {
         if slotsRemaining > 0 {
-            viewModel.presentNewEditor(sellerId: sellerId)
+            handleAddDropProduct()
         } else if let product = viewModel.products.first {
             viewModel.presentEditor(for: product)
         }
+    }
+
+    private func handleAddDropProduct() {
+        refreshSavedComposer()
+        if let saved = savedWeeklyDropComposer,
+           saved.isCreateMode,
+           saved.draft.hasComposerProgress {
+            isShowingDropComposerResumeDialog = true
+        } else {
+            viewModel.presentNewEditor(sellerId: sellerId)
+        }
+    }
+
+    private func refreshSavedComposer() {
+        let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSellerId.isEmpty else {
+            savedWeeklyDropComposer = nil
+            return
+        }
+        savedWeeklyDropComposer = SellerProductComposerDraftStore.loadWeeklyDrop(sellerId: trimmedSellerId)
+    }
+
+    private func weeklyDropComposerResumeCard(_ saved: WeeklyDropComposerDraft) -> some View {
+        WeeklyDropNoticeCard(
+            style: .info,
+            title: "Pick up where you left off",
+            message: saved.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "You have an unfinished Weekly Drop product ready to keep editing."
+                : "Continue \"\(saved.draft.name)\" or start a new drop product.",
+            actionTitle: "Continue",
+            action: {
+                viewModel.presentNewEditor(sellerId: sellerId, restored: saved)
+            }
+        )
     }
 
     private var primaryCTATitle: String {
@@ -497,7 +569,20 @@ private final class WeeklyDropPrepViewModel: ObservableObject {
         )
     }
 
-    func presentNewEditor(sellerId: String, stage: WeeklyDropEditorStage = .basics) {
+    func presentNewEditor(
+        sellerId: String,
+        stage: WeeklyDropEditorStage = .basics,
+        restored: WeeklyDropComposerDraft? = nil
+    ) {
+        if let restored {
+            editorContext = WeeklyDropEditorContext(
+                draft: restored.draft,
+                mode: .create,
+                stage: WeeklyDropEditorStage(rawValue: restored.stageRawValue) ?? stage
+            )
+            return
+        }
+
         editorContext = WeeklyDropEditorContext(
             draft: WeeklyDropDraft.new(sellerId: sellerId),
             mode: .create,
@@ -565,6 +650,7 @@ private final class WeeklyDropPrepViewModel: ObservableObject {
         }
 
         await loadSubmissions(sellerId: draft.sellerId, catalog: catalog)
+        SellerProductComposerDraftStore.clearWeeklyDrop(sellerId: draft.sellerId)
         editorContext = nil
     }
 
@@ -679,9 +765,11 @@ private enum WeeklyDropEditorStage: Int, CaseIterable, Identifiable {
 
 private struct WeeklyDropEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
 
     let context: WeeklyDropEditorContext
+    let persistsComposerDraft: Bool
     let isWindowOpen: Bool
     let slotsRemaining: Int
     let isSubmitting: Bool
@@ -707,12 +795,14 @@ private struct WeeklyDropEditorView: View {
 
     init(
         context: WeeklyDropEditorContext,
+        persistsComposerDraft: Bool = false,
         isWindowOpen: Bool,
         slotsRemaining: Int,
         isSubmitting: Bool,
         onSubmit: @escaping (WeeklyDropDraft) async throws -> Void
     ) {
         self.context = context
+        self.persistsComposerDraft = persistsComposerDraft
         self.isWindowOpen = isWindowOpen
         self.slotsRemaining = slotsRemaining
         self.isSubmitting = isSubmitting
@@ -748,6 +838,31 @@ private struct WeeklyDropEditorView: View {
 
     private var mediaEditingAllowed: Bool {
         isWindowOpen
+    }
+
+    private var composerAutosaveFingerprint: String {
+        [
+            draft.id,
+            draft.name,
+            draft.headline,
+            draft.priceText,
+            draft.story,
+            draft.bestUseCase,
+            draft.imageURLStrings.joined(separator: "|"),
+            draft.demoVideoURLString,
+            draft.productionPreviewURLString,
+            String(stage.rawValue),
+        ].joined(separator: "§")
+    }
+
+    private func persistComposerDraftIfNeeded() {
+        guard persistsComposerDraft else { return }
+        guard case .create = context.mode else { return }
+        SellerProductComposerDraftStore.saveWeeklyDrop(
+            draft: draft,
+            stageRawValue: stage.rawValue,
+            isCreateMode: true
+        )
     }
 
     var body: some View {
@@ -791,10 +906,21 @@ private struct WeeklyDropEditorView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button("Close") {
+                    persistComposerDraftIfNeeded()
                     dismiss()
                 }
                 .foregroundStyle(TBTheme.deepSky)
             }
+        }
+        .onChange(of: composerAutosaveFingerprint) { _, _ in
+            persistComposerDraftIfNeeded()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .background || phase == .inactive else { return }
+            persistComposerDraftIfNeeded()
+        }
+        .onDisappear {
+            persistComposerDraftIfNeeded()
         }
         .onChange(of: selectedImageItems) { _, items in
             Task { await loadSelectedImages(from: items) }
