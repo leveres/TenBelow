@@ -490,11 +490,14 @@ function sellerShippingOriginLabel(shippingOrigin = {}) {
 
 function buildSellerComplianceSection(account) {
   const section = document.createElement("div");
-  section.className = "account-compliance";
+  section.className = "account-panel account-compliance-panel";
+
+  const headerRow = document.createElement("div");
+  headerRow.className = "account-panel-header";
 
   const title = document.createElement("p");
-  title.className = "account-compliance-title";
-  title.textContent = "Seller onboarding compliance";
+  title.className = "account-panel-title";
+  title.textContent = "Onboarding";
 
   const pills = document.createElement("div");
   pills.className = "account-compliance-pills";
@@ -548,10 +551,13 @@ function buildSellerComplianceSection(account) {
       : "Welcome email after app onboarding";
   }
   pills.appendChild(welcomePill);
+  headerRow.append(title, pills);
 
-  section.append(title, pills, details);
+  section.append(headerRow, details);
 
   if (account.kind === "seller" && welcome.status === "failed") {
+    const actions = document.createElement("div");
+    actions.className = "account-panel-actions";
     const retryButton = document.createElement("button");
     retryButton.type = "button";
     retryButton.className = "account-action-button";
@@ -559,7 +565,8 @@ function buildSellerComplianceSection(account) {
     retryButton.addEventListener("click", () => {
       retrySellerWelcomeEmail(account.id, retryButton);
     });
-    section.appendChild(retryButton);
+    actions.appendChild(retryButton);
+    section.appendChild(actions);
   }
 
   return section;
@@ -603,11 +610,14 @@ function accountModerationStatusClass(accountModeration = {}) {
 
 function buildAccountModerationSection(account) {
   const section = document.createElement("div");
-  section.className = "account-moderation";
+  section.className = "account-panel account-moderation";
+
+  const headerRow = document.createElement("div");
+  headerRow.className = "account-panel-header";
 
   const title = document.createElement("p");
-  title.className = "account-compliance-title";
-  title.textContent = "Account moderation";
+  title.className = "account-panel-title";
+  title.textContent = "Moderation";
 
   const pills = document.createElement("div");
   pills.className = "account-compliance-pills";
@@ -625,9 +635,10 @@ function buildAccountModerationSection(account) {
     statusPill.textContent = "No moderation actions";
   }
   pills.appendChild(statusPill);
+  headerRow.append(title, pills);
 
   const details = document.createElement("p");
-  details.className = "account-card-meta";
+  details.className = "account-card-meta account-moderation-details";
   const detailParts = [];
   if (moderation.flagReason) detailParts.push(`Flag reason: ${moderation.flagReason}`);
   if (moderation.freezeReason) detailParts.push(`Freeze reason: ${moderation.freezeReason}`);
@@ -643,22 +654,35 @@ function buildAccountModerationSection(account) {
   }
   details.textContent = detailParts.length
     ? detailParts.join(" · ")
-    : "Use flag or freeze when a seller or buyer violates TenBelow policies. They receive an email with your reason.";
+    : "Flag or freeze when policies are violated. Include a reason — it can be emailed to the account holder.";
 
   const reasonField = document.createElement("textarea");
   reasonField.className = "account-moderation-reason";
   reasonField.rows = 3;
-  reasonField.placeholder = "Explain the violation or concern. This text is emailed to the account holder for flag/freeze actions.";
+  reasonField.placeholder = "Reason for flag or freeze (included in the email when sent).";
 
-  const sendEmailLabel = document.createElement("label");
-  sendEmailLabel.className = "account-moderation-checkbox";
+  const toolbar = document.createElement("div");
+  toolbar.className = "account-moderation-toolbar";
+
+  const controlsRow = document.createElement("div");
+  controlsRow.className = "account-moderation-controls-row";
+
+  const sendEmailOption = document.createElement("div");
+  sendEmailOption.className = "account-moderation-option";
   const sendEmailInput = document.createElement("input");
   sendEmailInput.type = "checkbox";
   sendEmailInput.checked = true;
-  sendEmailLabel.append(sendEmailInput, document.createTextNode(" Send email notification"));
+  const sendEmailText = document.createElement("span");
+  sendEmailText.textContent = "Send email notification";
+  sendEmailOption.append(sendEmailInput, sendEmailText);
+  sendEmailOption.addEventListener("click", (event) => {
+    if (event.target !== sendEmailInput) {
+      sendEmailInput.checked = !sendEmailInput.checked;
+    }
+  });
 
-  const actions = document.createElement("div");
-  actions.className = "account-moderation-actions";
+  const primaryActions = document.createElement("div");
+  primaryActions.className = "account-moderation-actions account-moderation-actions-primary";
 
   const flagButton = document.createElement("button");
   flagButton.type = "button";
@@ -670,11 +694,16 @@ function buildAccountModerationSection(account) {
 
   const freezeButton = document.createElement("button");
   freezeButton.type = "button";
-  freezeButton.className = "danger-button";
+  freezeButton.className = "danger-button account-moderation-danger-button";
   freezeButton.textContent = "Freeze account";
   freezeButton.addEventListener("click", () => {
     applyAccountModeration(account, "freeze", reasonField.value, sendEmailInput.checked, freezeButton);
   });
+
+  primaryActions.append(flagButton, freezeButton);
+
+  const secondaryActions = document.createElement("div");
+  secondaryActions.className = "account-moderation-actions account-moderation-actions-secondary";
 
   const unflagButton = document.createElement("button");
   unflagButton.type = "button";
@@ -694,8 +723,11 @@ function buildAccountModerationSection(account) {
     applyAccountModeration(account, "unfreeze", "", false, unfreezeButton);
   });
 
-  actions.append(flagButton, freezeButton, unflagButton, unfreezeButton);
-  section.append(title, pills, details, reasonField, sendEmailLabel, actions);
+  secondaryActions.append(unflagButton, unfreezeButton);
+
+  controlsRow.append(sendEmailOption, primaryActions);
+  toolbar.append(controlsRow, secondaryActions);
+  section.append(headerRow, details, reasonField, toolbar);
   return section;
 }
 
@@ -838,7 +870,7 @@ function renderAccounts(payload) {
     });
 
     const footer = document.createElement("div");
-    footer.className = "account-card-footer";
+    footer.className = "account-card-footer account-delete-footer";
     const note = document.createElement("p");
     note.className = "account-card-meta";
     const productCount = Number(account.activity?.productCount) || 0;
@@ -856,9 +888,9 @@ function renderAccounts(payload) {
     footer.append(note, deleteButton);
 
     if (account.kind === "seller") {
-      card.append(header, buildSellerComplianceSection(account), buildAccountModerationSection(account), stats, footer);
+      card.append(header, stats, buildSellerComplianceSection(account), buildAccountModerationSection(account), footer);
     } else {
-      card.append(header, buildAccountModerationSection(account), stats, footer);
+      card.append(header, stats, buildAccountModerationSection(account), footer);
     }
     accountList.appendChild(card);
   }

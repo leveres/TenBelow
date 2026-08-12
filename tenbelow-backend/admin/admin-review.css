@@ -745,11 +745,14 @@ textarea {
 
 .account-card {
   display: grid;
-  gap: 12px;
-  padding: 16px;
-  border-radius: 20px;
-  background: rgba(245, 250, 255, 0.95);
-  border: 1px solid rgba(127, 178, 255, 0.2);
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .custom-request-list {
@@ -772,6 +775,19 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 16px 18px;
+}
+
+.account-card-header {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.account-card-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
 .custom-request-header {
@@ -779,12 +795,6 @@ textarea {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-}
-
-.account-card-title {
-  margin: 0;
-  color: #2e5fb9;
-  font-size: 17px;
 }
 
 .custom-request-title {
@@ -795,9 +805,9 @@ textarea {
 
 .account-card-meta {
   margin: 4px 0 0;
-  color: #667892;
+  color: #64748b;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.45;
   word-break: break-word;
 }
 
@@ -872,13 +882,49 @@ textarea {
 .account-status {
   display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
+  padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(223, 90, 90, 0.12);
-  color: #bf4d4d;
-  font-size: 12px;
-  font-weight: 800;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.14);
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   white-space: nowrap;
+}
+
+.account-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  min-width: 0;
+}
+
+.account-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.account-panel-title {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.account-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-panel-actions .account-action-button {
+  width: auto;
 }
 
 .account-compliance {
@@ -908,12 +954,12 @@ textarea {
 .compliance-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.3;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .compliance-pill.is-ok {
@@ -951,47 +997,113 @@ textarea {
 }
 
 .account-moderation {
-  display: grid;
-  gap: 10px;
-  padding: 14px 0 4px;
-  border-top: 1px solid rgba(31, 127, 212, 0.08);
+  gap: 12px;
+}
+
+.account-moderation-details {
+  margin: 0;
 }
 
 .account-moderation-reason {
   width: 100%;
-  min-height: 84px;
+  max-width: 100%;
+  min-height: 76px;
   resize: vertical;
-  border: 1px solid rgba(31, 127, 212, 0.18);
-  border-radius: 14px;
-  padding: 12px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
   font: inherit;
-  color: #23486b;
-  background: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  color: #1e293b;
+  background: #fff;
+  box-sizing: border-box;
 }
 
-.account-moderation-checkbox {
+.account-moderation-toolbar {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.account-moderation-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.account-moderation-option {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex: 0 0 auto;
+  max-width: 100%;
   font-size: 13px;
-  color: #456789;
+  color: #475569;
+  user-select: none;
+  cursor: pointer;
+}
+
+.account-moderation-option input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  margin: 0;
+  flex: 0 0 15px;
+  accent-color: #2563eb;
 }
 
 .account-moderation-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+}
+
+.account-moderation-actions-primary {
+  align-items: center;
+  margin-left: auto;
+}
+
+.account-moderation-actions-secondary {
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.account-moderation-danger-button {
+  min-width: 132px;
+}
+
+.account-delete-footer {
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  background: #fafbfc;
+}
+
+.account-delete-footer .account-card-meta {
+  flex: 1 1 260px;
+  margin: 0;
+}
+
+.account-delete-footer .danger-button {
+  flex-shrink: 0;
 }
 
 .account-action-button {
-  border: 1px solid rgba(31, 127, 212, 0.22);
-  border-radius: 14px;
-  padding: 9px 14px;
-  color: #0b4f8a;
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #0f172a;
+  background: #fff;
   cursor: pointer;
   font: inherit;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .account-action-button:disabled,
@@ -1001,26 +1113,30 @@ textarea {
 }
 
 .account-status.is-inactive {
-  background: rgba(48, 173, 111, 0.14);
-  color: #1e8e58;
+  background: rgba(100, 116, 139, 0.1);
+  border-color: rgba(100, 116, 139, 0.16);
+  color: #475569;
 }
 
 .account-stat-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  background: #fafbfc;
 }
 
 .danger-button {
   border: 0;
-  border-radius: 14px;
-  padding: 9px 14px;
+  border-radius: 8px;
+  padding: 8px 12px;
   color: #fff;
-  background: linear-gradient(135deg, #ff6d6d 0%, #d63b3b 100%);
+  background: #dc2626;
   cursor: pointer;
   font: inherit;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -1149,14 +1265,15 @@ textarea {
 .seller-stat-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(127, 178, 255, 0.2);
-  color: #365a98;
-  font-size: 12px;
-  font-weight: 700;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .seller-product-list {
@@ -1680,9 +1797,34 @@ textarea {
 
   .account-card-header,
   .account-card-footer,
+  .account-delete-footer,
   .custom-request-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .account-moderation-controls-row {
+    align-items: stretch;
+  }
+
+  .account-moderation-actions-primary {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .account-moderation-actions-primary .account-action-button,
+  .account-moderation-actions-primary .danger-button {
+    flex: 1 1 calc(50% - 4px);
+  }
+
+  .account-panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .account-delete-footer .danger-button {
+    align-self: stretch;
+    width: 100%;
   }
 
   .seller-queue-toolbar,
