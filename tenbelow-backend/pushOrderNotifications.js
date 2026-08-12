@@ -137,3 +137,40 @@ export async function notifyOrderSupportEvent({
     body,
   });
 }
+
+/**
+ * Account moderation alerts when an admin flags or freezes a seller/buyer account.
+ */
+export async function notifyAccountModeration({
+  accountKind = "seller",
+  accountId = "",
+  buyerEmail,
+  action = "flag",
+  reason = "",
+}) {
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  if (!["flag", "freeze"].includes(normalizedAction)) {
+    return { skipped: true };
+  }
+
+  const trimmedReason = String(reason || "").trim();
+  const reasonSnippet = trimmedReason.length > 180 ? `${trimmedReason.slice(0, 177)}...` : trimmedReason;
+  const title = normalizedAction === "freeze" ? "Account frozen" : "Account flagged for review";
+  const body = reasonSnippet
+    ? `${reasonSnippet} Open TenBelow Settings for details.`
+    : "Open TenBelow Settings for details about this account action.";
+
+  if (accountKind === "buyer") {
+    return notifyOrderStatusChanged({
+      buyerEmail: buyerEmail || accountId,
+      title,
+      body,
+    });
+  }
+
+  return notifyOrderStatusChanged({
+    sellerId: String(accountId || "").trim(),
+    title,
+    body,
+  });
+}

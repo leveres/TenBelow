@@ -403,6 +403,7 @@ struct BuyerProfileView: View {
 
     private func signOutBuyer() {
         MarketplaceAuthSession.clearBuyerSession()
+        AccountModerationStore.shared.clear()
         buyerAccountCreated = false
         buyerFullName = ""
         buyerEmail = ""

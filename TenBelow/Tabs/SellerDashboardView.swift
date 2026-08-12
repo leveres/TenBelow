@@ -11,6 +11,7 @@ struct SellerDashboardView: View {
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
     @EnvironmentObject private var orderStore: OrderStore
     @EnvironmentObject private var inquiryStore: SellerInquiryStore
+    @ObservedObject private var accountModeration = AccountModerationStore.shared
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
     @AppStorage("sellerSellerId") private var sellerSellerId = ""
     let products: [Product]
@@ -115,6 +116,9 @@ struct SellerDashboardView: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            if accountModeration.hasModerationNotice {
+                AccountModerationBanner(status: accountModeration.status)
+            }
             headerCard
             primaryActions
             secondaryActions
@@ -138,6 +142,7 @@ struct SellerDashboardView: View {
             #if DEBUG
             print("[SellerDashboard] task start sellerId=\(seller.id)")
             #endif
+            await accountModeration.refresh()
             await SellerStoreSettingsSync.refreshLocalCache(sellerId: seller.id)
             refreshSellerFromLatestSources()
             await refreshDashboardIfNeeded()

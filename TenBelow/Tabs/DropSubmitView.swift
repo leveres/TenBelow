@@ -147,14 +147,14 @@ struct DropSubmitView: View {
                     viewModel.presentNewEditor(sellerId: sellerId, restored: saved)
                 }
             }
-            Button("Start a new product", role: .destructive) {
+            Button("Delete draft and start new", role: .destructive) {
                 SellerProductComposerDraftStore.clearWeeklyDrop(sellerId: sellerId)
                 refreshSavedComposer()
                 viewModel.presentNewEditor(sellerId: sellerId)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("You have an unfinished Weekly Drop listing. Continue editing it or begin a fresh product.")
+            Text("You have an unfinished Weekly Drop listing. Continue editing it, or delete the draft and start fresh.")
         }
     }
 
@@ -423,17 +423,42 @@ struct DropSubmitView: View {
     }
 
     private func weeklyDropComposerResumeCard(_ saved: WeeklyDropComposerDraft) -> some View {
-        WeeklyDropNoticeCard(
-            style: .info,
-            title: "Pick up where you left off",
-            message: saved.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? "You have an unfinished Weekly Drop product ready to keep editing."
-                : "Continue \"\(saved.draft.name)\" or start a new drop product.",
-            actionTitle: "Continue",
-            action: {
-                viewModel.presentNewEditor(sellerId: sellerId, restored: saved)
+        GlassCard(cornerRadius: 24) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(TBTheme.icyBlue)
+
+                    Text("Pick up where you left off")
+                        .font(.tbBodyStrong)
+                        .foregroundStyle(TBTheme.deepSky)
+                }
+
+                Text(
+                    saved.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? "You have an unfinished Weekly Drop product ready to keep editing."
+                        : "Continue \"\(saved.draft.name)\" or delete the draft."
+                )
+                .font(.tbBody)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button("Continue") {
+                        viewModel.presentNewEditor(sellerId: sellerId, restored: saved)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(TBTheme.skyBlue)
+
+                    Button("Delete draft", role: .destructive) {
+                        SellerProductComposerDraftStore.clearWeeklyDrop(sellerId: sellerId)
+                        refreshSavedComposer()
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
-        )
+        }
     }
 
     private var primaryCTATitle: String {

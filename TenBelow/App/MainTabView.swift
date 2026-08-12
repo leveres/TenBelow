@@ -144,6 +144,7 @@ struct MainTabView: View {
             Task { await refreshCatalog() }
             Task { await refreshDropStatusIfNeeded() }
             Task { await refreshSellerOrdersForTabBadgeIfNeeded() }
+            Task { await AccountModerationStore.shared.refresh() }
             if userRole == "seller" {
                 Task { _ = try? await MarketplaceAuthSession.ensureSellerSessionReady() }
             }

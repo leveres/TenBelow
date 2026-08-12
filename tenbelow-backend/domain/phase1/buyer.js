@@ -1,3 +1,5 @@
+import { normalizeAccountModeration } from "./accountModeration.js";
+
 export function normalizeBuyerRecord(record = {}, email = "") {
   const normalizedEmail = String(email || record.email || "").trim().toLowerCase();
   return {
@@ -8,6 +10,7 @@ export function normalizeBuyerRecord(record = {}, email = "") {
     emailVerifiedAt: record.emailVerifiedAt || null,
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: record.updatedAt || new Date().toISOString(),
+    accountModeration: normalizeAccountModeration(record.accountModeration),
   };
 }
 

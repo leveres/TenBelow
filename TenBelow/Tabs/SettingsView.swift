@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
+    @ObservedObject private var accountModeration = AccountModerationStore.shared
     @AppStorage("userRole") private var userRole = ""
     @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
     @AppStorage("sellerAccountCreated") private var sellerAccountCreated = false
@@ -23,6 +24,10 @@ struct SettingsView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
                         settingsTitle(height: metrics.titleHeight)
+
+                        if accountModeration.hasModerationNotice {
+                            AccountModerationBanner(status: accountModeration.status)
+                        }
 
                         if userRole == "seller" {
                             settingsSection("Seller membership") {
@@ -62,6 +67,7 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .task(id: userRole) {
+                await accountModeration.refresh()
                 guard userRole == "seller" else { return }
                 await sellerSubscription.refresh()
             }
@@ -297,6 +303,7 @@ struct SettingsView: View {
 
     private func signOutSeller() {
         MarketplaceAuthSession.clearSellerSession()
+        accountModeration.clear()
         sellerAccountCreated = false
         sellerPreviewMode = false
         switchAppMode(to: "buyer", launchTab: 0)

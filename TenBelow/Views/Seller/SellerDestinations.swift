@@ -478,9 +478,10 @@ struct AddProductView: View {
         TextField(title, text: text)
             .textFieldStyle(.plain)
             .font(.tbBody)
+            .foregroundStyle(TBTheme.deepSky)
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 1)
@@ -496,6 +497,7 @@ struct AddProductView: View {
             TextField(title, text: text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.tbBody)
+                .foregroundStyle(TBTheme.deepSky)
                 .lineLimit(lineLimit, reservesSpace: true)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 13)
@@ -951,6 +953,11 @@ enum SellerMarketplaceStatus: String, Codable {
     }
 }
 
+private struct AddProductPresentationToken: Identifiable {
+    let id = UUID()
+    let draft: SellerProductDraft
+}
+
 struct SellerProductsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var catalog: CatalogStore
@@ -965,9 +972,8 @@ struct SellerProductsView: View {
 
     @State private var productDrafts: [SellerProductDraft]
     @State private var selectedDraft: SellerProductDraft?
-    @State private var isShowingAddSheet = false
+    @State private var addProductPresentation: AddProductPresentationToken?
     @State private var isShowingComposerResumeDialog = false
-    @State private var addProductInitialDraft: SellerProductDraft?
     @State private var savedShopComposer: ShopProductComposerDraft?
     @State private var hasPresentedInitialAdd = false
     @State private var syncMessage: String?
@@ -1055,11 +1061,11 @@ struct SellerProductsView: View {
                 .accessibilityLabel("Add product")
             }
         }
-        .sheet(isPresented: $isShowingAddSheet) {
+        .sheet(item: $addProductPresentation) { presentation in
             NavigationStack {
                 AddProductView(
                     title: "Add Product",
-                    initialDraft: addProductInitialDraft ?? .new(sellerId: seller.id),
+                    initialDraft: presentation.draft,
                     persistsComposerDraft: true
                 ) { savedDraft, mediaSelection in
                     SellerProductComposerDraftStore.clearShop(sellerId: seller.id)
@@ -1125,13 +1131,14 @@ struct SellerProductsView: View {
                     openAddProductSheet()
                 }
             }
-            Button("Start a new product", role: .destructive) {
+            Button("Delete draft and start new", role: .destructive) {
                 SellerProductComposerDraftStore.clearShop(sellerId: seller.id)
+                refreshSavedShopComposer()
                 openAddProductSheet()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("You have an unfinished shop listing. Continue editing it or begin a fresh product.")
+            Text("You have an unfinished shop listing. Continue editing it, or delete the draft and start fresh.")
         }
         .confirmationDialog(
             "Delete product?",
@@ -1158,8 +1165,10 @@ struct SellerProductsView: View {
     }
 
     private func openAddProductSheet(restoredDraft: SellerProductDraft? = nil) {
-        addProductInitialDraft = restoredDraft ?? .new(sellerId: seller.id)
-        isShowingAddSheet = true
+        let draft = restoredDraft ?? SellerProductComposerDraftStore.loadShop(sellerId: seller.id)?.draft
+        addProductPresentation = AddProductPresentationToken(
+            draft: draft ?? .new(sellerId: seller.id)
+        )
     }
 
     private func refreshSavedShopComposer() {
@@ -1176,7 +1185,7 @@ struct SellerProductsView: View {
                 Text(
                     saved.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         ? "You have an unfinished shop listing ready to keep editing."
-                        : "Continue \"\(saved.draft.name)\" or start a new product."
+                        : "Continue \"\(saved.draft.name)\" or delete the draft."
                 )
                 .font(.tbCaption)
                 .foregroundStyle(.secondary)
@@ -1184,15 +1193,16 @@ struct SellerProductsView: View {
 
                 HStack(spacing: 10) {
                     Button("Continue") {
-                        openAddProductSheet(restoredDraft: saved.draft)
+                        if let saved = SellerProductComposerDraftStore.loadShop(sellerId: seller.id) {
+                            openAddProductSheet(restoredDraft: saved.draft)
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(TBTheme.skyBlue)
 
-                    Button("Start new") {
+                    Button("Delete draft", role: .destructive) {
                         SellerProductComposerDraftStore.clearShop(sellerId: seller.id)
                         refreshSavedShopComposer()
-                        openAddProductSheet()
                     }
                     .buttonStyle(.bordered)
                 }

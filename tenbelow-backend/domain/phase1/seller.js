@@ -1,4 +1,5 @@
 import { DEFAULT_SELLER_SUBSCRIPTION_PRODUCT_ID } from "./constants.js";
+import { normalizeAccountModeration } from "./accountModeration.js";
 
 function asFiniteNumber(value, fallback = 0) {
   const number = Number(value);
@@ -138,6 +139,7 @@ export function normalizeSellerRecord(record = {}, sellerId = "") {
     creatorBadge: founding.creatorBadge,
     membershipStatus: effectiveMembership.membershipStatus,
     profile: normalizeSellerPublicProfile(record.profile, sellerId, record.businessName),
+    accountModeration: normalizeAccountModeration(record.accountModeration),
   };
 }
 

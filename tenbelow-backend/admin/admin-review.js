@@ -589,6 +589,178 @@ async function retrySellerWelcomeEmail(sellerId, button) {
   }
 }
 
+function accountModerationStatusLabel(accountModeration = {}) {
+  if (accountModeration.isFrozen) return "Frozen";
+  if (accountModeration.isFlagged) return "Flagged";
+  return "";
+}
+
+function accountModerationStatusClass(accountModeration = {}) {
+  if (accountModeration.isFrozen) return "account-status is-frozen";
+  if (accountModeration.isFlagged) return "account-status is-flagged";
+  return "";
+}
+
+function buildAccountModerationSection(account) {
+  const section = document.createElement("div");
+  section.className = "account-moderation";
+
+  const title = document.createElement("p");
+  title.className = "account-compliance-title";
+  title.textContent = "Account moderation";
+
+  const pills = document.createElement("div");
+  pills.className = "account-compliance-pills";
+
+  const moderation = account.accountModeration || {};
+  const statusPill = document.createElement("span");
+  if (moderation.isFrozen) {
+    statusPill.className = "compliance-pill is-frozen";
+    statusPill.textContent = "Frozen account";
+  } else if (moderation.isFlagged) {
+    statusPill.className = "compliance-pill is-warning";
+    statusPill.textContent = "Flagged for review";
+  } else {
+    statusPill.className = "compliance-pill is-ok";
+    statusPill.textContent = "No moderation actions";
+  }
+  pills.appendChild(statusPill);
+
+  const details = document.createElement("p");
+  details.className = "account-card-meta";
+  const detailParts = [];
+  if (moderation.flagReason) detailParts.push(`Flag reason: ${moderation.flagReason}`);
+  if (moderation.freezeReason) detailParts.push(`Freeze reason: ${moderation.freezeReason}`);
+  if (moderation.lastAction) {
+    const when = formatAgreementTimestamp(moderation.lastActionAt);
+    detailParts.push(`Last action: ${moderation.lastAction}${when ? ` · ${when}` : ""}`);
+  }
+  if (moderation.lastEmailStatus === "sent") {
+    const sentWhen = formatAgreementTimestamp(moderation.lastEmailSentAt);
+    detailParts.push(sentWhen ? `Notice email sent · ${sentWhen}` : "Notice email sent");
+  } else if (moderation.lastEmailStatus === "failed") {
+    detailParts.push(`Notice email failed${moderation.lastEmailError ? `: ${moderation.lastEmailError}` : ""}`);
+  }
+  details.textContent = detailParts.length
+    ? detailParts.join(" · ")
+    : "Use flag or freeze when a seller or buyer violates TenBelow policies. They receive an email with your reason.";
+
+  const reasonField = document.createElement("textarea");
+  reasonField.className = "account-moderation-reason";
+  reasonField.rows = 3;
+  reasonField.placeholder = "Explain the violation or concern. This text is emailed to the account holder for flag/freeze actions.";
+
+  const sendEmailLabel = document.createElement("label");
+  sendEmailLabel.className = "account-moderation-checkbox";
+  const sendEmailInput = document.createElement("input");
+  sendEmailInput.type = "checkbox";
+  sendEmailInput.checked = true;
+  sendEmailLabel.append(sendEmailInput, document.createTextNode(" Send email notification"));
+
+  const actions = document.createElement("div");
+  actions.className = "account-moderation-actions";
+
+  const flagButton = document.createElement("button");
+  flagButton.type = "button";
+  flagButton.className = "account-action-button";
+  flagButton.textContent = "Flag account";
+  flagButton.addEventListener("click", () => {
+    applyAccountModeration(account, "flag", reasonField.value, sendEmailInput.checked, flagButton);
+  });
+
+  const freezeButton = document.createElement("button");
+  freezeButton.type = "button";
+  freezeButton.className = "danger-button";
+  freezeButton.textContent = "Freeze account";
+  freezeButton.addEventListener("click", () => {
+    applyAccountModeration(account, "freeze", reasonField.value, sendEmailInput.checked, freezeButton);
+  });
+
+  const unflagButton = document.createElement("button");
+  unflagButton.type = "button";
+  unflagButton.className = "account-action-button";
+  unflagButton.textContent = "Clear flag";
+  unflagButton.disabled = !moderation.isFlagged;
+  unflagButton.addEventListener("click", () => {
+    applyAccountModeration(account, "unflag", "", false, unflagButton);
+  });
+
+  const unfreezeButton = document.createElement("button");
+  unfreezeButton.type = "button";
+  unfreezeButton.className = "account-action-button";
+  unfreezeButton.textContent = "Unfreeze account";
+  unfreezeButton.disabled = !moderation.isFrozen;
+  unfreezeButton.addEventListener("click", () => {
+    applyAccountModeration(account, "unfreeze", "", false, unfreezeButton);
+  });
+
+  actions.append(flagButton, freezeButton, unflagButton, unfreezeButton);
+  section.append(title, pills, details, reasonField, sendEmailLabel, actions);
+  return section;
+}
+
+async function applyAccountModeration(account, action, reason, sendEmail, button) {
+  if (!account?.id) return;
+  const kind = account.kind === "buyer" ? "buyers" : "sellers";
+  const trimmedReason = String(reason || "").trim();
+  if ((action === "flag" || action === "freeze") && !trimmedReason) {
+    window.alert("Enter a reason before flagging or freezing an account.");
+    return;
+  }
+
+  const actionLabels = {
+    flag: "flag",
+    freeze: "freeze",
+    unflag: "clear the flag on",
+    unfreeze: "unfreeze",
+  };
+  const confirmed = window.confirm(
+    `${action === "flag" || action === "freeze" ? "Apply" : "Confirm"} ${actionLabels[action] || action} ${account.displayName || account.id}?`
+  );
+  if (!confirmed) return;
+
+  if (button) {
+    button.disabled = true;
+  }
+  try {
+    setFeedback(`Updating account moderation (${action})...`);
+    const response = await fetch(
+      `/admin/accounts/${encodeURIComponent(kind)}/${encodeURIComponent(account.id)}/moderation`,
+      {
+        method: "POST",
+        headers: {
+          ...adminHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          reason: trimmedReason,
+          sendEmail,
+        }),
+      }
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Account moderation update failed");
+    }
+    if (payload.email?.attempted && payload.email?.status === "failed") {
+      setFeedback(`Moderation saved, but email failed: ${payload.email.error || "delivery error"}`);
+    } else if (payload.email?.status === "sent") {
+      setFeedback(`Account ${action} applied and notice email sent`);
+    } else {
+      setFeedback(`Account ${action} applied`);
+    }
+    await loadAccounts();
+  } catch (error) {
+    setFeedback(error.message || "Account moderation update failed");
+    console.error(error);
+  } finally {
+    if (button) {
+      button.disabled = false;
+    }
+  }
+}
+
 function renderAccounts(payload) {
   if (!accountList || !accountTotalCount || !accountPageInfo || !accountPrevPage || !accountNextPage) return;
 
@@ -631,8 +803,14 @@ function renderAccounts(payload) {
 
     const status = document.createElement("span");
     const linkedActivity = activityTotal(account.activity || {});
-    status.className = linkedActivity > 0 ? "account-status" : "account-status is-inactive";
-    status.textContent = linkedActivity > 0 ? "Has activity" : "Inactive";
+    const moderationLabel = accountModerationStatusLabel(account.accountModeration || {});
+    if (moderationLabel) {
+      status.className = accountModerationStatusClass(account.accountModeration || {});
+      status.textContent = moderationLabel;
+    } else {
+      status.className = linkedActivity > 0 ? "account-status" : "account-status is-inactive";
+      status.textContent = linkedActivity > 0 ? "Has activity" : "Inactive";
+    }
     header.append(titleWrap, status);
 
     const stats = document.createElement("div");
@@ -678,9 +856,9 @@ function renderAccounts(payload) {
     footer.append(note, deleteButton);
 
     if (account.kind === "seller") {
-      card.append(header, buildSellerComplianceSection(account), stats, footer);
+      card.append(header, buildSellerComplianceSection(account), buildAccountModerationSection(account), stats, footer);
     } else {
-      card.append(header, stats, footer);
+      card.append(header, buildAccountModerationSection(account), stats, footer);
     }
     accountList.appendChild(card);
   }

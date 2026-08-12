@@ -19,6 +19,7 @@ import {
   notifyOrderSupportEvent,
   notifyPaymentSucceeded,
   notifyShipmentStatusToBuyer,
+  notifyAccountModeration,
 } from "./pushOrderNotifications.js";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
@@ -90,6 +91,15 @@ import {
   normalizeSellerWelcomeEmailFields,
 } from "./legal/sellerAgreementDocuments.js";
 import { deliverSellerWelcomeEmailIfNeeded, queueSellerWelcomeEmail } from "./services/sellerOnboardingEmail.js";
+import {
+  applyAccountModerationAction,
+  accountModerationBlockPayload,
+  accountModerationRequiresEmail,
+  accountModerationSummary,
+  normalizeAccountModeration,
+  recordAccountModerationEmailResult,
+} from "./domain/phase1/accountModeration.js";
+import { sendAccountModerationEmail } from "./services/accountModerationEmail.js";
 import {
   syncLegalAgreementDocumentsToPrisma,
   upsertSellerAgreementAcceptanceToPrisma,
@@ -833,6 +843,12 @@ function requireAuthenticatedUser(req, res, next) {
     });
     return res.status(401).json({ error: "Authenticated user session required" });
   }
+
+  const moderationBlock = accountModerationBlockForSession(session);
+  if (moderationBlock) {
+    return res.status(moderationBlock.status).json(moderationBlock.body);
+  }
+
   req.auth = session;
   return next();
 }
@@ -846,6 +862,14 @@ function requireAuthenticatedBuyer(req, res, next) {
     });
     return res.status(401).json({ error: "Authenticated buyer session required" });
   }
+
+  const buyers = loadBuyersFile();
+  const buyer = buyers[String(session.buyerEmail || "").trim().toLowerCase()];
+  const moderationBlock = accountModerationBlockPayload("buyer", buyer?.accountModeration);
+  if (moderationBlock) {
+    return res.status(moderationBlock.status).json(moderationBlock.body);
+  }
+
   req.auth = session;
   return next();
 }
@@ -859,6 +883,14 @@ function requireAuthenticatedSeller(req, res, next) {
     });
     return res.status(401).json({ error: "Authenticated seller session required" });
   }
+
+  const sellers = loadSellersFile();
+  const seller = sellers[String(session.sellerId || "").trim()];
+  const moderationBlock = accountModerationBlockPayload("seller", seller?.accountModeration);
+  if (moderationBlock) {
+    return res.status(moderationBlock.status).json(moderationBlock.body);
+  }
+
   req.auth = session;
   return next();
 }
@@ -1896,6 +1928,7 @@ function normalizeSellerRecord(record = {}, sellerId = "") {
     membershipStatus: effectiveMembership.membershipStatus,
     profile: normalizeSellerPublicProfile(record.profile, sellerId, record.businessName),
     storeSettings: normalizeSellerStoreSettings(record.storeSettings, record.profile),
+    accountModeration: normalizeAccountModeration(record.accountModeration),
   };
 }
 
@@ -2260,6 +2293,7 @@ function normalizeBuyerRecord(record = {}, email = "") {
     emailVerifiedAt: record.emailVerifiedAt || null,
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: record.updatedAt || new Date().toISOString(),
+    accountModeration: normalizeAccountModeration(record.accountModeration),
   };
 }
 
@@ -3108,6 +3142,9 @@ app.post("/auth/buyer-session", authLimiter, requireAppClient, (req, res) => {
     if (!buyer) {
       return res.status(404).json({ error: "Buyer account not found" });
     }
+    if (respondIfAccountModerationBlocked(res, "buyer", buyer)) {
+      return;
+    }
     if (buyer.emailVerified !== true) {
       return res.status(403).json({
         error: "Buyer email verification required",
@@ -3125,6 +3162,19 @@ app.post("/auth/buyer-session", authLimiter, requireAppClient, (req, res) => {
       token,
       role: "buyer",
       buyerEmail: email,
+      accountModeration: accountModerationSummary(buyer.accountModeration),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/auth/account-moderation-status", authLimiter, requireAppClient, requireAuthenticatedUser, (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      role: req.auth?.role || null,
+      accountModeration: accountModerationStatusForSession(req.auth),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3201,6 +3251,9 @@ app.post("/auth/buyer-login", authLimiter, requireAppClient, (req, res) => {
     if (!buyer) {
       return res.status(404).json({ error: "Buyer account not found" });
     }
+    if (respondIfAccountModerationBlocked(res, "buyer", buyer)) {
+      return;
+    }
     if (buyer.emailVerified !== true) {
       return res.status(403).json({
         error: "Buyer email verification required",
@@ -3237,6 +3290,7 @@ app.post("/auth/buyer-login", authLimiter, requireAppClient, (req, res) => {
       role: "buyer",
       buyerEmail: email,
       fullName: signedInBuyer.fullName || "",
+      accountModeration: accountModerationSummary(signedInBuyer.accountModeration),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3458,6 +3512,9 @@ app.post("/auth/seller-session", authLimiter, requireAppClient, requireAuthentic
       }
       return res.status(resolved.status).json({ error: resolved.error });
     }
+    if (respondIfAccountModerationBlocked(res, "seller", resolved.seller)) {
+      return;
+    }
 
     const token = issueUserSessionToken({
       role: "seller",
@@ -3469,6 +3526,7 @@ app.post("/auth/seller-session", authLimiter, requireAppClient, requireAuthentic
       token,
       role: "seller",
       sellerId: resolved.sellerId,
+      accountModeration: accountModerationSummary(resolved.seller?.accountModeration),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3495,6 +3553,9 @@ app.post("/auth/seller-session-bootstrap", authLimiter, requireAppClient, (req, 
       }
       return res.status(resolved.status).json({ error: resolved.error });
     }
+    if (respondIfAccountModerationBlocked(res, "seller", resolved.seller)) {
+      return;
+    }
 
     const token = issueUserSessionToken({
       role: "seller",
@@ -3506,6 +3567,7 @@ app.post("/auth/seller-session-bootstrap", authLimiter, requireAppClient, (req, 
       token,
       role: "seller",
       sellerId: resolved.sellerId,
+      accountModeration: accountModerationSummary(resolved.seller?.accountModeration),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3530,6 +3592,9 @@ app.post("/auth/seller-login", authLimiter, requireAppClient, (req, res) => {
     }
 
     const [sellerId, seller] = entry;
+    if (respondIfAccountModerationBlocked(res, "seller", seller)) {
+      return;
+    }
     const passwordHash = hashSellerPassword(password);
     if (seller.passwordHash && seller.passwordHash !== passwordHash) {
       return res.status(401).json({ error: "Incorrect seller password" });
@@ -3556,6 +3621,7 @@ app.post("/auth/seller-login", authLimiter, requireAppClient, (req, res) => {
       sellerId,
       sellerEmail,
       businessName: seller.businessName || seller.profile?.displayName || sellerId,
+      accountModeration: accountModerationSummary(seller.accountModeration),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -6865,6 +6931,84 @@ function paginateAdminAccounts(accounts, page, pageSize) {
   return { accounts: accounts.slice(start, start + pageSize), page: safePage, pageSize, total, pages };
 }
 
+function respondIfAccountModerationBlocked(res, kind, accountRecord) {
+  const moderationBlock = accountModerationBlockPayload(kind, accountRecord?.accountModeration);
+  if (!moderationBlock) return false;
+  res.status(moderationBlock.status).json(moderationBlock.body);
+  return true;
+}
+
+function accountModerationBlockForSession(session = {}) {
+  if (session.role === "seller") {
+    const sellers = loadSellersFile();
+    const seller = sellers[String(session.sellerId || "").trim()];
+    return accountModerationBlockPayload("seller", seller?.accountModeration);
+  }
+  if (session.role === "buyer") {
+    const buyers = loadBuyersFile();
+    const buyer = buyers[String(session.buyerEmail || "").trim().toLowerCase()];
+    return accountModerationBlockPayload("buyer", buyer?.accountModeration);
+  }
+  return null;
+}
+
+function accountModerationStatusForSession(session = {}) {
+  if (session.role === "seller") {
+    const sellers = loadSellersFile();
+    const seller = sellers[String(session.sellerId || "").trim()];
+    return accountModerationSummary(seller?.accountModeration);
+  }
+  if (session.role === "buyer") {
+    const buyers = loadBuyersFile();
+    const buyer = buyers[String(session.buyerEmail || "").trim().toLowerCase()];
+    return accountModerationSummary(buyer?.accountModeration);
+  }
+  return accountModerationSummary();
+}
+
+async function deliverAccountModerationEmailIfNeeded({
+  kind,
+  accountId,
+  accountRecord,
+  moderation,
+  action,
+  reason,
+  sendEmail = true,
+}) {
+  let nextModeration = normalizeAccountModeration(moderation);
+  if (!sendEmail || !accountModerationRequiresEmail(action)) {
+    nextModeration = recordAccountModerationEmailResult(nextModeration, { skipped: true });
+    return { moderation: nextModeration, email: { sent: false, skipped: true } };
+  }
+  if (!transactionalEmailConfigured()) {
+    nextModeration = recordAccountModerationEmailResult(nextModeration, {
+      error: "Email provider is not configured",
+    });
+    return { moderation: nextModeration, email: { sent: false, error: "Email provider is not configured" } };
+  }
+
+  const recipient = String(accountRecord?.email || accountId || "").trim().toLowerCase();
+  try {
+    const result = await sendAccountModerationEmail({
+      sendTransactionalEmail,
+      to: recipient,
+      accountKind: kind,
+      action,
+      displayName:
+        kind === "buyer"
+          ? accountRecord?.fullName || recipient
+          : accountRecord?.businessName || accountRecord?.profile?.displayName || accountId,
+      reason,
+      accountId,
+    });
+    nextModeration = recordAccountModerationEmailResult(nextModeration, { sent: true });
+    return { moderation: nextModeration, email: { sent: true, messageId: result?.messageId || null } };
+  } catch (err) {
+    nextModeration = recordAccountModerationEmailResult(nextModeration, { error: err.message });
+    return { moderation: nextModeration, email: { sent: false, error: err.message } };
+  }
+}
+
 app.get("/admin/accounts", adminMutationLimiter, requireAdmin, async (req, res) => {
   try {
     const kind = String(req.query.kind || "sellers").trim().toLowerCase();
@@ -6888,6 +7032,7 @@ app.get("/admin/accounts", adminMutationLimiter, requireAdmin, async (req, res) 
         displayName: buyer.fullName || email,
         createdAt: buyer.createdAt || null,
         updatedAt: buyer.updatedAt || null,
+        accountModeration: accountModerationSummary(buyer.accountModeration),
         activity: buyerAccountActivity(email, orders, exchangeRequests, customOrderRequests, productReviews),
       }));
     } else {
@@ -6917,6 +7062,7 @@ app.get("/admin/accounts", adminMutationLimiter, requireAdmin, async (req, res) 
           },
           appOnboardingCompletedAt: sellerRecord.appOnboardingCompletedAt || null,
           sellerPoliciesAcknowledged: sellerRecord.sellerPoliciesAcknowledged === true,
+          accountModeration: accountModerationSummary(sellerRecord.accountModeration),
           createdAt: profile.joinedAt || null,
           updatedAt: sellerRecord.membership?.lastSyncedAt || null,
           activity: sellerAccountActivity(
@@ -6989,6 +7135,122 @@ app.post("/admin/sellers/:sellerId/resend-welcome-email", adminMutationLimiter, 
   } catch (err) {
     console.error("admin resend welcome email error:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/accounts/:kind/:accountId/moderation", adminMutationLimiter, requireAdmin, async (req, res) => {
+  try {
+    const kind = String(req.params.kind || "").trim().toLowerCase();
+    const accountId = String(req.params.accountId || "").trim();
+    const action = String(req.body?.action || "").trim().toLowerCase();
+    const reason = String(req.body?.reason || "").trim();
+    const sendEmail = req.body?.sendEmail !== false;
+
+    if (!["sellers", "buyers"].includes(kind)) {
+      return res.status(400).json({ error: "kind must be sellers or buyers" });
+    }
+    if (!accountId) {
+      return res.status(400).json({ error: "accountId is required" });
+    }
+
+    let accountRecord;
+    let displayName;
+    let savedAccountId;
+
+    if (kind === "buyers") {
+      const email = accountId.toLowerCase();
+      const buyers = loadBuyersFile();
+      if (!buyers[email]) {
+        return res.status(404).json({ error: "Buyer account not found" });
+      }
+      const nextModeration = applyAccountModerationAction(buyers[email].accountModeration, { action, reason });
+      const emailResult = await deliverAccountModerationEmailIfNeeded({
+        kind: "buyer",
+        accountId: email,
+        accountRecord: buyers[email],
+        moderation: nextModeration,
+        action,
+        reason,
+        sendEmail,
+      });
+      buyers[email] = normalizeBuyerRecord(
+        {
+          ...buyers[email],
+          accountModeration: emailResult.moderation,
+          updatedAt: new Date().toISOString(),
+        },
+        email
+      );
+      saveBuyersFile(buyers);
+      accountRecord = buyers[email];
+      displayName = accountRecord.fullName || email;
+      savedAccountId = email;
+    } else {
+      const sellerId = accountId;
+      const sellers = loadSellersFile();
+      if (!sellers[sellerId]) {
+        return res.status(404).json({ error: "Seller account not found" });
+      }
+      const nextModeration = applyAccountModerationAction(sellers[sellerId].accountModeration, { action, reason });
+      const emailResult = await deliverAccountModerationEmailIfNeeded({
+        kind: "seller",
+        accountId: sellerId,
+        accountRecord: sellers[sellerId],
+        moderation: nextModeration,
+        action,
+        reason,
+        sendEmail,
+      });
+      sellers[sellerId] = normalizeSellerRecord(
+        {
+          ...sellers[sellerId],
+          accountModeration: emailResult.moderation,
+        },
+        sellerId
+      );
+      saveSellersFile(sellers);
+      accountRecord = sellers[sellerId];
+      displayName = accountRecord.businessName || accountRecord.profile?.displayName || sellerId;
+      savedAccountId = sellerId;
+    }
+
+    auditLog(
+      auditContext(req, {
+        action: "admin_account_moderation",
+        accountKind: kind === "buyers" ? "buyer" : "seller",
+        accountId: savedAccountId,
+        moderationAction: action,
+        reason: reason || null,
+        sendEmail,
+        emailSent: accountRecord.accountModeration?.lastEmailStatus === "sent",
+      })
+    );
+
+    if (accountModerationRequiresEmail(action)) {
+      await notifyAccountModeration({
+        accountKind: kind === "buyers" ? "buyer" : "seller",
+        accountId: savedAccountId,
+        buyerEmail: kind === "buyers" ? savedAccountId : accountRecord.email,
+        action,
+        reason,
+      });
+    }
+
+    res.json({
+      ok: true,
+      kind: kind === "buyers" ? "buyer" : "seller",
+      id: savedAccountId,
+      displayName,
+      accountModeration: accountModerationSummary(accountRecord.accountModeration),
+      email: {
+        attempted: sendEmail && accountModerationRequiresEmail(action),
+        status: accountRecord.accountModeration?.lastEmailStatus || null,
+        error: accountRecord.accountModeration?.lastEmailError || null,
+      },
+    });
+  } catch (err) {
+    console.error("admin account moderation error:", err);
+    res.status(400).json({ error: err.message });
   }
 });
 

@@ -1,7 +1,169 @@
 import Foundation
+import Combine
 #if canImport(Security)
 import Security
 #endif
+
+struct AccountModerationStatus: Codable, Equatable {
+    var isFlagged: Bool = false
+    var isFrozen: Bool = false
+    var flagReason: String?
+    var freezeReason: String?
+    var flaggedAt: String?
+    var frozenAt: String?
+    var lastAction: String?
+    var lastActionAt: String?
+    var lastEmailStatus: String?
+    var lastEmailSentAt: String?
+    var lastEmailError: String?
+
+    var hasModerationNotice: Bool {
+        isFlagged || isFrozen
+    }
+
+    var headline: String {
+        if isFrozen {
+            return "Account frozen"
+        }
+        if isFlagged {
+            return "Account flagged for review"
+        }
+        return ""
+    }
+
+    var detailMessage: String {
+        if isFrozen {
+            if let freezeReason, !freezeReason.isEmpty {
+                return freezeReason
+            }
+            return "Your account is temporarily frozen. Check your email for details or contact support@tenbelow.com."
+        }
+        if isFlagged {
+            if let flagReason, !flagReason.isEmpty {
+                return flagReason
+            }
+            return "Your account was flagged for review. Check your email for details."
+        }
+        return ""
+    }
+
+    var supportFooter: String {
+        "If you believe this was a mistake, contact support@tenbelow.com."
+    }
+}
+
+struct AccountModerationSessionError: Error {
+    let status: AccountModerationStatus
+}
+
+private struct AccountModerationStatusResponse: Decodable {
+    let ok: Bool?
+    let role: String?
+    let accountModeration: AccountModerationStatus?
+}
+
+private struct AccountModerationBlockedResponse: Decodable {
+    let error: String?
+    let code: String?
+    let accountModeration: AccountModerationStatus?
+}
+
+enum AccountModerationAPI {
+    static func fetchCurrentStatus() async throws -> AccountModerationStatus {
+        let url = CheckoutAPI.baseURL.appendingPathComponent("auth/account-moderation-status")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+
+        let (data, response) = try await URLSession.tenBelow.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        if http.statusCode == 403,
+           let blocked = try? JSONDecoder().decode(AccountModerationBlockedResponse.self, from: data),
+           let moderation = blocked.accountModeration {
+            return moderation
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        let payload = try JSONDecoder().decode(AccountModerationStatusResponse.self, from: data)
+        return payload.accountModeration ?? AccountModerationStatus()
+    }
+}
+
+@MainActor
+final class AccountModerationStore: ObservableObject {
+    static let shared = AccountModerationStore()
+
+    @Published private(set) var status = AccountModerationStatus()
+
+    private init() {
+        status = Self.loadCachedStatus()
+    }
+
+    var hasModerationNotice: Bool {
+        status.hasModerationNotice
+    }
+
+    func apply(_ next: AccountModerationStatus?) {
+        let resolved = next ?? AccountModerationStatus()
+        status = resolved
+        Self.cacheStatus(resolved)
+    }
+
+    func refresh() async {
+        guard AppConstants.isBackendConfigured else {
+            apply(nil)
+            return
+        }
+        guard MarketplaceAuthSession.hasAuthenticatedSession else {
+            apply(nil)
+            return
+        }
+
+        do {
+            let remote = try await AccountModerationAPI.fetchCurrentStatus()
+            apply(remote)
+        } catch {
+            #if DEBUG
+            print("Account moderation refresh failed: \(error.localizedDescription)")
+            #endif
+        }
+    }
+
+    func clear() {
+        apply(nil)
+    }
+
+    private static func cacheKey() -> String {
+        let defaults = UserDefaults.standard
+        let role = defaults.string(forKey: "userRole") ?? "guest"
+        if role == "seller" {
+            let sellerId = defaults.string(forKey: "sellerSellerId") ?? ""
+            return "accountModeration.cache.seller.\(sellerId)"
+        }
+        let email = defaults.string(forKey: "buyerEmail")?.lowercased() ?? ""
+        return "accountModeration.cache.buyer.\(email)"
+    }
+
+    private static func loadCachedStatus() -> AccountModerationStatus {
+        guard let data = UserDefaults.standard.data(forKey: cacheKey()),
+              let decoded = try? JSONDecoder().decode(AccountModerationStatus.self, from: data) else {
+            return AccountModerationStatus()
+        }
+        return decoded
+    }
+
+    private static func cacheStatus(_ status: AccountModerationStatus) {
+        guard let data = try? JSONEncoder().encode(status) else { return }
+        UserDefaults.standard.set(data, forKey: cacheKey())
+    }
+}
 
 private struct BuyerSessionRequest: Encodable {
     let email: String
@@ -22,6 +184,13 @@ private struct MarketplaceAuthSessionResponse: Decodable {
     let role: String
     let buyerEmail: String?
     let sellerId: String?
+    let accountModeration: AccountModerationStatus?
+}
+
+private struct MarketplaceAuthErrorResponse: Decodable {
+    let error: String?
+    let code: String?
+    let accountModeration: AccountModerationStatus?
 }
 
 private struct MarketplaceSessionTokenClaims {
@@ -235,6 +404,8 @@ enum MarketplaceAuthSession {
         } else {
             clearSellerSession()
         }
+
+        await AccountModerationStore.shared.refresh()
     }
 
     private nonisolated static func currentBearerToken() -> String? {
@@ -262,6 +433,14 @@ enum MarketplaceAuthSession {
                 body: BuyerSessionRequest(email: email)
             )
             storeBuyerSessionToken(response.token)
+            await MainActor.run {
+                AccountModerationStore.shared.apply(response.accountModeration)
+            }
+        } catch let moderation as AccountModerationSessionError {
+            await MainActor.run {
+                AccountModerationStore.shared.apply(moderation.status)
+            }
+            clearBuyerSession()
         } catch {
             clearBuyerSession()
         }
@@ -297,6 +476,15 @@ enum MarketplaceAuthSession {
                 reconcileLocalSellerIdentity(
                     canonicalSellerId: response.sellerId ?? tokenSellerId
                 )
+                await MainActor.run {
+                    AccountModerationStore.shared.apply(response.accountModeration)
+                }
+                return
+            } catch let moderation as AccountModerationSessionError {
+                await MainActor.run {
+                    AccountModerationStore.shared.apply(moderation.status)
+                }
+                clearSellerSession()
                 return
             } catch {
                 // Fall through to bootstrap when refresh fails (expired token, network blip, etc.).
@@ -312,6 +500,14 @@ enum MarketplaceAuthSession {
             reconcileLocalSellerIdentity(
                 canonicalSellerId: response.sellerId ?? tokenSellerId
             )
+            await MainActor.run {
+                AccountModerationStore.shared.apply(response.accountModeration)
+            }
+        } catch let moderation as AccountModerationSessionError {
+            await MainActor.run {
+                AccountModerationStore.shared.apply(moderation.status)
+            }
+            clearSellerSession()
         } catch let urlError as URLError where urlError.code == .notConnectedToInternet || urlError.code == .networkConnectionLost || urlError.code == .timedOut {
             // Stay signed in locally when offline; seller tools can retry when connectivity returns.
         } catch {
@@ -401,7 +597,18 @@ enum MarketplaceAuthSession {
         request.httpBody = try JSONEncoder().encode(body)
 
         let (data, response) = try await URLSession.tenBelow.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        if http.statusCode == 403,
+           let blocked = try? JSONDecoder().decode(MarketplaceAuthErrorResponse.self, from: data),
+           let moderation = blocked.accountModeration,
+           moderation.isFrozen {
+            throw AccountModerationSessionError(status: moderation)
+        }
+
+        guard (200...299).contains(http.statusCode) else {
             throw URLError(.userAuthenticationRequired)
         }
 
