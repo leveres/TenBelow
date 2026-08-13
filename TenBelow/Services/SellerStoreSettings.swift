@@ -17,6 +17,7 @@ struct SellerStoreSettingsPolicies: Codable, Equatable {
     var returnWindowDays: Int
     var allowsExchanges: Bool
     var allowsCancellations: Bool
+    var allowsRefunds: Bool = false
     var cancellationWindowHours: Int
     var policyNote: String
 }

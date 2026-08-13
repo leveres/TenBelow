@@ -46,6 +46,14 @@ enum ExchangeReasonCode: String, Codable, CaseIterable, Identifiable {
             return "Tell us clearly what went wrong."
         }
     }
+
+    static let refundEligibleCases: [ExchangeReasonCode] = [
+        .damaged,
+        .defective,
+        .wrongItem,
+        .poorQuality,
+        .missingPart,
+    ]
 }
 
 enum ExchangeRequestedResolution: String, Codable, CaseIterable, Identifiable {

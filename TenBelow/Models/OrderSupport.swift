@@ -46,6 +46,7 @@ struct OrderSupportRequest: Identifiable, Codable, Hashable {
     var sellerId: String
     var shipmentId: String?
     var reason: String
+    var reasonCode: String?
     var requestedBy: String
     var resolutionNote: String?
     var evidenceAssets: [SupportEvidenceAsset]?

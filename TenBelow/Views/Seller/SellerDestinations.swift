@@ -2708,13 +2708,22 @@ struct SellerPoliciesView: View {
             VStack(alignment: .leading, spacing: TBTheme.spacingLG) {
                 SellerSettingsHeader(
                     title: "Policies",
-                    subtitle: "Define the return, exchange, and cancellation rules shoppers should feel confident about."
+                    subtitle: MarketplacePolicyCopy.sellerPoliciesSubtitle
                 )
 
-                SellerSettingsCard(title: "Returns & Exchanges") {
+                SellerSettingsCard(title: MarketplacePolicyCopy.platformStandardsTitle) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        PolicyOutlineRow(text: "One exchange per item for damage, defect, wrong item, or material flaw.")
+                        PolicyOutlineRow(text: "Photo proof required within seven days of delivery.")
+                        PolicyOutlineRow(text: "Refunds are optional—you decide whether to accept them.")
+                        PolicyOutlineRow(text: "Cancellations apply only while an order is still preparing.")
+                    }
+                }
+
+                SellerSettingsCard(title: "After delivery") {
                     SellerSettingsToggleField(
                         title: "Accept returns",
-                        subtitle: "Allow buyers to request a return after delivery.",
+                        subtitle: MarketplacePolicyCopy.sellerAcceptReturnsSubtitle,
                         isOn: $draft.acceptsReturns
                     )
 
@@ -2724,15 +2733,21 @@ struct SellerPoliciesView: View {
 
                     SellerSettingsToggleField(
                         title: "Allow exchanges",
-                        subtitle: "Let buyers exchange size, color, or replacement-ready items.",
+                        subtitle: MarketplacePolicyCopy.sellerAllowExchangesSubtitle,
                         isOn: $draft.allowsExchanges
+                    )
+
+                    SellerSettingsToggleField(
+                        title: "Allow refund requests",
+                        subtitle: MarketplacePolicyCopy.sellerAllowRefundsSubtitle,
+                        isOn: $draft.allowsRefunds
                     )
                 }
 
-                SellerSettingsCard(title: "Cancellations") {
+                SellerSettingsCard(title: "Before shipping") {
                     SellerSettingsToggleField(
                         title: "Allow order cancellations",
-                        subtitle: "Give buyers a short grace period before production starts.",
+                        subtitle: MarketplacePolicyCopy.sellerAllowCancellationsSubtitle,
                         isOn: $draft.allowsCancellations
                     )
 
@@ -2741,11 +2756,11 @@ struct SellerPoliciesView: View {
                     }
                 }
 
-                SellerSettingsCard(title: "Policy Note") {
+                SellerSettingsCard(title: MarketplacePolicyCopy.sellerPolicyNoteFieldTitle) {
                     SellerSettingsTextEditor(
-                        title: "Visible note",
+                        title: "Visible on your shop",
                         text: $draft.policyNote,
-                        prompt: "Custom printed items may vary slightly in finish, but every order is quality checked before it ships."
+                        prompt: MarketplacePolicyCopy.sellerPolicyNotePrompt
                     )
                 }
 
@@ -2862,7 +2877,7 @@ struct SupportView: View {
                     NavigationLink {
                         LegalDocumentView(document: .exchangePolicy)
                     } label: {
-                        supportLinkRow(title: "Exchange Policy", subtitle: "Buyer-facing exchange guidelines")
+                        supportLinkRow(title: "Exchange Policy", subtitle: "How buyers request a one-time exchange")
                     }
                     .buttonStyle(.plain)
 
@@ -4371,6 +4386,7 @@ private struct SellerPolicySettingsDraft: Codable {
     var returnWindowDays: Int
     var allowsExchanges: Bool
     var allowsCancellations: Bool
+    var allowsRefunds: Bool = false
     var cancellationWindowHours: Int
     var policyNote: String
 
@@ -4386,8 +4402,9 @@ private struct SellerPolicySettingsDraft: Codable {
                 returnWindowDays: 14,
                 allowsExchanges: true,
                 allowsCancellations: true,
+                allowsRefunds: false,
                 cancellationWindowHours: 12,
-                policyNote: "Because each product is made to order, custom color requests and personalized pieces may be final sale."
+                policyNote: MarketplacePolicyCopy.defaultSellerPolicyNote
             )
         )
     }
@@ -4402,6 +4419,7 @@ private struct SellerPolicySettingsDraft: Codable {
         returnWindowDays = policies.returnWindowDays
         allowsExchanges = policies.allowsExchanges
         allowsCancellations = policies.allowsCancellations
+        allowsRefunds = policies.allowsRefunds
         cancellationWindowHours = policies.cancellationWindowHours
         policyNote = policies.policyNote
     }
@@ -4412,6 +4430,7 @@ private struct SellerPolicySettingsDraft: Codable {
             returnWindowDays: returnWindowDays,
             allowsExchanges: allowsExchanges,
             allowsCancellations: allowsCancellations,
+            allowsRefunds: allowsRefunds,
             cancellationWindowHours: cancellationWindowHours,
             policyNote: policyNote
         )

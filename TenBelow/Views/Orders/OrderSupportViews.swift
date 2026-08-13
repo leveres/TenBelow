@@ -363,26 +363,10 @@ struct CancelRequestSheet: View {
     }
 
     private var warningBanner: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(.orange)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Cancellation is not guaranteed")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.orange)
-                Text("\(shipment.sellerName) must approve before anything is cancelled. If they've already started preparing your order, they may deny it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(12)
-        .background(Color.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.orange.opacity(0.22), lineWidth: 1)
+        PolicyNoticeCard(
+            title: MarketplacePolicyCopy.buyerCancelNotGuaranteedTitle,
+            bodyText: MarketplacePolicyCopy.buyerCancelNotGuaranteedBody(sellerName: shipment.sellerName),
+            tone: .caution
         )
     }
 
@@ -391,7 +375,6 @@ struct CancelRequestSheet: View {
             Text("What happens next")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .textCase(.uppercase)
 
             VStack(alignment: .leading, spacing: 6) {
                 stepRow(number: "1", text: "Your request is sent to \(shipment.sellerName)")
@@ -445,6 +428,7 @@ struct RefundRequestSheet: View {
     let order: Order
     let shipment: Shipment
 
+    @State private var selectedReasonCode: ExchangeReasonCode?
     @State private var reason = ""
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var pickedImages: [UIImage] = []
@@ -455,6 +439,12 @@ struct RefundRequestSheet: View {
 
     private let maxImages = 3
 
+    private var canSubmit: Bool {
+        selectedReasonCode != nil
+            && reason.trimmingCharacters(in: .whitespacesAndNewlines).count >= 8
+            && !pickedImages.isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -463,12 +453,54 @@ struct RefundRequestSheet: View {
                         .font(.tbSectionTitle)
                         .foregroundStyle(TBTheme.deepSky)
 
-                    Text("Use this after shipping if something arrived damaged, defective, or not as described. Refunds are reviewed by \(shipment.sellerName).")
-                        .font(.tbBody)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    PolicyNoticeCard(
+                        bodyText: MarketplacePolicyCopy.buyerRefundIntro,
+                        tone: .support
+                    )
 
-                    TextField("Describe the issue (required)", text: $reason, axis: .vertical)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("What went wrong?")
+                            .font(.tbBodyStrong)
+
+                        ForEach(ExchangeReasonCode.refundEligibleCases) { code in
+                            Button {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    selectedReasonCode = code
+                                }
+                            } label: {
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: selectedReasonCode == code ? "largecircle.fill.circle" : "circle")
+                                        .foregroundStyle(selectedReasonCode == code ? TBTheme.deepSky : .secondary)
+                                        .padding(.top, 2)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(code.title)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(.primary)
+                                        Text(code.helperText)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(10)
+                                .background(
+                                    selectedReasonCode == code ? TBTheme.deepSky.opacity(0.08) : Color.white.opacity(0.55),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(
+                                            selectedReasonCode == code ? TBTheme.deepSky.opacity(0.24) : TBTheme.frostEdge,
+                                            lineWidth: 1
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    TextField("Describe the damage or defect (required)", text: $reason, axis: .vertical)
                         .lineLimit(4...8)
                         .padding(12)
                         .background(Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -496,7 +528,7 @@ struct RefundRequestSheet: View {
                         }
                     }
                     .buttonStyle(PremiumGlassPillButtonStyle(isEmphasized: true))
-                    .disabled(reason.trimmingCharacters(in: .whitespacesAndNewlines).count < 8 || isSubmitting)
+                    .disabled(!canSubmit || isSubmitting)
                 }
                 .padding(16)
             }
@@ -526,7 +558,7 @@ struct RefundRequestSheet: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(TBTheme.deepSky)
                 Spacer()
-                Text("Optional · up to 3 photos")
+                Text("Required · at least 1 photo")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -632,6 +664,12 @@ struct RefundRequestSheet: View {
     }
 
     private func submit() async {
+        guard let selectedReasonCode else { return }
+        guard !pickedImages.isEmpty else {
+            orderStore.orderSupportError = "Attach at least one photo showing the damage."
+            return
+        }
+
         isSubmitting = true
         uploadProgress = nil
         defer { isSubmitting = false; uploadProgress = nil }
@@ -641,7 +679,8 @@ struct RefundRequestSheet: View {
             type: .refund,
             sellerId: shipment.sellerId,
             shipmentId: shipment.id,
-            reason: reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            reason: reason.trimmingCharacters(in: .whitespacesAndNewlines),
+            reasonCode: selectedReasonCode.rawValue
         )
         guard orderStore.orderSupportError == nil else { return }
 
@@ -760,6 +799,12 @@ struct OrderSupportRequestsSection: View {
                         .strokeBorder(Color.orange.opacity(0.18), lineWidth: 1)
                 )
             } else {
+                if let reasonCode = request.reasonCode,
+                   let code = ExchangeReasonCode(rawValue: reasonCode) {
+                    Text(code.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(TBTheme.deepSky)
+                }
                 Text(request.reason)
                     .font(.tbCaption)
                     .foregroundStyle(.secondary)

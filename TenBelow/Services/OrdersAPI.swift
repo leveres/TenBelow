@@ -187,18 +187,26 @@ enum OrdersAPI {
         type: OrderSupportRequestType,
         sellerId: String,
         shipmentId: String,
-        reason: String
+        reason: String,
+        reasonCode: String? = nil
     ) async throws -> Order {
         struct Body: Encodable {
             let type: String
             let sellerId: String
             let shipmentId: String
             let reason: String
+            let reasonCode: String?
         }
         let request = try authorizedJSONRequest(
             path: "orders/\(orderId)/support-requests",
             method: "POST",
-            body: Body(type: type.rawValue, sellerId: sellerId, shipmentId: shipmentId, reason: reason)
+            body: Body(
+                type: type.rawValue,
+                sellerId: sellerId,
+                shipmentId: shipmentId,
+                reason: reason,
+                reasonCode: reasonCode
+            )
         )
         let (data, resp) = try await URLSession.tenBelow.data(for: request)
         return try decodeOrderResponse(data: data, resp: resp)

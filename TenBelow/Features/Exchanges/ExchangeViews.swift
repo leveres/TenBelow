@@ -99,10 +99,10 @@ private struct ExchangeIntroView: View {
                             .font(.tbProductTitleXL)
                             .foregroundStyle(TBTheme.deepSky)
 
-                        Text("All sales are final. Eligible orders may request a one-time exchange for the same item if it arrived damaged, defective, incorrect, or materially flawed.")
-                            .font(.tbBody)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        PolicyNoticeCard(
+                            bodyText: MarketplacePolicyCopy.buyerExchangeIntro,
+                            tone: .exchange
+                        )
 
                         Text("Select the item you'd like reviewed.")
                             .font(.tbBodyStrong)
@@ -125,7 +125,7 @@ private struct ExchangeIntroView: View {
                 Button {
                     showExchangePolicyBrowser = true
                 } label: {
-                    Text("Read Full Exchange Policy")
+                    Text(MarketplacePolicyCopy.readExchangePolicyButton)
                         .font(.tbBodyStrong)
                         .foregroundStyle(TBTheme.icyBlue)
                         .frame(maxWidth: .infinity, alignment: .leading)

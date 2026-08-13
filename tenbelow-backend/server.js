@@ -71,10 +71,12 @@ import {
 } from "./mediaUploadPolicy.js";
 import {
   applyApprovedSupportRequest,
+  attachSupportEligibilityToOrder,
   normalizeOrderMessage,
   normalizeOrderSupportFields,
   normalizeSupportRequest,
   orderMessagesForSeller,
+  validateSupportRequestApproval,
   validateSupportRequestCreate,
 } from "./orderSupport.js";
 import {
@@ -1965,10 +1967,11 @@ function normalizeSellerStoreSettings(raw = {}, profile = {}) {
       returnWindowDays: Math.max(0, asFiniteNumber(policies.returnWindowDays, 14)),
       allowsExchanges: policies.allowsExchanges !== false,
       allowsCancellations: policies.allowsCancellations !== false,
+      allowsRefunds: policies.allowsRefunds === true,
       cancellationWindowHours: Math.max(0, asFiniteNumber(policies.cancellationWindowHours, 12)),
       policyNote: String(
         policies.policyNote ||
-          "Because each product is made to order, custom color requests and personalized pieces may be final sale."
+          "Made-to-order pieces may vary slightly in finish. Every order is checked before it ships."
       ).trim(),
     },
     updatedAt: raw.updatedAt || null,
@@ -2642,6 +2645,14 @@ function hydrateOrderRecord(order = {}) {
   };
 }
 
+function attachSupportEligibilityToOrders(orders = [], sellersMap = {}) {
+  return orders.map((order) =>
+    attachSupportEligibilityToOrder(hydrateOrderRecord(order), sellersMap, (seller) =>
+      normalizeSellerStoreSettings(seller.storeSettings, seller.profile || {}).policies
+    )
+  );
+}
+
 function loadHydratedOrders() {
   return loadOrdersFile().map((order) => hydrateOrderRecord(order));
 }
@@ -2672,7 +2683,9 @@ function respondWithParticipantOrder(res, order, auth) {
   if (auth?.role === "seller") {
     return res.json({ order: sellerScopedOrder(order, auth.sellerId) });
   }
-  return res.json({ order });
+  const sellers = loadSellersFile();
+  const [enriched] = attachSupportEligibilityToOrders([order], sellers);
+  return res.json({ order: enriched });
 }
 
 function sellerCanAccessOrder(order, sellerId) {
@@ -4388,7 +4401,8 @@ app.post("/orders/buyer", requireAppClient, requireAuthenticatedBuyer, (req, res
     }
     orders = orders.filter((order) => (order.buyerEmail || "").trim().toLowerCase() === authEmail);
     orders.sort((lhs, rhs) => new Date(rhs.createdAt).getTime() - new Date(lhs.createdAt).getTime());
-    res.json({ orders: orders.map((order) => hydrateOrderRecord(order)) });
+    const sellers = loadSellersFile();
+    res.json({ orders: attachSupportEligibilityToOrders(orders, sellers) });
   } catch (err) {
     console.error("orders buyer lookup error:", err);
     res.status(500).json({ error: err.message });
@@ -4951,6 +4965,7 @@ app.post(
       const shipmentId = String(req.body?.shipmentId || "").trim();
       const type = String(req.body?.type || "").trim().toLowerCase();
       const reason = String(req.body?.reason || "").trim();
+      const reasonCode = String(req.body?.reasonCode || "").trim().toLowerCase();
 
       const order = findOrderForParticipant(orderId, req.auth);
       if (!order) return res.status(404).json({ error: "Order not found" });
@@ -4962,12 +4977,19 @@ app.post(
         return res.status(404).json({ error: "Seller shipment not found in this order" });
       }
 
+      const sellers = loadSellersFile();
+      const seller = sellers[sellerId] || {};
+      const sellerPolicies = normalizeSellerStoreSettings(seller.storeSettings, seller.profile || {}).policies;
+
       const shipment = order.shipments.find((entry) => entry.id === shipmentId && entry.sellerId === sellerId);
       const validation = validateSupportRequestCreate({
         type,
         reason,
+        reasonCode,
         shipment,
         sellerId,
+        sellerPolicies,
+        orderCreatedAt: order.createdAt,
         existingRequests: order.supportRequests,
       });
       if (!validation.ok) {
@@ -4981,6 +5003,7 @@ app.post(
         sellerId,
         shipmentId: shipment?.id || null,
         reason: validation.reason,
+        reasonCode: validation.reasonCode,
         requestedBy: req.auth.role === "seller" ? "seller" : "buyer",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -5069,6 +5092,12 @@ app.patch(
         resolutionNote: resolutionNote || existing.resolutionNote,
         updatedAt: new Date().toISOString(),
       });
+      if (req.auth.role === "seller" && status === "approved") {
+        const approvalValidation = validateSupportRequestApproval(updatedRequest);
+        if (!approvalValidation.ok) {
+          return res.status(400).json({ error: approvalValidation.error });
+        }
+      }
       order.supportRequests[requestIndex] = updatedRequest;
       let nextOrder = saveHydratedOrder(order);
       if (status === "approved") {

@@ -783,10 +783,10 @@ struct BuyerOrderDetailView: View {
                     .font(.headline)
                     .fontWeight(.semibold)
 
-                Text("Message sellers about this order, or submit a cancel/refund request for a specific shipment.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                PolicyNoticeCard(
+                    bodyText: MarketplacePolicyCopy.buyerOrderSupportIntro,
+                    tone: .support
+                )
 
                 OrderSupportRequestsSection(order: activeOrder, sellerId: nil, isSellerView: false, embeddedInCard: true)
                     .environmentObject(orderStore)
@@ -811,21 +811,8 @@ struct BuyerOrderDetailView: View {
                                 $0.type == .cancel && $0.status == .pending && $0.shipmentId == shipment.id
                             }
                             if hasPendingCancel {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "clock.fill")
-                                        .font(.system(size: 11, weight: .semibold))
-                                    Text("Cancellation request pending")
-                                        .font(.system(size: 12, weight: .semibold))
-                                }
-                                .foregroundStyle(.orange)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
-                                )
-                            } else {
+                                supportPendingBanner("Cancellation request pending", tint: .orange)
+                            } else if buyerCanRequestCancel(for: shipment, hasPendingCancel: hasPendingCancel) {
                                 Button {
                                     supportSheet = .request(shipment, .cancel)
                                 } label: {
@@ -837,19 +824,54 @@ struct BuyerOrderDetailView: View {
                         }
 
                         if shipment.status == .shipped || shipment.status == .delivered {
-                            Button {
-                                supportSheet = .request(shipment, .refund)
-                            } label: {
-                                Label("Request refund", systemImage: "dollarsign.arrow.circlepath")
-                                    .frame(maxWidth: .infinity)
+                            let hasPendingRefund = activeOrder.supportRequests.contains {
+                                $0.type == .refund && $0.status == .pending && $0.shipmentId == shipment.id
                             }
-                            .buttonStyle(.bordered)
+                            if hasPendingRefund {
+                                supportPendingBanner("Refund request pending", tint: .orange)
+                            } else if buyerCanRequestRefund(for: shipment, hasPendingRefund: hasPendingRefund) {
+                                Button {
+                                    supportSheet = .request(shipment, .refund)
+                                } label: {
+                                    Label("Request refund", systemImage: "dollarsign.arrow.circlepath")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                            }
                         }
                     }
                     .padding(.top, 4)
                 }
             }
         }
+    }
+
+    private func buyerCanRequestCancel(for shipment: Shipment, hasPendingCancel: Bool) -> Bool {
+        guard shipment.status == .preparing, !hasPendingCancel else { return false }
+        return shipment.supportEligibility?.canRequestCancel ?? true
+    }
+
+    private func buyerCanRequestRefund(for shipment: Shipment, hasPendingRefund: Bool) -> Bool {
+        guard shipment.status == .shipped || shipment.status == .delivered, !hasPendingRefund else { return false }
+        return shipment.supportEligibility?.canRequestRefund ?? false
+    }
+
+    @ViewBuilder
+    private func supportPendingBanner(_ title: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock.fill")
+                .font(.system(size: 11, weight: .semibold))
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(tint)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(tint.opacity(0.25), lineWidth: 1)
+        )
     }
 
     private var buyerExchangeSection: some View {
@@ -859,10 +881,10 @@ struct BuyerOrderDetailView: View {
                     .font(.headline)
                     .fontWeight(.semibold)
 
-                Text("All sales are final. Eligible orders may request a one-time exchange for the same item if it arrived damaged, defective, incorrect, or materially flawed.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                PolicyNoticeCard(
+                    bodyText: MarketplacePolicyCopy.buyerExchangeIntro,
+                    tone: .exchange
+                )
 
                 if let latestExchangeRequest {
                     GlassCard(cornerRadius: 18) {
@@ -895,7 +917,7 @@ struct BuyerOrderDetailView: View {
                 Button {
                     showExchangePolicyBrowser = true
                 } label: {
-                    Text("Read Exchange Policy")
+                    Text(MarketplacePolicyCopy.readExchangePolicyButton)
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -961,12 +983,12 @@ struct BuyerOrderDetailView: View {
 
     private var exchangeSectionUnavailableCopy: String {
         if exchangeItemContexts.allSatisfy({ $0.item.deliveredAt == nil && $0.item.fulfillmentStatus != .delivered }) {
-            return "Exchanges can be requested after delivery."
+            return MarketplacePolicyCopy.buyerExchangeAfterDelivery
         }
         if exchangeItemContexts.allSatisfy({ ($0.item.exchangeCount ?? 0) >= catalog.config.maxExchangeCountPerOrderItem }) {
-            return "This order has already used its one-time exchange."
+            return MarketplacePolicyCopy.buyerExchangeUsed
         }
-        return "Exchange eligibility is not available for this order right now."
+        return MarketplacePolicyCopy.buyerExchangeUnavailable
     }
 
     private var orderLineItems: [OrderLineItem] {

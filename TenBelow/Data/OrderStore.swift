@@ -431,7 +431,8 @@ final class OrderStore: ObservableObject {
         type: OrderSupportRequestType,
         sellerId: String,
         shipmentId: String,
-        reason: String
+        reason: String,
+        reasonCode: String? = nil
     ) async -> String? {
         orderSupportError = nil
         do {
@@ -440,7 +441,8 @@ final class OrderStore: ObservableObject {
                 type: type,
                 sellerId: sellerId,
                 shipmentId: shipmentId,
-                reason: reason
+                reason: reason,
+                reasonCode: reasonCode
             )
             upsertOrder(updated)
             return updated.supportRequests

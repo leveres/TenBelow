@@ -148,9 +148,13 @@ TenBelow’s standard remedy for eligible delivered-item issues is exchange or r
 
 Eligible exchange requests generally include products that arrive damaged, defective, materially different from the listing, or incorrect due to seller fulfillment error. Exchange requests must be supported by required evidence and submitted within the timeframe stated in the Exchange Policy.
 
+Some sellers may optionally allow one damage-based refund request per shipment, supported by photo evidence and reviewed by the seller. Refunds are not the standard remedy and remain separate from TenBelow's exchange process.
+
+Buyers may request order cancellation only while a shipment is still preparing and only when the seller has enabled cancellations within the seller's stated window.
+
 TenBelow reviews exchange requests first and may approve, deny, or request additional information. TenBelow may also seek seller input before making a final determination. Sellers must comply with approved exchange decisions.
 
-Refunds are generally not offered for delivered items except where required by law, where an order cannot be fulfilled or replaced, where a shipping-delay cancellation must be honored, where a seller fails to comply with an approved remedy, or where TenBelow determines that a refund is necessary to resolve a valid claim, marketplace failure, or legal obligation.
+Refunds are generally not offered for delivered items except where required by law, where an order cannot be fulfilled or replaced, where a shipping-delay cancellation must be honored, where a seller fails to comply with an approved remedy, where a seller has enabled and approved an eligible damage-based refund request, or where TenBelow determines that a refund is necessary to resolve a valid claim, marketplace failure, or legal obligation.
 
 11. Custom Requests and Optional Seller Features
 
@@ -610,9 +614,11 @@ Where the approved exchange involves seller fault, listing inaccuracy, shipment 
 
 11. Refunds and Non-Exchange Outcomes
 
-Because many TenBelow items are creator-made, made to order, or 3D printed, TenBelow’s standard remedy for eligible delivered-item issues is exchange or replacement rather than refund. Sellers may not advertise refund promises or policies that conflict with TenBelow’s platform structure unless expressly approved in writing by TenBelow.
+Because many TenBelow items are creator-made, made to order, or 3D printed, TenBelow's standard remedy for eligible delivered-item issues is exchange or replacement rather than refund. Sellers may not advertise refund promises that conflict with TenBelow's platform structure unless expressly approved in writing by TenBelow.
 
-Refunds may still be required in limited circumstances, including where required by law, where an order cannot be fulfilled or replaced, where a shipping-delay cancellation must be honored, where a seller fails to comply with an approved remedy, or where TenBelow determines that a refund is necessary to resolve a valid claim, marketplace failure, or legal obligation.
+Sellers may optionally enable one damage-based refund request per shipment in shop settings. Those requests require photo proof, a qualifying damage or defect reason, and seller review. They are separate from TenBelow's exchange process.
+
+Refunds may still be required in limited circumstances, including where required by law, where an order cannot be fulfilled or replaced, where a shipping-delay cancellation must be honored, where a seller fails to comply with an approved remedy, where a seller has enabled and approved an eligible damage-based refund request, or where TenBelow determines that a refund is necessary to resolve a valid claim, marketplace failure, or legal obligation.
 
 TenBelow may process or direct refunds, reversals, or payout offsets where necessary to comply with law, resolve a valid dispute, protect users, or maintain marketplace integrity.
 
@@ -705,7 +711,7 @@ Effective Date: April 24, 2026
 
 This Exchange Policy explains how TenBelow handles exchange requests for eligible product issues on the platform. In this Policy, “TenBelow,” “Company,” “we,” “us,” and “our” mean Innovative Codeworks LLC, doing business as TenBelow. “Buyer” means the person who placed the order. “Seller” means the seller or creator who fulfilled or was expected to fulfill the product order.
 
-Because many products sold through TenBelow are creator-made, 3D printed, made to order, or produced in small batches, TenBelow’s standard remedy for eligible delivered-item issues is exchange or replacement rather than refund.
+Because many products sold through TenBelow are creator-made, 3D printed, made to order, or produced in small batches, TenBelow's standard remedy for eligible delivered-item issues is exchange or replacement rather than refund. Some sellers may separately choose to accept one optional damage-based refund request per shipment under their shop settings.
 
 1. General Rule
 
@@ -787,7 +793,10 @@ Refunds are generally not the standard remedy for delivered items on TenBelow. H
 - an order cannot be fulfilled or replaced;
 - a seller fails to comply with an approved exchange remedy;
 - a valid shipping-delay cancellation or other legal cancellation right applies;
+- a seller has enabled and approved an eligible one-time damage-based refund request for that shipment;
 - TenBelow determines that a refund is necessary to resolve a valid claim, marketplace failure, or legal obligation.
+
+Some sellers may optionally accept one damage-based refund request per shipment. Those requests require photo proof, a qualifying damage or defect reason, and seller review. They are separate from TenBelow's standard exchange process.
 
 11. Abuse and Misuse
 

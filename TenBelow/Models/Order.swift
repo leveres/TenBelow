@@ -48,6 +48,13 @@ struct Order: Identifiable, Codable, Hashable {
     }
 }
 
+struct ShipmentSupportEligibility: Codable, Hashable {
+    var canRequestCancel: Bool
+    var canRequestRefund: Bool
+    var cancelDisabledReason: String?
+    var refundDisabledReason: String?
+}
+
 struct Shipment: Identifiable, Codable, Hashable {
     let id: String
     var sellerId: String
@@ -62,6 +69,7 @@ struct Shipment: Identifiable, Codable, Hashable {
     var deliveredAt: Date?
 
     var items: [OrderLineItem]
+    var supportEligibility: ShipmentSupportEligibility?
 }
 
 struct OrderLineItem: Identifiable, Codable, Hashable {
