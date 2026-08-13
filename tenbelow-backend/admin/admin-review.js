@@ -488,16 +488,168 @@ function sellerShippingOriginLabel(shippingOrigin = {}) {
   return country || state || "";
 }
 
+function accountDisplayHandle(handle = "") {
+  const trimmed = String(handle || "").trim();
+  if (!trimmed) return "";
+  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+}
+
+function accountInitials(displayName = "", id = "") {
+  const source = String(displayName || id || "?").trim();
+  const words = source.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return `${words[0][0] || ""}${words[1][0] || ""}`.toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
+}
+
+function accountAvatarTone(id = "") {
+  let hash = 0;
+  const value = String(id || "account");
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash + value.charCodeAt(index) * (index + 1)) % 6;
+  }
+  return String(hash);
+}
+
+function accountStatEntries(account, kindLabel = "seller") {
+  const activity = account.activity || {};
+  if (account.kind === "buyer" || kindLabel === "buyer") {
+    return [
+      ["Orders", activity.orderCount || 0],
+      ["Exchanges", activity.exchangeCount || 0],
+      ["Requests", activity.customOrderCount || 0],
+      ["Reviews", activity.reviewCount || 0],
+    ];
+  }
+  return [
+    ["Products", activity.productCount || 0],
+    ["Orders", activity.orderCount || 0],
+    ["Exchanges", activity.exchangeCount || 0],
+    ["Requests", activity.customOrderCount || 0],
+    ["Reviews", activity.reviewCount || 0],
+  ];
+}
+
+function formatAccountStatsInline(account, kindLabel = "seller") {
+  return accountStatEntries(account, kindLabel)
+    .map(([label, value]) => `${label} ${value}`)
+    .join(" · ");
+}
+
+function sellerComplianceSummary(account) {
+  const parts = ["Onboarding"];
+  parts.push(account.sellerAgreement?.accepted === true ? "Agreement ok" : "Agreement missing");
+  parts.push(account.sellerPoliciesAcknowledged === true ? "Policies ok" : "Policies missing");
+  const welcomeStatus = account.welcomeEmail?.status;
+  if (welcomeStatus === "sent") parts.push("Welcome sent");
+  else if (welcomeStatus === "failed") parts.push("Welcome failed");
+  else parts.push("Welcome pending");
+  return parts.join(" · ");
+}
+
+function sellerComplianceNeedsAttention(account) {
+  return (
+    account.sellerAgreement?.accepted !== true
+    || account.sellerPoliciesAcknowledged !== true
+    || account.welcomeEmail?.status === "failed"
+  );
+}
+
+function accountModerationSummary(account) {
+  const moderation = account.accountModeration || {};
+  if (moderation.isFrozen) return "Moderation · Frozen account";
+  if (moderation.isFlagged) return "Moderation · Flagged for review";
+  return "Moderation · No actions";
+}
+
+function accountModerationNeedsAttention(account) {
+  const moderation = account.accountModeration || {};
+  return moderation.isFrozen || moderation.isFlagged;
+}
+
+function wrapAccountPanel(summaryText, section, { open = false, variant = "" } = {}) {
+  const details = document.createElement("details");
+  details.className = `account-panel-details${variant ? ` ${variant}` : ""}`;
+  if (open) details.open = true;
+  const summary = document.createElement("summary");
+  summary.className = "account-panel-summary";
+  summary.textContent = summaryText;
+  details.append(summary, section);
+  return details;
+}
+
+function buildAccountCardHeader(account, kindLabel) {
+  const linkedActivity = activityTotal(account.activity || {});
+  const moderation = account.accountModeration || {};
+  const accountKindValue = account.kind || kindLabel;
+
+  const header = document.createElement("div");
+  header.className = "account-card-header";
+
+  const identity = document.createElement("div");
+  identity.className = "account-card-identity";
+
+  const avatar = document.createElement("span");
+  avatar.className = "account-avatar";
+  avatar.dataset.tone = accountAvatarTone(account.id);
+  avatar.textContent = accountInitials(account.displayName, account.id);
+  avatar.setAttribute("aria-hidden", "true");
+
+  const primary = document.createElement("div");
+  primary.className = "account-card-primary";
+
+  const titleRow = document.createElement("div");
+  titleRow.className = "account-card-title-row";
+
+  const title = document.createElement("h3");
+  title.className = "account-card-title";
+  title.textContent = account.displayName || account.id || "Account";
+
+  const handle = document.createElement("span");
+  handle.className = "account-card-handle";
+  handle.textContent = accountDisplayHandle(account.handle || account.id);
+
+  const kindBadge = document.createElement("span");
+  kindBadge.className = `account-kind-badge is-${accountKindValue === "buyer" ? "buyer" : "seller"}`;
+  kindBadge.textContent = accountKindValue === "buyer" ? "Buyer" : "Seller";
+
+  titleRow.append(title, handle, kindBadge);
+
+  const contact = document.createElement("p");
+  contact.className = "account-card-meta account-card-contact";
+  contact.textContent = `${account.email || "No email on file"} · ID ${account.id}`;
+
+  const statsLine = document.createElement("p");
+  statsLine.className = "account-card-stats-inline";
+  statsLine.textContent = formatAccountStatsInline(account, kindLabel);
+
+  primary.append(titleRow, contact, statsLine);
+  identity.append(avatar, primary);
+
+  const badges = document.createElement("div");
+  badges.className = "account-card-badges";
+
+  const moderationLabel = accountModerationStatusLabel(moderation);
+  if (moderationLabel) {
+    const moderationBadge = document.createElement("span");
+    moderationBadge.className = accountModerationStatusClass(moderation);
+    moderationBadge.textContent = moderationLabel;
+    badges.appendChild(moderationBadge);
+  }
+
+  const activityBadge = document.createElement("span");
+  activityBadge.className = linkedActivity > 0 ? "account-status" : "account-status is-inactive";
+  activityBadge.textContent = linkedActivity > 0 ? "Has activity" : "Inactive";
+  badges.appendChild(activityBadge);
+
+  header.append(identity, badges);
+  return { header, linkedActivity };
+}
+
 function buildSellerComplianceSection(account) {
   const section = document.createElement("div");
   section.className = "account-panel account-compliance-panel";
-
-  const headerRow = document.createElement("div");
-  headerRow.className = "account-panel-header";
-
-  const title = document.createElement("p");
-  title.className = "account-panel-title";
-  title.textContent = "Onboarding";
 
   const pills = document.createElement("div");
   pills.className = "account-compliance-pills";
@@ -551,9 +703,8 @@ function buildSellerComplianceSection(account) {
       : "Welcome email after app onboarding";
   }
   pills.appendChild(welcomePill);
-  headerRow.append(title, pills);
 
-  section.append(headerRow, details);
+  section.append(pills, details);
 
   if (account.kind === "seller" && welcome.status === "failed") {
     const actions = document.createElement("div");
@@ -612,30 +763,7 @@ function buildAccountModerationSection(account) {
   const section = document.createElement("div");
   section.className = "account-panel account-moderation";
 
-  const headerRow = document.createElement("div");
-  headerRow.className = "account-panel-header";
-
-  const title = document.createElement("p");
-  title.className = "account-panel-title";
-  title.textContent = "Moderation";
-
-  const pills = document.createElement("div");
-  pills.className = "account-compliance-pills";
-
   const moderation = account.accountModeration || {};
-  const statusPill = document.createElement("span");
-  if (moderation.isFrozen) {
-    statusPill.className = "compliance-pill is-frozen";
-    statusPill.textContent = "Frozen account";
-  } else if (moderation.isFlagged) {
-    statusPill.className = "compliance-pill is-warning";
-    statusPill.textContent = "Flagged for review";
-  } else {
-    statusPill.className = "compliance-pill is-ok";
-    statusPill.textContent = "No moderation actions";
-  }
-  pills.appendChild(statusPill);
-  headerRow.append(title, pills);
 
   const details = document.createElement("p");
   details.className = "account-card-meta account-moderation-details";
@@ -727,7 +855,7 @@ function buildAccountModerationSection(account) {
 
   controlsRow.append(sendEmailOption, primaryActions);
   toolbar.append(controlsRow, secondaryActions);
-  section.append(headerRow, details, reasonField, toolbar);
+  section.append(details, reasonField, toolbar);
   return section;
 }
 
@@ -818,79 +946,54 @@ function renderAccounts(payload) {
 
   for (const account of accounts) {
     const card = document.createElement("article");
-    card.className = "account-card";
+    const accountKindValue = account.kind || kindLabel;
+    card.className = `account-card is-${accountKindValue === "buyer" ? "buyer" : "seller"}`;
 
-    const header = document.createElement("div");
-    header.className = "account-card-header";
-    const titleWrap = document.createElement("div");
-    const title = document.createElement("h3");
-    title.className = "account-card-title";
-    title.textContent = account.displayName || account.id || "Account";
-    const meta = document.createElement("p");
-    meta.className = "account-card-meta";
-    const handle = account.handle ? ` · ${account.handle}` : "";
-    const email = account.email ? ` · ${account.email}` : "";
-    meta.textContent = `${account.kind || kindLabel} ID: ${account.id}${handle}${email}`;
-    titleWrap.append(title, meta);
+    const { header, linkedActivity } = buildAccountCardHeader(account, kindLabel);
+    if (linkedActivity > 0) card.classList.add("has-activity");
+    if (accountModerationNeedsAttention(account)) card.classList.add("has-moderation");
 
-    const status = document.createElement("span");
-    const linkedActivity = activityTotal(account.activity || {});
-    const moderationLabel = accountModerationStatusLabel(account.accountModeration || {});
-    if (moderationLabel) {
-      status.className = accountModerationStatusClass(account.accountModeration || {});
-      status.textContent = moderationLabel;
-    } else {
-      status.className = linkedActivity > 0 ? "account-status" : "account-status is-inactive";
-      status.textContent = linkedActivity > 0 ? "Has activity" : "Inactive";
-    }
-    header.append(titleWrap, status);
-
-    const stats = document.createElement("div");
-    stats.className = "account-stat-grid";
-    const activity = account.activity || {};
-    const statEntries = account.kind === "buyer"
-      ? [
-          ["Orders", activity.orderCount || 0],
-          ["Exchanges", activity.exchangeCount || 0],
-          ["Requests", activity.customOrderCount || 0],
-          ["Reviews", activity.reviewCount || 0],
-        ]
-      : [
-          ["Products", activity.productCount || 0],
-          ["Orders", activity.orderCount || 0],
-          ["Exchanges", activity.exchangeCount || 0],
-          ["Requests", activity.customOrderCount || 0],
-          ["Reviews", activity.reviewCount || 0],
-        ];
-    statEntries.forEach(([label, value]) => {
-      const stat = document.createElement("span");
-      stat.className = "seller-stat-pill";
-      stat.textContent = `${label}: ${value}`;
-      stats.appendChild(stat);
-    });
-
-    const footer = document.createElement("div");
-    footer.className = "account-card-footer account-delete-footer";
-    const note = document.createElement("p");
-    note.className = "account-card-meta";
     const productCount = Number(account.activity?.productCount) || 0;
-    note.textContent = linkedActivity > 0
+    const deleteSection = document.createElement("div");
+    deleteSection.className = "account-panel account-delete-panel";
+    const deleteNote = document.createElement("p");
+    deleteNote.className = "account-card-meta";
+    deleteNote.textContent = linkedActivity > 0
       ? account.kind === "seller" && productCount > 0
         ? `Delete is available. ${productCount} linked product${productCount === 1 ? "" : "s"} will be removed from the app; other history may remain for audit.`
         : `Delete is available. Linked activity remains in records: ${account.activity?.blockers?.join(", ") || `${linkedActivity} activity records`}.`
       : "No activity found. This account can be permanently deleted.";
-
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "danger-button";
     deleteButton.textContent = "Delete account";
     deleteButton.addEventListener("click", () => deleteAccount(account));
-    footer.append(note, deleteButton);
+    deleteSection.append(deleteNote, deleteButton);
+
+    const deleteSummary = linkedActivity > 0 ? "Delete account · Has linked activity" : "Delete account · Eligible";
+    const deletePanel = wrapAccountPanel(deleteSummary, deleteSection, {
+      variant: "account-panel-details-danger",
+    });
+
+    const moderationPanel = wrapAccountPanel(
+      accountModerationSummary(account),
+      buildAccountModerationSection(account),
+      { open: accountModerationNeedsAttention(account) }
+    );
 
     if (account.kind === "seller") {
-      card.append(header, stats, buildSellerComplianceSection(account), buildAccountModerationSection(account), footer);
+      card.append(
+        header,
+        wrapAccountPanel(
+          sellerComplianceSummary(account),
+          buildSellerComplianceSection(account),
+          { open: sellerComplianceNeedsAttention(account) }
+        ),
+        moderationPanel,
+        deletePanel
+      );
     } else {
-      card.append(header, stats, buildAccountModerationSection(account), footer);
+      card.append(header, moderationPanel, deletePanel);
     }
     accountList.appendChild(card);
   }
