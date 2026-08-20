@@ -114,6 +114,8 @@ enum TBTheme {
 // MARK: - Reusable Button Styles
 
 struct PrimaryButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundColor(.white)
@@ -122,10 +124,14 @@ struct PrimaryButtonStyle: ButtonStyle {
             .background(TBTheme.accent)
             .cornerRadius(16)
             .opacity(configuration.isPressed ? 0.85 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .tbAnimation(TBMotion.press, value: configuration.isPressed)
     }
 }
 
 struct PrimaryCTAButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .contentShape(Rectangle())
@@ -150,12 +156,14 @@ struct PrimaryCTAButtonStyle: ButtonStyle {
                 in: RoundedRectangle(cornerRadius: 16)
             )
             .shadow(color: TBTheme.accent.opacity(0.25), radius: 10, y: 5)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(.spring(response: 0.25), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1.0)
+            .tbAnimation(TBMotion.press, value: configuration.isPressed)
     }
 }
 
 struct SecondaryCTAButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .contentShape(Rectangle())
@@ -177,12 +185,14 @@ struct SecondaryCTAButtonStyle: ButtonStyle {
                     .strokeBorder(TBTheme.skyBlue.opacity(0.20), lineWidth: 1)
             )
             .shadow(color: TBTheme.deepSky.opacity(0.04), radius: 6, y: 2)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(.spring(response: 0.25), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1.0)
+            .tbAnimation(TBMotion.press, value: configuration.isPressed)
     }
 }
 
 struct GlassPillButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var isFinal: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
@@ -216,12 +226,14 @@ struct GlassPillButtonStyle: ButtonStyle {
                 }
             )
             .clipShape(Capsule())
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(.spring(response: 0.25), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1.0)
+            .tbAnimation(TBMotion.press, value: configuration.isPressed)
     }
 }
 
 struct PremiumGlassPillButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var isEmphasized: Bool = false
     var expandsToFullWidth: Bool = true
     var horizontalPadding: CGFloat = 32
@@ -340,9 +352,9 @@ struct PremiumGlassPillButtonStyle: ButtonStyle {
                 )
             }
             .clipShape(Capsule())
-            .scaleEffect(configuration.isPressed ? 0.975 : 1.0)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1.0)
             .opacity(configuration.isPressed ? 0.96 : 1.0)
-            .animation(.spring(response: 0.24, dampingFraction: 0.78), value: configuration.isPressed)
+            .tbAnimation(TBMotion.press, value: configuration.isPressed)
     }
 }
 

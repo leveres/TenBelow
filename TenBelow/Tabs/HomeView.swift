@@ -29,6 +29,7 @@ struct HomeView: View {
     @State private var isLiveDropRefreshInFlight = false
     @State private var isHomeVisible = false
     @State private var catalogCache = HomeCatalogCache()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let rotationInterval: TimeInterval = 120
     private let rotationTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
 
@@ -249,7 +250,7 @@ struct HomeView: View {
     /// resolution), and Home re-renders on rotation timers. Memoize per catalog revision so
     /// repeated body evaluations and per-card lookups stay O(1).
     private var catalogSnapshot: HomeCatalogSnapshot {
-        let key = "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(catalog.isUsingCachedData)"
+        let key = "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(catalog.isUsingCachedData)|\(orderStore.orders.count)"
         if let cached = catalogCache.snapshot, cached.key == key {
             return cached
         }
@@ -259,7 +260,8 @@ struct HomeView: View {
             key: key,
             products: resolvedProducts,
             freshFavoritesCatalog: computeFreshFavoritesCatalog(base: resolvedProducts),
-            remoteProfiles: catalog.sellerProfiles
+            remoteProfiles: catalog.sellerProfiles,
+            productSalesCounts: computeProductSalesCounts()
         )
         catalogCache.snapshot = snapshot
         return snapshot
@@ -594,7 +596,11 @@ struct HomeView: View {
     }
 
     private var productSalesCounts: [String: Int] {
-        orders
+        catalogSnapshot.productSalesCounts
+    }
+
+    private func computeProductSalesCounts() -> [String: Int] {
+        orderStore.orders
             .flatMap(\.shipments)
             .flatMap(\.items)
             .reduce(into: [:]) { counts, item in
@@ -648,12 +654,14 @@ struct HomeView: View {
     }
 
     private func advanceRotations() {
-        if spotlightCreators.count > 1 {
-            creatorRotationIndex = (creatorRotationIndex + 1) % spotlightCreators.count
-        }
+        withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
+            if spotlightCreators.count > 1 {
+                creatorRotationIndex = (creatorRotationIndex + 1) % spotlightCreators.count
+            }
 
-        if featuredProducts.count > 1 {
-            featuredRotationIndex = (featuredRotationIndex + 1) % featuredProducts.count
+            if featuredProducts.count > 1 {
+                featuredRotationIndex = (featuredRotationIndex + 1) % featuredProducts.count
+            }
         }
     }
 
@@ -717,6 +725,8 @@ struct HomeView: View {
                     selectedFeaturedCreator = creator
                 }
             )
+            .id(creator.id)
+            .transition(TBMotion.subtleReveal(reduceMotion: reduceMotion))
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .padding(.bottom, layout.spotlightBottomSpacing)
@@ -753,6 +763,8 @@ struct HomeView: View {
                     .frame(height: layout.logoToDealSpacing)
 
                 DealOfDayBanner(product: dealOfDayProduct)
+                    .id(dealOfDayProduct.id)
+                    .transition(TBMotion.subtleReveal(reduceMotion: reduceMotion))
                     .environment(\.dealBannerContentWidth, contentWidth)
                     .frame(height: dealBannerHeight)
 
@@ -1052,7 +1064,7 @@ private struct DealOfDayBanner: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                SnowfallParticleCanvas(flakeCount: 84)
+                SnowfallParticleCanvas(flakeCount: 24, animates: false)
                     .allowsHitTesting(false)
             }
         }
@@ -1299,6 +1311,7 @@ private final class HomeCatalogSnapshot {
     let key: String
     let products: [Product]
     let freshFavoritesCatalog: [Product]
+    let productSalesCounts: [String: Int]
 
     private let remoteProfiles: [SellerProfile]
     private var cachedSellerProfilesByID: [String: SellerProfile]?
@@ -1308,12 +1321,14 @@ private final class HomeCatalogSnapshot {
         key: String,
         products: [Product],
         freshFavoritesCatalog: [Product],
-        remoteProfiles: [SellerProfile]
+        remoteProfiles: [SellerProfile],
+        productSalesCounts: [String: Int]
     ) {
         self.key = key
         self.products = products
         self.freshFavoritesCatalog = freshFavoritesCatalog
         self.remoteProfiles = remoteProfiles
+        self.productSalesCounts = productSalesCounts
     }
 
     var sellerProfilesByID: [String: SellerProfile] {

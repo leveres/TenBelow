@@ -14,6 +14,9 @@ final class SellerProductEncodingTests: XCTestCase {
             demoVideoURL: nil,
             productionPreviewURL: nil,
             material: "PETG",
+            availableColors: [
+                ProductColorOption(name: "Ocean Blue", hex: "#3578C8"),
+            ],
             durabilityNote: "Built for everyday use.",
             careWarnings: ["Handle with care."],
             shipsInMinDays: 2,
@@ -38,5 +41,8 @@ final class SellerProductEncodingTests: XCTestCase {
             object["rightsCertificationAcceptedAt"] as? String,
             "2026-08-08T07:00:00Z"
         )
+        let colors = try XCTUnwrap(object["availableColors"] as? [[String: Any]])
+        XCTAssertEqual(colors.first?["name"] as? String, "Ocean Blue")
+        XCTAssertEqual(colors.first?["hex"] as? String, "#3578C8")
     }
 }

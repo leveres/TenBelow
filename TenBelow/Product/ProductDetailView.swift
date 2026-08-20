@@ -34,6 +34,10 @@ struct ProductDetailView: View {
     @State private var latestAverageRating: Double?
     @State private var latestReviewCount: Int?
     @State private var loadedReviews: [ProductReview] = []
+    @State private var selectedColor: ProductColorOption?
+    @State private var addToCartFeedbackTrigger = 0
+    @State private var favoriteFeedbackTrigger = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if os(iOS)
     @State private var showShareSheet = false
     #endif
@@ -109,7 +113,15 @@ struct ProductDetailView: View {
     }
 
     private var isInCart: Bool {
-        cart.items.contains { $0.product.id == product.id }
+        let expectedLineID = CartItem.lineID(
+            productId: product.id,
+            selectedColorId: selectedColor?.id
+        )
+        return cart.items.contains { $0.id == expectedLineID }
+    }
+
+    private var requiresColorSelection: Bool {
+        !product.availableColors.isEmpty
     }
 
     private var displayedAverageRating: Double {
@@ -155,10 +167,6 @@ struct ProductDetailView: View {
     }
 
     private func reportListing(product: Product) {
-        #if os(iOS)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        #endif
-
         guard let url = ReportListingMail.mailtoURL(for: product) else {
             showReportListingHelp = true
             return
@@ -170,19 +178,17 @@ struct ProductDetailView: View {
     }
 
     private func handleAddToCart() {
+        guard !requiresColorSelection || selectedColor != nil else { return }
         if isInCart {
             showCart = true
             return
         }
 
-        cart.add(product)
+        cart.add(product, selectedColor: selectedColor)
         buyerEngagement.trackAddToCart(product)
+        addToCartFeedbackTrigger += 1
 
-        #if os(iOS)
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        #endif
-
-        withAnimation(.easeInOut(duration: 0.25)) {
+        withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
             addedToCart = true
         }
 
@@ -196,7 +202,7 @@ struct ProductDetailView: View {
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
-                withAnimation(.easeInOut(duration: 0.3)) {
+                withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
                     addedToCart = false
                 }
             }
@@ -205,7 +211,7 @@ struct ProductDetailView: View {
 
     private func openCartFromToast() {
         toastDismissTask?.cancel()
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
             addedToCart = false
         }
         showCart = true
@@ -271,8 +277,11 @@ struct ProductDetailView: View {
     }
 
     private func toggleFavorite() {
-        let isNowFavorited = buyerEngagement.toggleFavorite(for: product)
-        localProducts.setFavoriteState(for: product.id, isFavorited: isNowFavorited)
+        withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
+            let isNowFavorited = buyerEngagement.toggleFavorite(for: product)
+            localProducts.setFavoriteState(for: product.id, isFavorited: isNowFavorited)
+        }
+        favoriteFeedbackTrigger += 1
     }
 
     @ViewBuilder
@@ -461,6 +470,13 @@ struct ProductDetailView: View {
                         }
                     }
 
+                    if requiresColorSelection {
+                        ProductColorSelectionSection(
+                            colors: product.availableColors,
+                            selection: $selectedColor
+                        )
+                    }
+
                     // Quick facts
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Quick facts")
@@ -531,10 +547,15 @@ struct ProductDetailView: View {
                     productName: product.name,
                     onViewCart: openCartFromToast
                 )
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .move(edge: .top).combined(with: .opacity)
+                    )
                     .padding(.top, 8)
             }
         }
+        .animation(reduceMotion ? nil : TBMotion.surface, value: addedToCart)
         .navigationTitle("")
         #if os(iOS) || os(visionOS)
         // Shop root hides the bar; restore it for pushed product detail (back button + actions).
@@ -607,6 +628,8 @@ struct ProductDetailView: View {
                 productName: product.name,
                 priceText: Money.format(cents: product.priceCents),
                 isAdded: isInCart,
+                selectedColorName: selectedColor?.name,
+                requiresColorSelection: requiresColorSelection,
                 action: handleAddToCart
             )
             .padding(.horizontal, 16)
@@ -647,6 +670,8 @@ struct ProductDetailView: View {
                 initialIndex: selectedMediaIndex
             )
         }
+        .sensoryFeedback(.success, trigger: addToCartFeedbackTrigger)
+        .sensoryFeedback(.selection, trigger: favoriteFeedbackTrigger)
     }
 
     private var productRatingSection: some View {
@@ -884,6 +909,8 @@ private struct ProductFullscreenZoomableImage: View {
 }
 
 private struct MediaPagePill: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let currentIndex: Int
     let totalCount: Int
 
@@ -891,6 +918,7 @@ private struct MediaPagePill: View {
         Text("\(currentIndex + 1) of \(max(totalCount, 1))")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.white)
+            .contentTransition(.numericText())
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(.black.opacity(0.22), in: Capsule())
@@ -898,14 +926,18 @@ private struct MediaPagePill: View {
                 Capsule()
                     .strokeBorder(.white.opacity(0.18), lineWidth: 0.8)
             )
+            .animation(reduceMotion ? nil : TBMotion.stateChange, value: currentIndex)
     }
 }
 
 private struct StickyBuyBar: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let productName: String
     let priceText: String
     let isAdded: Bool
+    let selectedColorName: String?
+    let requiresColorSelection: Bool
     let action: () -> Void
 
     var body: some View {
@@ -918,24 +950,29 @@ private struct StickyBuyBar: View {
     private var buyButton: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: isAdded ? "checkmark" : "cart.badge.plus")
+                Image(systemName: isAdded ? "checkmark.circle.fill" : "cart.badge.plus")
                     .font(.system(size: 13, weight: .semibold))
+                    .contentTransition(.symbolEffect(.replace))
                 Text(buttonTitle)
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
+                    .contentTransition(.opacity)
                 Text("• \(priceText)")
                     .font(.body.weight(.semibold))
                     .opacity(0.92)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
+                    .contentTransition(.numericText())
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
             .background(
                 LinearGradient(
-                    colors: [TBTheme.accent, TBTheme.deepSky],
+                    colors: isAdded
+                        ? [Color.green.opacity(0.88), Color.green.opacity(0.72)]
+                        : [TBTheme.accent, TBTheme.deepSky],
                     startPoint: .leading,
                     endPoint: .trailing
                 ),
@@ -943,10 +980,96 @@ private struct StickyBuyBar: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(requiresColorSelection && selectedColorName == nil)
+        .opacity(requiresColorSelection && selectedColorName == nil ? 0.68 : 1)
+        .tbAnimation(TBMotion.stateChange, value: isAdded)
     }
 
     private var buttonTitle: String {
-        isAdded ? "Added" : "Add to Cart"
+        if requiresColorSelection, selectedColorName == nil {
+            return "Choose a Color"
+        }
+        if isAdded {
+            return "Added"
+        }
+        if let selectedColorName {
+            return "Add \(selectedColorName)"
+        }
+        return "Add to Cart"
+    }
+}
+
+private struct ProductColorSelectionSection: View {
+    let colors: [ProductColorOption]
+    @Binding var selection: ProductColorOption?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Choose a color")
+                    .font(.tbHeadline)
+                    .foregroundStyle(TBTheme.deepSky)
+                Spacer()
+                Text(selection?.name ?? "Required")
+                    .font(.tbCaption.weight(.semibold))
+                    .foregroundStyle(selection == nil ? .orange : TBTheme.accent)
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 104), spacing: 10)],
+                alignment: .leading,
+                spacing: 10
+            ) {
+                ForEach(colors) { color in
+                    Button {
+                        selection = color
+                    } label: {
+                        HStack(spacing: 8) {
+                            ProductColorSwatch(hex: color.hex, size: 22)
+                            Text(color.name)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            if selection?.id == color.id {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(TBTheme.accent)
+                            }
+                        }
+                        .foregroundStyle(TBTheme.deepSky)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 46)
+                        .background(
+                            selection?.id == color.id
+                                ? TBTheme.skyLight.opacity(0.34)
+                                : Color.white.opacity(0.72),
+                            in: RoundedRectangle(cornerRadius: 15)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 15)
+                                .strokeBorder(
+                                    selection?.id == color.id
+                                        ? TBTheme.accent.opacity(0.55)
+                                        : TBTheme.skyBlue.opacity(0.14),
+                                    lineWidth: selection?.id == color.id ? 1.5 : 1
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(color.name) color")
+                    .accessibilityAddTraits(selection?.id == color.id ? .isSelected : [])
+                }
+            }
+
+            Text("Your selected color is saved with the order and shown beside the seller's making video.")
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(.white.opacity(0.58), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
+        )
     }
 }
 

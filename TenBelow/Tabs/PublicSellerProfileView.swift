@@ -27,6 +27,7 @@ struct PublicSellerProfileView: View {
     @State private var showCustomOrderSheet = false
     #endif
     @State private var profileCache = ProfileCache()
+    @State private var sellerDropShelf: SellerProfileDropResponse?
 
     private let productsPerPage = 4
 
@@ -55,6 +56,33 @@ struct PublicSellerProfileView: View {
     private var resolvedSeller: SellerProfile {
         refreshProfileCacheIfNeeded()
         return profileCache.resolvedSeller ?? seller
+    }
+
+    private var weeklyDropProducts: [Product] {
+        guard let sellerDropShelf, sellerDropShelf.phase != .none else { return [] }
+        return sellerDropShelf.products.map(resolveDropProduct)
+    }
+
+    private var weeklyDropProductIDs: Set<String> {
+        Set(weeklyDropProducts.map(\.id))
+    }
+
+    private var dropCatalogProductIDs: Set<String> {
+        Set(
+            catalog.products
+                .filter { $0.sellerId == seller.id && $0.isDrop }
+                .map(\.id)
+        )
+    }
+
+    private var storefrontProducts: [Product] {
+        let excludedIDs = dropCatalogProductIDs.union(weeklyDropProductIDs)
+        guard !excludedIDs.isEmpty else { return sellerProducts }
+        return sellerProducts.filter { !excludedIDs.contains($0.id) }
+    }
+
+    private var visibleProductCount: Int {
+        storefrontProducts.count + weeklyDropProducts.count
     }
 
     private func refreshProfileCacheIfNeeded() {
@@ -97,16 +125,16 @@ struct PublicSellerProfileView: View {
     }
 
     private var totalProductPages: Int {
-        max(1, Int(ceil(Double(sellerProducts.count) / Double(productsPerPage))))
+        max(1, Int(ceil(Double(storefrontProducts.count) / Double(productsPerPage))))
     }
 
     private var currentPageProducts: [Product] {
-        guard !sellerProducts.isEmpty else { return [] }
+        guard !storefrontProducts.isEmpty else { return [] }
         let safePage = min(currentProductPage, totalProductPages - 1)
         let startIndex = safePage * productsPerPage
-        let endIndex = min(startIndex + productsPerPage, sellerProducts.count)
+        let endIndex = min(startIndex + productsPerPage, storefrontProducts.count)
         guard startIndex < endIndex else { return [] }
-        return Array(sellerProducts[startIndex..<endIndex])
+        return Array(storefrontProducts[startIndex..<endIndex])
     }
 
     private var isSellerFollowed: Bool {
@@ -144,8 +172,11 @@ struct PublicSellerProfileView: View {
             BuyerCustomOrderRequestSheet(seller: resolvedSeller)
         }
         #endif
-        .onChange(of: sellerProducts.count) { _, _ in
+        .onChange(of: storefrontProducts.count) { _, _ in
             currentProductPage = min(currentProductPage, max(totalProductPages - 1, 0))
+        }
+        .task(id: "\(seller.id)|\(catalog.contentRevision)") {
+            await loadSellerDropShelf()
         }
         .navigationDestination(item: $selectedProduct) { product in
             ProductDetailView(product: product)
@@ -212,7 +243,7 @@ struct PublicSellerProfileView: View {
                         .foregroundStyle(Color.white.opacity(0.72))
 
                     HStack(spacing: 10) {
-                        Text("\(sellerProducts.count) products")
+                        Text("\(visibleProductCount) products")
                             .font(.tbMeta)
                             .foregroundStyle(Color.white.opacity(0.74))
 
@@ -343,110 +374,184 @@ struct PublicSellerProfileView: View {
 
     // MARK: - Products Section
 
+    @ViewBuilder
     private var productsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Products")
-                    .font(.tbHeadline)
-                    .foregroundStyle(.primary.opacity(0.88))
+        if !storefrontProducts.isEmpty || weeklyDropProducts.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Products")
+                        .font(.tbHeadline)
+                        .foregroundStyle(.primary.opacity(0.88))
 
-                Spacer()
+                    Spacer()
 
-                if !sellerProducts.isEmpty {
-                    Text("Page \(min(currentProductPage + 1, totalProductPages)) of \(totalProductPages)")
-                        .font(.tbMeta)
-                        .foregroundStyle(.secondary)
+                    if !storefrontProducts.isEmpty {
+                        Text("Page \(min(currentProductPage + 1, totalProductPages)) of \(totalProductPages)")
+                            .font(.tbMeta)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
 
-            if sellerProducts.isEmpty {
-                emptyProductsState
-                    .padding(.vertical, TBTheme.spacingMD)
-            } else {
-                GeometryReader { geo in
-                    let gridColumnSpacing: CGFloat = 10
-                    let gridRowSpacing: CGFloat = 8
-                    let sectionStackSpacing: CGFloat = totalProductPages > 1 ? 8 : 0
-                    let tileWidth = max((geo.size.width - gridColumnSpacing) / 2, 0)
-                    let artworkHeight = min(max(tileWidth * 0.58, 82), 104)
-                    let rowCellHeight = artworkHeight + 66
+                if storefrontProducts.isEmpty {
+                    emptyProductsState
+                        .padding(.vertical, TBTheme.spacingMD)
+                } else {
+                    GeometryReader { geo in
+                        let gridColumnSpacing: CGFloat = 10
+                        let gridRowSpacing: CGFloat = 8
+                        let sectionStackSpacing: CGFloat = totalProductPages > 1 ? 8 : 0
+                        let tileWidth = max((geo.size.width - gridColumnSpacing) / 2, 0)
+                        let artworkHeight = min(max(tileWidth * 0.58, 82), 104)
+                        let rowCellHeight = artworkHeight + 66
 
-                    VStack(spacing: sectionStackSpacing) {
-                        LazyVGrid(
-                            columns: [
-                                GridItem(.flexible(), spacing: gridColumnSpacing, alignment: .top),
-                                GridItem(.flexible(), spacing: gridColumnSpacing, alignment: .top)
-                            ],
-                            spacing: gridRowSpacing
-                        ) {
-                            ForEach(currentPageProducts) { product in
-                                SellerProfileProductTile(
-                                    product: product,
-                                    isDraftPreview: previewDraftIDs.contains(product.id),
-                                    rowHeight: rowCellHeight,
-                                    artworkHeight: artworkHeight,
-                                    onSelect: { selectedProduct = product }
-                                )
+                        VStack(spacing: sectionStackSpacing) {
+                            LazyVGrid(
+                                columns: [
+                                    GridItem(.flexible(), spacing: gridColumnSpacing, alignment: .top),
+                                    GridItem(.flexible(), spacing: gridColumnSpacing, alignment: .top)
+                                ],
+                                spacing: gridRowSpacing
+                            ) {
+                                ForEach(currentPageProducts) { product in
+                                    SellerProfileProductTile(
+                                        product: product,
+                                        isDraftPreview: previewDraftIDs.contains(product.id),
+                                        rowHeight: rowCellHeight,
+                                        artworkHeight: artworkHeight,
+                                        onSelect: { selectedProduct = product }
+                                    )
+                                }
                             }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .top)
+                            .frame(maxWidth: .infinity, alignment: .top)
 
-                        if totalProductPages > 1 {
-                            HStack(spacing: 10) {
-                                Button {
-                                    currentProductPage = max(currentProductPage - 1, 0)
-                                } label: {
-                                    paginationArrow(systemName: "chevron.left")
-                                }
-                                .disabled(currentProductPage == 0)
-
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 8) {
-                                        ForEach(0..<totalProductPages, id: \.self) { page in
-                                            Button {
-                                                currentProductPage = page
-                                            } label: {
-                                                Text("\(page + 1)")
-                                                    .font(.tbMeta)
-                                                    .foregroundStyle(page == currentProductPage ? .white : .primary.opacity(0.72))
-                                                    .frame(width: 30, height: 30)
-                                                    .background(
-                                                        Group {
-                                                            if page == currentProductPage {
-                                                                Circle()
-                                                                    .fill(TBTheme.deepSky.opacity(0.9))
-                                                            } else {
-                                                                Circle()
-                                                                    .fill(.white.opacity(0.92))
-                                                                    .overlay(
-                                                                        Circle()
-                                                                            .stroke(Color.black.opacity(0.05), lineWidth: 1)
-                                                                    )
-                                                            }
-                                                        }
-                                                    )
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
+                            if totalProductPages > 1 {
+                                HStack(spacing: 10) {
+                                    Button {
+                                        currentProductPage = max(currentProductPage - 1, 0)
+                                    } label: {
+                                        paginationArrow(systemName: "chevron.left")
                                     }
-                                    .padding(.horizontal, 2)
-                                }
+                                    .disabled(currentProductPage == 0)
 
-                                Button {
-                                    currentProductPage = min(currentProductPage + 1, totalProductPages - 1)
-                                } label: {
-                                    paginationArrow(systemName: "chevron.right")
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 8) {
+                                            ForEach(0..<totalProductPages, id: \.self) { page in
+                                                Button {
+                                                    currentProductPage = page
+                                                } label: {
+                                                    Text("\(page + 1)")
+                                                        .font(.tbMeta)
+                                                        .foregroundStyle(page == currentProductPage ? .white : .primary.opacity(0.72))
+                                                        .frame(width: 30, height: 30)
+                                                        .background(
+                                                            Group {
+                                                                if page == currentProductPage {
+                                                                    Circle()
+                                                                        .fill(TBTheme.deepSky.opacity(0.9))
+                                                                } else {
+                                                                    Circle()
+                                                                        .fill(.white.opacity(0.92))
+                                                                        .overlay(
+                                                                            Circle()
+                                                                                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                                                                        )
+                                                                }
+                                                            }
+                                                        )
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                        .padding(.horizontal, 2)
+                                    }
+
+                                    Button {
+                                        currentProductPage = min(currentProductPage + 1, totalProductPages - 1)
+                                    } label: {
+                                        paginationArrow(systemName: "chevron.right")
+                                    }
+                                    .disabled(currentProductPage >= totalProductPages - 1)
                                 }
-                                .disabled(currentProductPage >= totalProductPages - 1)
                             }
                         }
                     }
+                    .frame(height: gridSectionHeight(for: currentPageProducts.count))
+                    .tbAnimation(TBMotion.stateChange, value: currentProductPage)
                 }
-                .frame(height: gridSectionHeight(for: currentPageProducts.count))
-                .animation(.easeInOut(duration: 0.2), value: currentProductPage)
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var weeklyDropSection: some View {
+        if let sellerDropShelf, !weeklyDropProducts.isEmpty {
+            SellerProfileWeeklyDropShelf(
+                phase: sellerDropShelf.phase,
+                products: weeklyDropProducts,
+                onSelect: { selectedProduct = $0 }
+            )
+        }
+    }
+
+    @MainActor
+    private func loadSellerDropShelf() async {
+        do {
+            let response = try await DropAPI.sellerProfileDrop(sellerId: seller.id)
+            guard !Task.isCancelled else { return }
+            sellerDropShelf = response
+        } catch {
+            guard !Task.isCancelled else { return }
+            sellerDropShelf = nil
+        }
+    }
+
+    private func resolveDropProduct(_ dropProduct: DropProduct) -> Product {
+        if let existing = sellerProducts.first(where: { $0.id == dropProduct.id }) {
+            return existing
+        }
+
+        let formatter = ISO8601DateFormatter()
+        let rightsAcceptedAt = dropProduct.rightsCertificationAcceptedAt.flatMap { value -> Date? in
+            if let date = formatter.date(from: value) {
+                return date
+            }
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter.date(from: value)
+        }
+        let minShipDays = min(dropProduct.shipsInMinDays, dropProduct.shipsInMaxDays)
+        let maxShipDays = max(dropProduct.shipsInMinDays, dropProduct.shipsInMaxDays)
+        let dropNote = [
+            dropProduct.headline,
+            dropProduct.story,
+            dropProduct.durabilityNote,
+        ]
+        .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
+
+        return Product(
+            id: dropProduct.id,
+            sellerId: dropProduct.sellerId,
+            name: dropProduct.name,
+            priceCents: dropProduct.priceCents,
+            category: Category(rawValue: dropProduct.category) ?? .home,
+            imageNames: dropProduct.imageURLs,
+            demoVideoURL: Product.mediaURL(for: dropProduct.demoVideoURL),
+            productionPreviewURL: Product.mediaURL(for: dropProduct.productionPreviewURL),
+            pageViewCount: 0,
+            favoriteCount: 0,
+            material: dropProduct.material,
+            productionNote: dropNote,
+            durabilityNote: dropProduct.durabilityNote,
+            careWarnings: dropProduct.careWarnings,
+            shipsInDays: minShipDays...maxShipDays,
+            previousPriceCents: dropProduct.previousPriceCents,
+            rightsOwnershipType: dropProduct.rightsOwnershipType,
+            rightsReferenceFlags: dropProduct.rightsReferenceFlags ?? [],
+            rightsCertificationAccepted: dropProduct.rightsCertificationAccepted ?? false,
+            rightsCertificationAcceptedAt: rightsAcceptedAt,
+            requiresManualReview: dropProduct.requiresManualReview ?? false,
+            reviewReason: dropProduct.reviewReason
+        )
     }
 
     private func gridSectionHeight(for productCount: Int) -> CGFloat {
@@ -665,8 +770,6 @@ struct PublicSellerProfileView: View {
                 )
         )
         .shadow(color: TBTheme.deepSky.opacity(0.10), radius: 2, y: 1)
-        .shadow(color: .black.opacity(0.08), radius: 12, y: 5)
-        .shadow(color: .white.opacity(0.45), radius: 1, y: -1)
         .contentShape(Capsule(style: .continuous))
     }
 
@@ -716,6 +819,9 @@ struct PublicSellerProfileView: View {
 
                     actionSection
 
+                    weeklyDropSection
+                        .padding(.top, 6)
+
                     productsSection
                         .padding(.top, 4)
                 }
@@ -724,6 +830,196 @@ struct PublicSellerProfileView: View {
             }
         }
         .scrollBounceBehavior(.basedOnSize)
+        .refreshable {
+            await loadSellerDropShelf()
+        }
+    }
+}
+
+// MARK: - Weekly Drop Shelf
+
+private struct SellerProfileWeeklyDropShelf: View {
+    let phase: SellerProfileDropPhase
+    let products: [Product]
+    let onSelect: (Product) -> Void
+
+    private var title: String {
+        phase == .live ? "This Week's Drop" : "From Last Week's Drop"
+    }
+
+    private var subtitle: String {
+        phase == .live
+            ? "Featured in the live Weekly Drop."
+            : "Unsold favorites remain here until the next Drop opens."
+    }
+
+    private var badgeTitle: String {
+        phase == .live ? "Live" : "Previous"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .frame(width: 34, height: 34)
+                    .background(TBTheme.skyBlue.opacity(0.13), in: RoundedRectangle(cornerRadius: 10))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.tbHeadline)
+                        .foregroundStyle(.primary.opacity(0.9))
+                    Text(subtitle)
+                        .font(.tbMeta)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(badgeTitle)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(phase == .live ? .white : TBTheme.deepSky)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(
+                        phase == .live ? TBTheme.deepSky : TBTheme.skyBlue.opacity(0.14),
+                        in: Capsule()
+                    )
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 10) {
+                    ForEach(products) { product in
+                        SellerProfileDropProductCard(product: product) {
+                            onSelect(product)
+                        }
+                    }
+                }
+                .scrollTargetLayout()
+                .padding(.horizontal, 1)
+                .padding(.bottom, 5)
+            }
+            .scrollTargetBehavior(.viewAligned)
+        }
+        .padding(12)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.92),
+                    TBTheme.skyBlue.opacity(0.08),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.95),
+                            TBTheme.skyBlue.opacity(0.42),
+                            TBTheme.deepSky.opacity(0.16),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: TBTheme.deepSky.opacity(0.08), radius: 14, y: 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(title), \(products.count) products")
+    }
+}
+
+private struct SellerProfileDropProductCard: View {
+    let product: Product
+    let onSelect: () -> Void
+
+    private var formattedPrice: String {
+        Money.format(cents: product.priceCents)
+    }
+
+    var body: some View {
+        Button(action: onSelect) {
+            cardContent
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(product.name), \(formattedPrice), Weekly Drop product")
+        .accessibilityHint("Opens product details.")
+    }
+
+    private var cardContent: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            productArtwork
+                .frame(width: 154, height: 104)
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+
+            Text(product.name)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(TBTheme.deepSky)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            Text(formattedPrice)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.primary.opacity(0.82))
+        }
+        .padding(8)
+        .frame(width: 170, alignment: .topLeading)
+        .frame(minHeight: 174, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.05), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.04), radius: 8, y: 3)
+    }
+
+    @ViewBuilder
+    private var productArtwork: some View {
+        ZStack {
+            LinearGradient(
+                colors: [TBTheme.skyBlue.opacity(0.18), Color.white],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            if product.primaryImageReference != nil {
+                StorefrontImageView(reference: product.primaryImageReference) {
+                    Image(systemName: product.category.icon)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.45))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+            } else {
+                Image(systemName: product.category.icon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(TBTheme.deepSky.opacity(0.45))
+            }
+
+            VStack {
+                HStack {
+                    Text("Weekly Drop")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(.white.opacity(0.9), in: Capsule())
+                    Spacer()
+                }
+                Spacer()
+            }
+            .padding(7)
+        }
     }
 }
 

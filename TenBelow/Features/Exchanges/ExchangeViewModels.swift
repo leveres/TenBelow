@@ -14,7 +14,12 @@ struct ExchangeOrderItemContext: Identifiable, Hashable {
     let item: OrderLineItem
 
     var id: String { item.id }
-    var productTitle: String { item.productName }
+    var productTitle: String {
+        guard let colorName = item.selectedColorName, !colorName.isEmpty else {
+            return item.productName
+        }
+        return "\(item.productName) · \(colorName)"
+    }
     var imageURL: URL? {
         guard let thumbnailURL = item.thumbnailURL else { return nil }
         return URL(string: thumbnailURL)
@@ -269,6 +274,13 @@ final class ExchangeRequestViewModel: ObservableObject {
                 reasonCode: selectedReasonCode,
                 buyerExplanation: trimmedExplanation,
                 assets: draftAssets,
+                originalVariantSnapshot: selectedItem.item.selectedColor.map {
+                    [
+                        "selectedColorId": $0.id,
+                        "selectedColorName": $0.name,
+                        "selectedColorHex": $0.hex ?? "",
+                    ]
+                } ?? [:],
                 progress: { _ in }
             )
             submittedRequest = request

@@ -8,13 +8,15 @@
 import SwiftUI
 
 struct CartButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let itemCount: Int
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
-                Image(systemName: "cart.fill")
+                cartIcon
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(TBTheme.deepSky)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -32,6 +34,8 @@ struct CartButton: View {
                         .background(TBTheme.accent, in: Capsule())
                         .padding(.top, 2)
                         .padding(.trailing, 0)
+                        .contentTransition(.numericText())
+                        .transition(reduceMotion ? .opacity : .scale(scale: 0.82).combined(with: .opacity))
                 }
             }
             // Room for the badge inside layout bounds (avoids nav bar clipping when a glass capsule is used).
@@ -39,8 +43,19 @@ struct CartButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .tbAnimation(TBMotion.success, value: itemCount)
         .accessibilityLabel("Open cart")
         .accessibilityValue("\(itemCount) item\(itemCount == 1 ? "" : "s")")
+    }
+
+    @ViewBuilder
+    private var cartIcon: some View {
+        if reduceMotion {
+            Image(systemName: "cart.fill")
+        } else {
+            Image(systemName: "cart.fill")
+                .symbolEffect(.bounce.down, value: itemCount)
+        }
     }
 }
 

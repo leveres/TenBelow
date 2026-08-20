@@ -8,7 +8,7 @@
     "setup:postgres:phase1": "node scripts/setup-postgres-phase1.mjs",
     "repair:prisma:phase1": "node scripts/repair-prisma-phase1-schema.mjs",
     "dev": "node --watch server.js",
-    "check": "node --check server.js",
+    "check": "node --check server.js && node --check admin/admin-review.js && node scripts/verify-product-colors.mjs",
     "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://127.0.0.1:5432/tenbelow} prisma generate",
     "prisma:validate": "DATABASE_URL=${DATABASE_URL:-postgresql://127.0.0.1:5432/tenbelow} prisma validate",
     "prisma:migrate:dev": "prisma migrate dev",

@@ -53,6 +53,7 @@ struct StoredProduct: Identifiable, Codable, Hashable {
     var pageViewCount: Int
     var favoriteCount: Int
     var material: String
+    var availableColors: [ProductColorOption]
     var productionNote: String
     var durabilityNote: String
     var careWarnings: [String]
@@ -70,7 +71,7 @@ struct StoredProduct: Identifiable, Codable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, sellerId, name, priceCents, category, imageNames, demoVideoURL, productionPreviewURL
-        case pageViewCount, favoriteCount, material, productionNote, durabilityNote, careWarnings
+        case pageViewCount, favoriteCount, material, availableColors, productionNote, durabilityNote, careWarnings
         case shipsInMinDays, shipsInMaxDays, createdAt, updatedAt, previousPriceCents
         case rightsOwnershipType, rightsReferenceFlags, rightsCertificationAccepted
         case rightsCertificationAcceptedAt, requiresManualReview, reviewReason
@@ -93,6 +94,7 @@ struct StoredProduct: Identifiable, Codable, Hashable {
         pageViewCount = product.pageViewCount
         favoriteCount = product.favoriteCount
         material = product.material
+        availableColors = product.availableColors
         productionNote = product.productionNote
         durabilityNote = product.durabilityNote
         careWarnings = product.careWarnings
@@ -130,6 +132,7 @@ struct StoredProduct: Identifiable, Codable, Hashable {
         pageViewCount = existing?.pageViewCount ?? 0
         favoriteCount = existing?.favoriteCount ?? 0
         material = draft.material.isEmpty ? "PLA+" : draft.material
+        availableColors = draft.availableColors
         productionNote = draft.productionNote.isEmpty ? "Printed fresh when you order" : draft.productionNote
         durabilityNote = draft.durabilityNote.isEmpty ? "Built for everyday use." : draft.durabilityNote
         careWarnings = draft.warningLines.isEmpty ? ["Handle with care."] : draft.warningLines
@@ -163,6 +166,7 @@ struct StoredProduct: Identifiable, Codable, Hashable {
         pageViewCount = try container.decode(Int.self, forKey: .pageViewCount)
         favoriteCount = try container.decode(Int.self, forKey: .favoriteCount)
         material = try container.decode(String.self, forKey: .material)
+        availableColors = try container.decodeIfPresent([ProductColorOption].self, forKey: .availableColors) ?? []
         productionNote = try container.decode(String.self, forKey: .productionNote)
         durabilityNote = try container.decode(String.self, forKey: .durabilityNote)
         careWarnings = try container.decode([String].self, forKey: .careWarnings)
@@ -192,6 +196,7 @@ struct StoredProduct: Identifiable, Codable, Hashable {
             pageViewCount: pageViewCount,
             favoriteCount: favoriteCount,
             material: material,
+            availableColors: availableColors,
             productionNote: productionNote,
             durabilityNote: durabilityNote,
             careWarnings: careWarnings,

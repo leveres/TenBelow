@@ -10,11 +10,23 @@ import StripePaymentSheet
 import UIKit
 #endif
 
+private enum CheckoutFocusField: Hashable {
+    case email
+    case name
+    case line1
+    case line2
+    case city
+    case state
+    case postalCode
+    case country
+}
+
 struct CheckoutView: View {
     @EnvironmentObject private var cart: CartStore
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
     @EnvironmentObject private var orderStore: OrderStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("buyerFullName") private var buyerFullName = ""
     @AppStorage("buyerEmail") private var buyerEmail = ""
     @AppStorage("buyerHasPlacedOrder") private var buyerHasPlacedOrder = false
@@ -36,6 +48,8 @@ struct CheckoutView: View {
     /// Keeps the current `PaymentSheet` alive for the duration of UIKit presentation (see `presentPaymentSheetFromKeyWindow`).
     @State private var paymentSheetRetainer: PaymentSheet?
     @State private var presentedLegal: LegalDocument?
+
+    @FocusState private var focusedField: CheckoutFocusField?
 
     private var isCheckoutReady: Bool {
         AppConstants.hasLiveCheckoutConfiguration || AppConstants.isTestingOverridesEnabled
@@ -144,6 +158,11 @@ struct CheckoutView: View {
                         .background(Color.red.opacity(0.08))
                         .cornerRadius(TBTheme.radiusMD)
                         .padding(.horizontal)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .move(edge: .top).combined(with: .opacity)
+                        )
                     }
 
                     if !isCheckoutReady {
@@ -160,6 +179,7 @@ struct CheckoutView: View {
                 }
                 .padding(.vertical, TBTheme.spacingLG)
                 .padding(.bottom, 40)
+                .animation(reduceMotion ? nil : TBMotion.stateChange, value: errorMessage)
             }
             .scrollDismissesKeyboard(.interactively)
             .dynamicTypeSize(.xSmall ... .accessibility5)
@@ -240,11 +260,21 @@ struct CheckoutView: View {
                             .foregroundStyle(TBTheme.skyBlue)
 
                         ForEach(group.items) { item in
-                            HStack {
-                                Text(item.product.name)
-                                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                                    .foregroundStyle(TBTheme.deepSky)
-                                    .lineLimit(1)
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.product.name)
+                                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                                        .foregroundStyle(TBTheme.deepSky)
+                                        .lineLimit(1)
+                                    if let color = item.selectedColor {
+                                        HStack(spacing: 5) {
+                                            ProductColorSwatch(hex: color.hex, size: 12)
+                                            Text(color.name)
+                                        }
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    }
+                                }
                                 Spacer()
                                 Text("\(item.quantity) × \(Money.format(cents: item.product.priceCents))")
                                     .font(.system(size: 14, weight: .medium, design: .rounded))
@@ -312,35 +342,83 @@ struct CheckoutView: View {
                         .foregroundStyle(TBTheme.deepSky)
                 }
 
-                CheckoutField(label: "Email", text: $email, icon: "envelope")
+                CheckoutField(
+                    label: "Email",
+                    text: $email,
+                    icon: "envelope",
+                    focus: $focusedField,
+                    focusValue: .email
+                )
                     .keyboardType(.emailAddress)
                     .textContentType(.emailAddress)
                     .textInputAutocapitalization(.never)
 
-                CheckoutField(label: "Full name", text: $name, icon: "person")
+                CheckoutField(
+                    label: "Full name",
+                    text: $name,
+                    icon: "person",
+                    focus: $focusedField,
+                    focusValue: .name
+                )
                     .textContentType(.name)
 
-                CheckoutField(label: "Address", text: $line1, icon: "house")
+                CheckoutField(
+                    label: "Address",
+                    text: $line1,
+                    icon: "house",
+                    focus: $focusedField,
+                    focusValue: .line1
+                )
                     .textContentType(.streetAddressLine1)
 
-                CheckoutField(label: "Apt, suite (optional)", text: $line2, icon: nil)
+                CheckoutField(
+                    label: "Apt, suite (optional)",
+                    text: $line2,
+                    icon: nil,
+                    focus: $focusedField,
+                    focusValue: .line2
+                )
                     .textContentType(.streetAddressLine2)
 
                 HStack(spacing: TBTheme.spacingMD) {
-                    CheckoutField(label: "City", text: $city, icon: nil)
+                    CheckoutField(
+                        label: "City",
+                        text: $city,
+                        icon: nil,
+                        focus: $focusedField,
+                        focusValue: .city
+                    )
                         .textContentType(.addressCity)
-                    CheckoutField(label: "State", text: $state, icon: nil)
+                    CheckoutField(
+                        label: "State",
+                        text: $state,
+                        icon: nil,
+                        focus: $focusedField,
+                        focusValue: .state
+                    )
                         .textContentType(.addressState)
                         .textInputAutocapitalization(.characters)
                         .frame(maxWidth: .infinity)
                 }
 
                 HStack(spacing: TBTheme.spacingMD) {
-                    CheckoutField(label: "ZIP", text: $postalCode, icon: nil)
+                    CheckoutField(
+                        label: "ZIP",
+                        text: $postalCode,
+                        icon: nil,
+                        focus: $focusedField,
+                        focusValue: .postalCode
+                    )
                         .keyboardType(.numberPad)
                         .textContentType(.postalCode)
                         .frame(maxWidth: .infinity)
-                    CheckoutField(label: "Country", text: $country, icon: nil)
+                    CheckoutField(
+                        label: "Country",
+                        text: $country,
+                        icon: nil,
+                        focus: $focusedField,
+                        focusValue: .country
+                    )
                         .textContentType(.countryName)
                         .textInputAutocapitalization(.characters)
                         .frame(maxWidth: .infinity)
@@ -424,23 +502,24 @@ struct CheckoutView: View {
         Button {
             Task { await createAndPresentPayment() }
         } label: {
-            if isSubmitting {
-                ProgressView()
-                    .tint(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-            } else {
-                HStack {
-                    Text(isCheckoutReady
-                         ? "Pay \(Money.format(cents: cart.totalCents))"
-                         : "Checkout Unavailable")
-                    Image(systemName: isCheckoutReady ? "creditcard.fill" : "lock.fill")
-                        .font(.caption.weight(.semibold))
+            ZStack {
+                if isSubmitting {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    HStack {
+                        Text(isCheckoutReady
+                             ? "Pay \(Money.format(cents: cart.totalCents))"
+                             : "Checkout Unavailable")
+                            .contentTransition(.numericText())
+                        Image(systemName: isCheckoutReady ? "creditcard.fill" : "lock.fill")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
                 }
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
             }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 52)
         }
         .buttonStyle(PrimaryCTAButtonStyle())
         .disabled(!canProceed || isSubmitting || cart.subtotalCents < minimumOrderCents || !isCheckoutReady)
@@ -448,6 +527,7 @@ struct CheckoutView: View {
         .padding(.horizontal)
         .accessibilityIdentifier("checkout.pay")
         .accessibilityHint("Places your order and opens payment when checkout is ready.")
+        .animation(reduceMotion ? nil : TBMotion.stateChange, value: isSubmitting)
 
         if cart.subtotalCents < minimumOrderCents {
             Text("Minimum order \(Money.format(cents: minimumOrderCents)) to proceed.")
@@ -575,7 +655,13 @@ struct CheckoutView: View {
                 postalCode: normalizedPostalCode,
                 country: normalizedCountry
             ),
-            items: cart.items.map { CheckoutItem(productId: $0.product.id, quantity: $0.quantity) }
+            items: cart.items.map {
+                CheckoutItem(
+                    productId: $0.product.id,
+                    selectedColorId: $0.selectedColor?.id,
+                    quantity: $0.quantity
+                )
+            }
         )
 
         do {
@@ -725,6 +811,12 @@ private struct CheckoutField: View {
     let label: String
     @Binding var text: String
     var icon: String? = nil
+    var focus: FocusState<CheckoutFocusField?>.Binding
+    var focusValue: CheckoutFocusField
+
+    private var isFocused: Bool {
+        focus.wrappedValue == focusValue
+    }
 
     private var checkoutFieldAccessibilityIdentifier: String {
         switch label {
@@ -746,14 +838,19 @@ private struct CheckoutField: View {
             .font(.system(size: 16, weight: .medium, design: .rounded))
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color.white.opacity(0.7))
+            .background(Color.white.opacity(isFocused ? 0.88 : 0.7))
             .cornerRadius(TBTheme.radiusMD)
             .overlay(
                 RoundedRectangle(cornerRadius: TBTheme.radiusMD)
-                    .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                    .strokeBorder(
+                        isFocused ? TBTheme.accent.opacity(0.55) : Color.secondary.opacity(0.2),
+                        lineWidth: isFocused ? 1.5 : 1
+                    )
             )
+            .focused(focus, equals: focusValue)
             .autocorrectionDisabled()
             .accessibilityIdentifier(checkoutFieldAccessibilityIdentifier)
+            .animation(TBMotion.stateChange, value: isFocused)
     }
 }
 

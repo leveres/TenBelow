@@ -12,6 +12,7 @@ struct ShippingAddress: Codable {
 
 struct CheckoutItem: Codable {
     let productId: String
+    let selectedColorId: String?
     let quantity: Int
 }
 

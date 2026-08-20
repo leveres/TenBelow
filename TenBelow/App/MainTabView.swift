@@ -49,7 +49,7 @@ struct MainTabView: View {
             tabContent
                 .opacity(shouldDisplayLoadingOverlay ? 0.0 : 1.0)
                 .allowsHitTesting(!shouldDisplayLoadingOverlay)
-                .animation(.easeInOut(duration: 0.5), value: shouldDisplayLoadingOverlay)
+                .animation(reduceMotion ? nil : TBMotion.surface, value: shouldDisplayLoadingOverlay)
 
             if shouldDisplayLoadingOverlay {
                 AppLoadingOverlay(
@@ -80,8 +80,7 @@ struct MainTabView: View {
                 .accessibilitySortPriority(1)
             }
         }
-        .animation(.easeInOut(duration: 0.5), value: shouldDisplayLoadingOverlay)
-        .animation(.spring(response: 0.42, dampingFraction: 0.86), value: activeNotificationBanner?.id)
+        .animation(reduceMotion ? nil : TBMotion.surface, value: activeNotificationBanner?.id)
         .task {
             #if DEBUG
             AppConstants.refreshDebugBackendBaseURLOverrideCache()
@@ -167,6 +166,7 @@ struct MainTabView: View {
     private var tabContent: some View {
         TabView(selection: $selectedTab) {
             HomeView()
+                .environment(\.tbTabIsActive, selectedTab == .home)
                 .tag(MainTab.home)
                 .tabItem { Label("Home", systemImage: "house.fill") }
 
@@ -179,6 +179,7 @@ struct MainTabView: View {
                     ShopView()
                 }
             }
+            .environment(\.tbTabIsActive, selectedTab == .store)
             .tag(MainTab.store)
             .tabItem {
                 if userRole == "seller" {
@@ -189,6 +190,7 @@ struct MainTabView: View {
             }
 
             DropView()
+                .environment(\.tbTabIsActive, selectedTab == .drop)
                 .tag(MainTab.drop)
                 .tabItem { Label("Weekly Drop", systemImage: dropTabSymbolName) }
                 .badge(isWeeklyDropLive ? "LIVE" : nil)
@@ -196,11 +198,13 @@ struct MainTabView: View {
             NavigationStack {
                 OrdersView()
             }
+                .environment(\.tbTabIsActive, selectedTab == .orders)
                 .tag(MainTab.orders)
                 .tabItem { Label("Orders", systemImage: "shippingbox.fill") }
                 .badge(ordersTabBadge)
 
             SettingsView()
+                .environment(\.tbTabIsActive, selectedTab == .settings)
                 .tag(MainTab.settings)
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .badge(settingsTabBadge)

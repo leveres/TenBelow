@@ -1011,6 +1011,7 @@ struct BuyerOrderDetailView: View {
                 ProductionPreviewEntry(
                     productId: item.productId,
                     productName: item.productName,
+                    selectedColor: item.selectedColor,
                     videoURL: resolvedURL
                 )
             )
@@ -1059,6 +1060,15 @@ struct BuyerOrderDetailView: View {
                                     .font(.tbBodyStrong)
                                     .foregroundStyle(.primary)
 
+                                if let color = preview.selectedColor {
+                                    HStack(spacing: 5) {
+                                        ProductColorSwatch(hex: color.hex, size: 12)
+                                        Text("Made in \(color.name)")
+                                    }
+                                    .font(.tbCaption.weight(.semibold))
+                                    .foregroundStyle(TBTheme.accent)
+                                }
+
                                 Text("Watch the maker video for this item.")
                                     .font(.tbCaption)
                                     .foregroundStyle(.secondary)
@@ -1083,6 +1093,7 @@ struct BuyerOrderDetailView: View {
 private struct ProductionPreviewEntry: Identifiable {
     let productId: String
     let productName: String
+    var selectedColor: ProductColorOption? = nil
     let videoURL: URL
 
     var id: String {
@@ -1488,6 +1499,15 @@ struct SellerOrderDetailView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
 
+                    if let color = item.selectedColor {
+                        HStack(spacing: 5) {
+                            ProductColorSwatch(hex: color.hex, size: 13)
+                            Text("Make in \(color.name)")
+                        }
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(TBTheme.accent)
+                    }
+
                     Text(productionPreviewStatusText(existingURL: existingURL, isBusy: isBusy))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1534,6 +1554,7 @@ struct SellerOrderDetailView: View {
                         selectedProductionPreviewEntry = ProductionPreviewEntry(
                             productId: item.productId,
                             productName: item.productName,
+                            selectedColor: item.selectedColor,
                             videoURL: existingURL
                         )
                     } label: {

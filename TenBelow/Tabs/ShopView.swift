@@ -13,6 +13,7 @@ struct ShopView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showCart = false
     @State private var showSellerFilter = false
     @State private var showCollapsedFilters = false
@@ -160,6 +161,7 @@ struct ShopView: View {
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(TBMotion.subtleReveal(reduceMotion: reduceMotion))
                     } else {
                         GeometryReader { geometry in
                             ScrollView {
@@ -185,8 +187,13 @@ struct ShopView: View {
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                         }
+                        .transition(.opacity)
                     }
                 }
+                .animation(
+                    reduceMotion ? nil : TBMotion.stateChange,
+                    value: displayedProducts.isEmpty
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .background(TBFrostBackground())
 
@@ -544,7 +551,7 @@ private struct ShopCategoryChip: View {
         )
         .shadow(color: .black.opacity(0.03), radius: 8, x: 0, y: 4)
         .contentShape(Capsule())
-        .animation(.easeInOut(duration: 0.18), value: isSelected)
+        .tbAnimation(TBMotion.stateChange, value: isSelected)
     }
 }
 

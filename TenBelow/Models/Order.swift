@@ -79,6 +79,9 @@ struct OrderLineItem: Identifiable, Codable, Hashable {
     var unitPriceCents: Int
     var quantity: Int
     var thumbnailURL: String?
+    var selectedColorId: String? = nil
+    var selectedColorName: String? = nil
+    var selectedColorHex: String? = nil
     /// Optional order-bound production clip URL string.
     /// This is independent from public product media/gallery.
     var productionPreviewURL: String? = nil
@@ -95,5 +98,10 @@ struct OrderLineItem: Identifiable, Codable, Hashable {
               let url = URL(string: productionPreviewURL)
         else { return nil }
         return url
+    }
+
+    var selectedColor: ProductColorOption? {
+        guard let selectedColorName, !selectedColorName.isEmpty else { return nil }
+        return ProductColorOption(id: selectedColorId, name: selectedColorName, hex: selectedColorHex)
     }
 }

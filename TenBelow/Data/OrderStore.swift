@@ -380,6 +380,9 @@ final class OrderStore: ObservableObject {
                     unitPriceCents: item.product.priceCents,
                     quantity: item.quantity,
                     thumbnailURL: item.product.imageNames.first,
+                    selectedColorId: item.selectedColor?.id,
+                    selectedColorName: item.selectedColor?.name,
+                    selectedColorHex: item.selectedColor?.hex,
                     productionPreviewURL: nil
                 )
             }

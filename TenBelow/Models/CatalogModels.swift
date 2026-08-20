@@ -22,6 +22,7 @@ struct UpsertSellerProductRequest: Codable {
     let demoVideoURL: String?
     let productionPreviewURL: String?
     let material: String
+    let availableColors: [ProductColorOption]
     let durabilityNote: String
     let careWarnings: [String]
     let shipsInMinDays: Int
@@ -168,6 +169,7 @@ struct RemoteProduct: Codable, Identifiable, Hashable {
     let demoVideoURL: String?
     let productionPreviewURL: String?
     let material: String
+    let availableColors: [ProductColorOption]
     let durabilityNote: String
     let careWarnings: [String]
     let shipsInMinDays: Int
@@ -194,7 +196,7 @@ struct RemoteProduct: Codable, Identifiable, Hashable {
 extension RemoteProduct {
     private enum CodingKeys: String, CodingKey {
         case id, sellerId, name, priceCents, category, imageURLs, demoVideoURL
-        case productionPreviewURL, material, durabilityNote, careWarnings
+        case productionPreviewURL, material, availableColors, durabilityNote, careWarnings
         case shipsInMinDays, shipsInMaxDays, isDrop, isActive, isApproved
         case averageRating, reviewCount, approvalStatus, archivedAt, reviewNotes
         case submittedAt, previousPriceCents, rightsOwnershipType, rightsReferenceFlags
@@ -213,6 +215,7 @@ extension RemoteProduct {
         demoVideoURL = try container.decodeIfPresent(String.self, forKey: .demoVideoURL)
         productionPreviewURL = try container.decodeIfPresent(String.self, forKey: .productionPreviewURL)
         material = try container.decode(String.self, forKey: .material)
+        availableColors = try container.decodeIfPresent([ProductColorOption].self, forKey: .availableColors) ?? []
         durabilityNote = try container.decode(String.self, forKey: .durabilityNote)
         careWarnings = try container.decode([String].self, forKey: .careWarnings)
         shipsInMinDays = try container.decode(Int.self, forKey: .shipsInMinDays)
@@ -286,6 +289,7 @@ extension RemoteProduct {
             averageRating: averageRating ?? fallbackProduct?.averageRating ?? 0,
             reviewCount: reviewCount ?? fallbackProduct?.reviewCount ?? 0,
             material: material,
+            availableColors: availableColors,
             productionNote: fallbackProduct?.productionNote ?? "Printed fresh when you order",
             durabilityNote: durabilityNote,
             careWarnings: careWarnings,

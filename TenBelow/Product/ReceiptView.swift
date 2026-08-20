@@ -15,7 +15,9 @@ struct ReceiptView: View {
     var onDismiss: () -> Void
 
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showExchangePolicyBrowser = false
+    @State private var revealStep = 0
 
     private var itemsBySeller: [(sellerId: String, items: [CartItem])] {
         Dictionary(grouping: items, by: { $0.product.sellerId })
@@ -41,6 +43,8 @@ struct ReceiptView: View {
             VStack(spacing: TBTheme.spacingXL) {
 
                 confirmationHeader
+                    .opacity(revealStep >= 1 ? 1 : 0)
+                    .offset(y: revealStep >= 1 || reduceMotion ? 0 : 8)
 
                 if !items.isEmpty {
                     GlassCard(cornerRadius: 22) {
@@ -53,12 +57,22 @@ struct ReceiptView: View {
                                         .foregroundStyle(TBTheme.skyBlue)
 
                                     ForEach(group.items) { item in
-                                        HStack {
-                                            Text(item.product.name)
-                                                .font(.body.weight(.medium))
-                                                .fontDesign(.rounded)
-                                                .foregroundStyle(TBTheme.deepSky)
-                                                .lineLimit(2)
+                                        HStack(alignment: .top) {
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text(item.product.name)
+                                                    .font(.body.weight(.medium))
+                                                    .fontDesign(.rounded)
+                                                    .foregroundStyle(TBTheme.deepSky)
+                                                    .lineLimit(2)
+                                                if let color = item.selectedColor {
+                                                    HStack(spacing: 5) {
+                                                        ProductColorSwatch(hex: color.hex, size: 12)
+                                                        Text("Color: \(color.name)")
+                                                    }
+                                                    .font(.caption.weight(.semibold))
+                                                    .foregroundStyle(.secondary)
+                                                }
+                                            }
                                             Spacer()
                                             Text("\(item.quantity) × \(Money.format(cents: item.product.priceCents))")
                                                 .font(.subheadline.weight(.medium))
@@ -114,18 +128,20 @@ struct ReceiptView: View {
                         }
                     }
                     .padding(.horizontal)
+                    .opacity(revealStep >= 2 ? 1 : 0)
+                    .offset(y: revealStep >= 2 || reduceMotion ? 0 : 8)
                 }
 
                 receiptDetails
+                    .opacity(revealStep >= 2 ? 1 : 0)
 
                 exchangeActions
+                    .opacity(revealStep >= 3 ? 1 : 0)
 
                 policyLinks
+                    .opacity(revealStep >= 3 ? 1 : 0)
 
                 Button {
-                    #if os(iOS)
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    #endif
                     onDismiss()
                 } label: {
                     Text("Done")
@@ -137,10 +153,23 @@ struct ReceiptView: View {
                 .buttonStyle(PrimaryCTAButtonStyle())
                 .padding(.horizontal)
                 .padding(.bottom, 40)
+                .opacity(revealStep >= 3 ? 1 : 0)
             }
             .padding(.top, TBTheme.spacingLG)
         }
         .background(TBFrostBackground())
+        .onAppear {
+            if reduceMotion {
+                revealStep = 3
+                return
+            }
+            withAnimation(TBMotion.stateChange) { revealStep = 1 }
+            withAnimation(TBMotion.stateChange.delay(0.08)) { revealStep = 2 }
+            withAnimation(TBMotion.stateChange.delay(0.16)) { revealStep = 3 }
+        }
+        .sensoryFeedback(.success, trigger: revealStep) { _, newValue in
+            newValue == 3
+        }
         .sheet(isPresented: $showExchangePolicyBrowser) {
             LegalDocumentSheet(document: .exchangePolicy)
         }
@@ -156,6 +185,7 @@ struct ReceiptView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 56))
                     .foregroundStyle(.green)
+                    .symbolEffect(.pulse.byLayer, options: .nonRepeating, value: revealStep >= 1)
             }
             .accessibilityHidden(true)
 

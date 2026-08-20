@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct ShippingProgressBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let subtotalCents: Int
     let freeShippingThresholdCents: Int
 
@@ -19,23 +21,31 @@ struct ShippingProgressBar: View {
         max(freeShippingThresholdCents - subtotalCents, 0)
     }
 
+    private var isUnlocked: Bool {
+        remainingCents == 0
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: TBTheme.spacingSM) {
-            if remainingCents == 0 {
-                Text("Free shipping unlocked")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(.green)
-                    .shadow(color: .green.opacity(0.25), radius: 2, y: 1)
-            } else {
-                Text("Add **\(Money.format(cents: remainingCents))** from this maker for free shipping")
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                    .foregroundStyle(TBTheme.deepSky)
-                    .shadow(color: TBTheme.skyBlue.opacity(0.15), radius: 2, y: 1)
+            Group {
+                if isUnlocked {
+                    Text("Free shipping unlocked")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.green)
+                        .shadow(color: .green.opacity(0.25), radius: 2, y: 1)
+                } else {
+                    Text("Add **\(Money.format(cents: remainingCents))** from this maker for free shipping")
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky)
+                        .shadow(color: TBTheme.skyBlue.opacity(0.15), radius: 2, y: 1)
+                }
             }
+            .contentTransition(.opacity)
+            .animation(reduceMotion ? nil : TBMotion.stateChange, value: isUnlocked)
 
             ProgressView(value: progress)
                 .tint(progress >= 1.0 ? .green : TBTheme.accent)
-                .animation(nil, value: progress)
+                .animation(reduceMotion ? nil : TBMotion.surface, value: progress)
         }
         .padding(TBTheme.spacingMD)
         .background(
@@ -67,4 +77,3 @@ struct ShippingProgressBar: View {
         .shadow(color: TBTheme.deepSky.opacity(0.06), radius: 5, y: 3)
     }
 }
-

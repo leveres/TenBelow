@@ -876,6 +876,7 @@ private struct WeeklyDropEditorView: View {
             draft.imageURLStrings.joined(separator: "|"),
             draft.demoVideoURLString,
             draft.productionPreviewURLString,
+            draft.availableColors.map { "\($0.id):\($0.name):\($0.hex ?? "")" }.joined(separator: "|"),
             String(stage.rawValue),
         ].joined(separator: "§")
     }
@@ -1100,6 +1101,7 @@ private struct WeeklyDropEditorView: View {
                 subtitle: "Keep the supporting details launch-ready."
             ) {
                 WeeklyDropTextField(title: "Material", text: $draft.material)
+                ProductColorOptionsEditor(colors: $draft.availableColors)
                 WeeklyDropTextEditor(
                     title: "Durability note",
                     text: $draft.durabilityNote,
@@ -1284,6 +1286,12 @@ private struct WeeklyDropEditorView: View {
                 WeeklyDropReviewRow(label: "Story", value: draft.story)
                 WeeklyDropReviewRow(label: "Best use", value: draft.bestUseCase)
                 WeeklyDropReviewRow(label: "Material", value: draft.material)
+                if !draft.availableColors.isEmpty {
+                    WeeklyDropReviewRow(
+                        label: "Colors",
+                        value: draft.availableColors.map(\.name).joined(separator: ", ")
+                    )
+                }
                 WeeklyDropReviewRow(label: "Ships", value: "\(min(draft.shipsInMinDays, draft.shipsInMaxDays))-\(max(draft.shipsInMinDays, draft.shipsInMaxDays)) days")
                 WeeklyDropReviewRow(
                     label: "Media",

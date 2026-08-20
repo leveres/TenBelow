@@ -1699,6 +1699,39 @@ textarea {
   color: #6883a9;
 }
 
+.color-options-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.color-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid rgba(109, 147, 204, 0.2);
+  border-radius: 999px;
+  color: #40536f;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.color-swatch {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 1px solid rgba(31, 51, 82, 0.24);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+.color-swatch.has-no-hex {
+  background:
+    linear-gradient(135deg, transparent 42%, #8da0bc 43%, #8da0bc 57%, transparent 58%),
+    #eef3fa;
+}
+
 .drop-headline,
 .drop-story,
 .drop-best-use-case,

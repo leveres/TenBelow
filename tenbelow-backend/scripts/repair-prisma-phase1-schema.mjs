@@ -19,6 +19,7 @@ import { syncLegalAgreementDocumentsToPrisma } from "../db/repositories/legalAgr
 import { getPool } from "../db/pgDocuments.mjs";
 
 const MIGRATIONS_NEWEST_FIRST = [
+  "20260819190000_product_color_options",
   "20260809033000_seller_welcome_email",
   "20260721013000_add_categories",
   "20260721000000_init",

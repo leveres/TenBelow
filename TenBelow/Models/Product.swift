@@ -7,6 +7,44 @@
 
 import Foundation
 
+struct ProductColorOption: Identifiable, Codable, Hashable {
+    let id: String
+    var name: String
+    var hex: String?
+
+    init(id: String? = nil, name: String, hex: String? = nil) {
+        let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.id = id?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            ?? Self.stableID(for: normalizedName)
+        self.name = normalizedName
+        self.hex = Self.normalizedHex(hex)
+    }
+
+    static func stableID(for name: String) -> String {
+        let slug = name
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+        return slug.isEmpty ? UUID().uuidString.lowercased() : slug
+    }
+
+    static func normalizedHex(_ value: String?) -> String? {
+        let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: "#", with: "") ?? ""
+        guard raw.range(of: #"^[0-9A-F]{6}$"#, options: .regularExpression) != nil else {
+            return nil
+        }
+        return "#\(raw)"
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
 enum ProductRightsOwnershipOption: String, CaseIterable, Identifiable, Codable {
     case createdMyself = "I created this product myself"
     case ownCommercialRights = "I own the commercial rights to this product"
@@ -80,6 +118,7 @@ struct Product: Identifiable, Hashable {
     let reviewCount: Int
 
     let material: String
+    let availableColors: [ProductColorOption]
     let productionNote: String
     let durabilityNote: String
     let careWarnings: [String]
@@ -107,6 +146,7 @@ struct Product: Identifiable, Hashable {
         averageRating: Double = 0,
         reviewCount: Int = 0,
         material: String,
+        availableColors: [ProductColorOption] = [],
         productionNote: String,
         durabilityNote: String,
         careWarnings: [String],
@@ -133,6 +173,7 @@ struct Product: Identifiable, Hashable {
         self.averageRating = averageRating
         self.reviewCount = reviewCount
         self.material = material
+        self.availableColors = availableColors
         self.productionNote = productionNote
         self.durabilityNote = durabilityNote
         self.careWarnings = careWarnings

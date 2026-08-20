@@ -17,6 +17,7 @@ struct ProductCard: View {
     @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let product: Product
     var seller: SellerProfile? = nil
@@ -55,7 +56,7 @@ struct ProductCard: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ProductCardNavigationButtonStyle())
             .accessibilityLabel(productAccessibilityLabel)
             .accessibilityHint("Opens product details.")
 
@@ -196,8 +197,10 @@ struct ProductCard: View {
         Group {
             if buyerEngagement.showsFavoriteButton(for: product) {
                 Button {
-                    let isNowFavorited = buyerEngagement.toggleFavorite(for: product)
-                    localProducts.setFavoriteState(for: product.id, isFavorited: isNowFavorited)
+                    withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
+                        let isNowFavorited = buyerEngagement.toggleFavorite(for: product)
+                        localProducts.setFavoriteState(for: product.id, isFavorited: isNowFavorited)
+                    }
                 } label: {
                     favoritePillContent(isInteractive: true)
                 }
@@ -215,11 +218,13 @@ struct ProductCard: View {
         return HStack(spacing: 4) {
             Image(systemName: heartSymbolName(isInteractive: isInteractive))
                 .font(.system(size: m.icon, weight: .semibold))
+                .contentTransition(.opacity)
             Text(verbatim: "\(displayedFavoriteCount)")
                 .font(.system(size: m.text, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
+                .contentTransition(.numericText())
         }
         .foregroundStyle(
             (isInteractive && buyerEngagement.isProductFavorited(product.id)) ? TBTheme.accent : TBTheme.deepSky
@@ -601,6 +606,17 @@ struct ProductCard: View {
             }
             Spacer(minLength: 0)
         }
+    }
+}
+
+private struct ProductCardNavigationButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
+            .opacity(configuration.isPressed ? 0.94 : 1)
+            .tbAnimation(TBMotion.press, value: configuration.isPressed)
     }
 }
 

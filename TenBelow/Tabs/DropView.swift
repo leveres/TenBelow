@@ -463,7 +463,16 @@ struct DropView: View {
             }
             .onReceive(countdownTimer) { now in
                 guard isDropVisible else { return }
-                countdownNow = now
+                if isSeller || isUsingWeeklyDropPreview {
+                    countdownNow = now
+                    return
+                }
+                // Buyer board card ticks its own countdown; throttle phase checks to every 30s.
+                let bucket = Int(now.timeIntervalSince1970 / 30)
+                let lastBucket = Int(countdownNow.timeIntervalSince1970 / 30)
+                if bucket != lastBucket {
+                    countdownNow = now
+                }
             }
             .onAppear {
                 isDropVisible = true
@@ -503,69 +512,75 @@ struct DropView: View {
 
     @ViewBuilder
     private var buyerActiveDropContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: DropLayoutMetrics.buyerHeaderStackSpacing) {
-                SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 5, flakeCount: 82) {
-                    Image("WeeklyDropTitle")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: DropLayoutMetrics.buyerTitleHeight)
-                        .padding(.bottom, DropLayoutMetrics.buyerTitleBottomTuck)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: DropLayoutMetrics.buyerHeaderStackSpacing) {
+                    SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 5, flakeCount: 82) {
+                        Image("WeeklyDropTitle")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: DropLayoutMetrics.buyerTitleHeight)
+                            .padding(.bottom, DropLayoutMetrics.buyerTitleBottomTuck)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, DropLayoutMetrics.buyerTitleCardOverlap)
+
+                    weeklyDropPreviewBadge
+                    WeeklyDropBoardCard(
+                        state: buyerLiveBoardState,
+                        referenceNow: isUsingWeeklyDropPreview ? countdownNow : nil
+                    )
+
+                    Text("Limited-time premium releases from makers across TenBelow. These picks stay live through Sunday night.")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 2)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, DropLayoutMetrics.buyerTitleCardOverlap)
+                .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
+                .padding(.top, DropLayoutMetrics.buyerContentTopInset)
 
-                weeklyDropPreviewBadge
-                WeeklyDropBoardCard(state: buyerLiveBoardState, now: countdownNow)
-
-                Text("Limited-time premium releases from makers across TenBelow. These picks stay live through Sunday night.")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 2)
+                buyerDropProductsSection(
+                    products: weeklyDropProducts,
+                    isLockedPreview: false,
+                    lockedMessage: nil
+                )
             }
-            .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
-            .padding(.top, DropLayoutMetrics.buyerContentTopInset)
-
-            buyerDropProductsSection(
-                products: weeklyDropProducts,
-                isLockedPreview: false,
-                lockedMessage: nil
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.bottom, TopLevelHeaderMetrics.dropBottomInset)
+            .padding(.bottom, TopLevelHeaderMetrics.dropBottomInset + TopLevelHeaderMetrics.homeFloatingTabBarClearance)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder
     private var buyerThursdayPreviewContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: DropLayoutMetrics.buyerHeaderStackSpacing) {
-                SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 5, flakeCount: 82) {
-                    Image("WeeklyDropTitle")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: DropLayoutMetrics.buyerTitleHeight)
-                        .padding(.bottom, DropLayoutMetrics.buyerTitleBottomTuck)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: DropLayoutMetrics.buyerHeaderStackSpacing) {
+                    SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 5, flakeCount: 82) {
+                        Image("WeeklyDropTitle")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: DropLayoutMetrics.buyerTitleHeight)
+                            .padding(.bottom, DropLayoutMetrics.buyerTitleBottomTuck)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, DropLayoutMetrics.buyerTitleCardOverlap)
+
+                    weeklyDropPreviewBadge
+                    WeeklyDropBoardCard(
+                        state: buyerThursdayPreviewState,
+                        referenceNow: isUsingWeeklyDropPreview ? countdownNow : nil
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, DropLayoutMetrics.buyerTitleCardOverlap)
+                .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
+                .padding(.top, DropLayoutMetrics.buyerContentTopInset)
 
-                weeklyDropPreviewBadge
-                WeeklyDropBoardCard(state: buyerThursdayPreviewState, now: countdownNow)
+                buyerDropProductsSection(
+                    products: weeklyDropProducts,
+                    isLockedPreview: true,
+                    lockedMessage: "Preview only until Friday 12:00 AM"
+                )
             }
-            .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
-            .padding(.top, DropLayoutMetrics.buyerContentTopInset)
-
-            buyerDropProductsSection(
-                products: weeklyDropProducts,
-                isLockedPreview: true,
-                lockedMessage: "Preview only until Friday 12:00 AM"
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.bottom, TopLevelHeaderMetrics.dropBottomInset)
+            .padding(.bottom, TopLevelHeaderMetrics.dropBottomInset + TopLevelHeaderMetrics.homeFloatingTabBarClearance)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: - Buyer Inactive Drop
@@ -657,33 +672,36 @@ struct DropView: View {
 
     @ViewBuilder
     private var buyerPreviewDropContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: DropLayoutMetrics.buyerHeaderStackSpacing) {
-                SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 5, flakeCount: 82) {
-                    Image("WeeklyDropTitle")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: DropLayoutMetrics.buyerTitleHeight)
-                        .padding(.bottom, DropLayoutMetrics.buyerTitleBottomTuck)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: DropLayoutMetrics.buyerHeaderStackSpacing) {
+                    SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 5, flakeCount: 82) {
+                        Image("WeeklyDropTitle")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: DropLayoutMetrics.buyerTitleHeight)
+                            .padding(.bottom, DropLayoutMetrics.buyerTitleBottomTuck)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, DropLayoutMetrics.buyerTitleCardOverlap)
+
+                    weeklyDropPreviewBadge
+                    WeeklyDropBoardCard(
+                        state: buyerPreviewBoardState,
+                        referenceNow: isUsingWeeklyDropPreview ? countdownNow : nil
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, DropLayoutMetrics.buyerTitleCardOverlap)
+                .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
+                .padding(.top, DropLayoutMetrics.buyerContentTopInset)
 
-                weeklyDropPreviewBadge
-                WeeklyDropBoardCard(state: buyerPreviewBoardState, now: countdownNow)
+                buyerDropProductsSection(
+                    products: buyerPreviewDropProducts,
+                    isLockedPreview: false,
+                    lockedMessage: nil
+                )
             }
-            .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
-            .padding(.top, DropLayoutMetrics.buyerContentTopInset)
-
-            buyerDropProductsSection(
-                products: buyerPreviewDropProducts,
-                isLockedPreview: false,
-                lockedMessage: nil
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.bottom, TopLevelHeaderMetrics.dropBottomInset)
+            .padding(.bottom, TopLevelHeaderMetrics.dropBottomInset + TopLevelHeaderMetrics.homeFloatingTabBarClearance)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: - Seller Hub
@@ -1345,6 +1363,7 @@ struct DropView: View {
             pageViewCount: 0,
             favoriteCount: 0,
             material: dropProduct.material,
+            availableColors: dropProduct.availableColors ?? [],
             productionNote: dropBuyerStatusNote(for: dropProduct),
             durabilityNote: dropProduct.durabilityNote,
             careWarnings: dropProduct.careWarnings,
@@ -1620,27 +1639,24 @@ private struct BuyerDropPagedList: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: TBTheme.spacingMD) {
-                ForEach(visibleProducts) { product in
-                    Button {
-                        guard !isLockedPreview else { return }
-                        onSelect(product)
-                    } label: {
-                        DropProductRow(
-                            product: product,
-                            sellerDisplayName: sellerDisplayName(product.sellerId),
-                            isLockedPreview: isLockedPreview,
-                            lockedMessage: lockedMessage
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isLockedPreview)
+        LazyVStack(spacing: TBTheme.spacingMD) {
+            ForEach(visibleProducts) { product in
+                Button {
+                    guard !isLockedPreview else { return }
+                    onSelect(product)
+                } label: {
+                    DropProductRow(
+                        product: product,
+                        sellerDisplayName: sellerDisplayName(product.sellerId),
+                        isLockedPreview: isLockedPreview,
+                        lockedMessage: lockedMessage
+                    )
                 }
+                .buttonStyle(.plain)
+                .disabled(isLockedPreview)
             }
-            .padding(.bottom, 12)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.bottom, 12)
         .onChange(of: products.count) { _, _ in
             currentPage = min(currentPage, max(pageCount - 1, 0))
         }

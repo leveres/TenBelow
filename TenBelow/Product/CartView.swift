@@ -21,6 +21,7 @@ struct CartView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
     @State private var phase: CheckoutPhase = .cart
     @State private var receiptItems: [CartItem] = []
@@ -61,13 +62,7 @@ struct CartView: View {
     }
 
     private var cartRefreshFingerprint: String {
-        let remoteFingerprint = catalog.products
-            .map { "\($0.id):\($0.priceCents):\($0.isActive):\($0.isApproved)" }
-            .joined(separator: "|")
-        let fallbackFingerprint = localProducts.products
-            .map { "\($0.id):\($0.priceCents)" }
-            .joined(separator: "|")
-        return "\(remoteFingerprint)#\(fallbackFingerprint)"
+        "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(cart.items.count)"
     }
 
     private var isShowingReceipt: Bool {
@@ -79,6 +74,20 @@ struct CartView: View {
 
     private var canProceedToCheckout: Bool {
         cart.subtotalCents >= minimumOrderCents
+    }
+
+    private var phaseAnimationKey: String {
+        switch phase {
+        case .cart: return "cart"
+        case .checkout: return "checkout"
+        case .receipt(let orderId): return "receipt-\(orderId)"
+        }
+    }
+
+    private func setPhase(_ nextPhase: CheckoutPhase) {
+        withAnimation(reduceMotion ? nil : TBMotion.surface) {
+            phase = nextPhase
+        }
     }
 
     private func sellerDisplayName(for sellerId: String) -> String {
@@ -132,17 +141,21 @@ struct CartView: View {
                     switch phase {
                     case .cart:
                         cartContent
+                            .transition(TBMotion.surfaceTransition(reduceMotion: reduceMotion, edge: .leading))
                     case .checkout:
                         CheckoutView(onSuccess: { orderId in
                             receiptItems = cart.items
-                            phase = .receipt(orderId: orderId)
+                            setPhase(.receipt(orderId: orderId))
                         })
+                        .transition(TBMotion.surfaceTransition(reduceMotion: reduceMotion, edge: .trailing))
                     case .receipt(let orderId):
                         ReceiptView(orderId: orderId, items: receiptItems) {
                             dismiss()
                         }
+                        .transition(TBMotion.surfaceTransition(reduceMotion: reduceMotion, edge: .trailing))
                     }
                 }
+                .animation(reduceMotion ? nil : TBMotion.surface, value: phaseAnimationKey)
             }
             .navigationTitle(phaseTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -153,7 +166,7 @@ struct CartView: View {
                         ? "Your cart was updated because an item is no longer available."
                         : "Your cart was updated because some items are no longer available."
                     if case .checkout = phase, cart.items.isEmpty {
-                        phase = .cart
+                        setPhase(.cart)
                     }
                 } else if !cart.items.isEmpty {
                     cartUpdateMessage = nil
@@ -166,10 +179,7 @@ struct CartView: View {
                         EmptyView()
                     case .checkout:
                         Button("Back") {
-                            #if os(iOS)
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            #endif
-                            phase = .cart
+                            setPhase(.cart)
                         }
                         .foregroundStyle(TBTheme.icyBlue)
                     case .cart:
@@ -224,8 +234,10 @@ struct CartView: View {
     private var cartContent: some View {
         if cart.items.isEmpty {
             emptyCartView
+                .transition(TBMotion.subtleReveal(reduceMotion: reduceMotion))
         } else {
             cartWithItemsView
+                .transition(.opacity)
         }
     }
 
@@ -355,6 +367,7 @@ struct CartView: View {
 
                             ForEach(group.items) { item in
                                 CartRow(item: item)
+                                    .transition(TBMotion.subtleReveal(reduceMotion: reduceMotion))
                             }
 
                             if let quote = shippingQuote(for: group.sellerId) {
@@ -400,10 +413,12 @@ struct CartView: View {
                             Text(Money.format(cents: cart.totalCents))
                                 .font(.system(size: 18, weight: .bold, design: .rounded))
                                 .foregroundStyle(TBTheme.icyBlue)
+                                .contentTransition(.numericText())
                         }
                     }
                 }
                 .padding(.horizontal)
+                .animation(reduceMotion ? nil : TBMotion.stateChange, value: cart.totalCents)
 
                 if cart.subtotalCents < minimumOrderCents {
                     HStack(spacing: 8) {
@@ -421,11 +436,8 @@ struct CartView: View {
                 }
 
                 Button {
-                    #if os(iOS)
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    #endif
                     guard canProceedToCheckout else { return }
-                    phase = .checkout
+                    setPhase(.checkout)
                 } label: {
                     HStack {
                         Text("Proceed to Checkout")
@@ -512,6 +524,7 @@ struct CartView: View {
 
 private struct CartRow: View {
     @EnvironmentObject private var cart: CartStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let item: CartItem
 
     var body: some View {
@@ -543,19 +556,29 @@ private struct CartRow: View {
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(TBTheme.icyBlue)
 
+                if let color = item.selectedColor {
+                    Label {
+                        Text("Color: \(color.name)")
+                    } icon: {
+                        ProductColorSwatch(hex: color.hex, size: 14)
+                    }
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                }
+
                 HStack(spacing: 8) {
                     Stepper(value: Binding(
                         get: { item.quantity },
                         set: { newQty in
-                            #if os(iOS)
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            #endif
-                            cart.setQuantity(item.product, qty: newQty)
+                            withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
+                                cart.setQuantity(item, qty: newQty)
+                            }
                         }
                     ), in: 1...25) {
                         Text("Qty \(item.quantity)")
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
                     }
                     .labelsHidden()
                 }
@@ -564,10 +587,9 @@ private struct CartRow: View {
             Spacer(minLength: 8)
 
             Button {
-                #if os(iOS)
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                #endif
-                cart.remove(item.product)
+                withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
+                    cart.remove(item)
+                }
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 22))
@@ -575,7 +597,9 @@ private struct CartRow: View {
                     .symbolRenderingMode(.hierarchical)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Remove \(item.product.name)")
+            .accessibilityLabel(
+                "Remove \(item.product.name)\(item.selectedColor.map { ", \($0.name)" } ?? "")"
+            )
         }
         .padding(.vertical, 4)
     }

@@ -209,6 +209,7 @@ model Product {
   category        String          @default("desk") @db.VarChar(64)
   priceCents      Int             @default(0) @map("price_cents")
   previousPriceCents Int?         @map("previous_price_cents")
+  availableColors Json            @default("[]") @map("available_colors")
   material        String          @default("PLA+")
   durabilityNote  String          @default("Built for everyday use.") @map("durability_note")
   careWarnings    String[]        @default([]) @map("care_warnings")
@@ -412,6 +413,9 @@ model OrderItem {
   quantity               Int     @default(1)
   thumbnailUrl           String? @map("thumbnail_url") @db.Text
   productionPreviewUrl   String? @map("production_preview_url") @db.Text
+  selectedColorId        String? @map("selected_color_id") @db.VarChar(48)
+  selectedColorName      String? @map("selected_color_name")
+  selectedColorHex       String? @map("selected_color_hex") @db.VarChar(7)
 
   sellerOrder      SellerOrder       @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
   product          Product           @relation(fields: [productId], references: [id], onDelete: Restrict)

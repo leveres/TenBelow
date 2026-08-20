@@ -147,6 +147,7 @@ enum ShopBrowseFilters {
         let haystack = [
             product.name,
             product.material,
+            product.availableColors.map(\.name).joined(separator: " "),
             product.productionNote,
             product.durabilityNote,
             product.category.rawValue,

@@ -106,6 +106,10 @@ import {
   syncLegalAgreementDocumentsToPrisma,
   upsertSellerAgreementAcceptanceToPrisma,
 } from "./db/repositories/legalAgreementRepository.js";
+import {
+  AvailableColorsValidationError,
+  normalizeAvailableColors,
+} from "./domain/phase1/product.js";
 
 const app = express();
 const STRIPE_SECRET_KEY = String(process.env.STRIPE_SECRET_KEY || "").trim();
@@ -695,6 +699,7 @@ function normalizeCatalogProduct(product = {}) {
     previousPriceCents:
       product.previousPriceCents == null ? null : Math.max(0, asFiniteNumber(product.previousPriceCents, 0)),
     category: String(product.category || "desk").trim().toLowerCase(),
+    availableColors: normalizeAvailableColors(product.availableColors),
     imageURLs: normalizeHostedMediaReferences(product.imageURLs),
     demoVideoURL: normalizeHostedMediaReference(product.demoVideoURL),
     productionPreviewURL: normalizeHostedMediaReference(product.productionPreviewURL),
@@ -721,6 +726,26 @@ function normalizeCatalogProduct(product = {}) {
     requiresManualReview: product.requiresManualReview === true,
     reviewReason: product.reviewReason ? String(product.reviewReason).trim() : null,
   };
+}
+
+function availableColorsForProductWrite(body = {}, existingProduct = null) {
+  const existingColors = existingProduct?.availableColors || [];
+  if (!Object.prototype.hasOwnProperty.call(body, "availableColors")) {
+    return normalizeAvailableColors(existingColors);
+  }
+  return normalizeAvailableColors(body.availableColors, {
+    strict: true,
+    existingColors,
+  });
+}
+
+function respondToAvailableColorsError(res, error) {
+  if (!(error instanceof AvailableColorsValidationError)) return false;
+  res.status(400).json({
+    code: "invalid_available_colors",
+    error: error.message,
+  });
+  return true;
 }
 
 function auditContext(req, extra = {}) {
@@ -2611,6 +2636,9 @@ function groupOrderItemsIntoShipments(orderItems, sellers) {
         quantity: item.quantity,
         thumbnailURL: item.thumbnailURL || null,
         productionPreviewURL: item.productionPreviewURL || null,
+        selectedColorId: item.selectedColorId || null,
+        selectedColorName: item.selectedColorName || null,
+        selectedColorHex: item.selectedColorHex || null,
       })),
     };
   });
@@ -4276,6 +4304,35 @@ app.post("/create-payment-intent", paymentLimiter, requireAppClient, requireAuth
         });
       }
 
+      const availableColors = normalizeAvailableColors(product.availableColors);
+      const selectedColorId = String(item.selectedColorId || "").trim();
+      let selectedColor = null;
+      if (availableColors.length) {
+        if (!selectedColorId) {
+          return res.status(400).json({
+            code: "color_selection_required",
+            error: `Choose a color for ${product.name} before checking out.`,
+            productId: product.id,
+          });
+        }
+        selectedColor = availableColors.find((color) => color.id === selectedColorId) || null;
+        if (!selectedColor) {
+          return res.status(409).json({
+            code: "color_unavailable",
+            error: `The selected color for ${product.name} is no longer available.`,
+            productId: product.id,
+            selectedColorId,
+          });
+        }
+      } else if (selectedColorId) {
+        return res.status(409).json({
+          code: "color_unavailable",
+          error: `${product.name} does not currently offer color options.`,
+          productId: product.id,
+          selectedColorId,
+        });
+      }
+
       const lineCents = product.priceCents * quantity;
       subtotalCents += lineCents;
       sellerTotals[product.sellerId] = (sellerTotals[product.sellerId] || 0) + lineCents;
@@ -4288,6 +4345,9 @@ app.post("/create-payment-intent", paymentLimiter, requireAppClient, requireAuth
         thumbnailURL: product.imageURLs?.[0] || null,
         productionPreviewURL: product.productionPreviewURL || null,
         shipsInMaxDays: product.shipsInMaxDays || 4,
+        selectedColorId: selectedColor?.id || null,
+        selectedColorName: selectedColor?.name || null,
+        selectedColorHex: selectedColor?.hex || null,
       });
     }
 
@@ -4534,6 +4594,19 @@ app.post("/exchange-requests", requireAppClient, requireAuthenticatedBuyer, asyn
 
     const now = new Date().toISOString();
     const orderExchangeNumber = exchangeRequests.filter((request) => request.orderId === normalizedOrderId).length + 1;
+    const storedColorSnapshot = resolved.item.selectedColorId
+      ? {
+          selectedColorId: resolved.item.selectedColorId,
+          selectedColorName: resolved.item.selectedColorName || "",
+          ...(resolved.item.selectedColorHex ? { selectedColorHex: resolved.item.selectedColorHex } : {}),
+        }
+      : {};
+    const resolvedOriginalVariantSnapshot = {
+      ...(originalVariantSnapshot && typeof originalVariantSnapshot === "object" && !Array.isArray(originalVariantSnapshot)
+        ? originalVariantSnapshot
+        : {}),
+      ...storedColorSnapshot,
+    };
     const nextRequest = normalizeExchangeRequest({
       id: `EX-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
       orderId: normalizedOrderId,
@@ -4543,7 +4616,7 @@ app.post("/exchange-requests", requireAppClient, requireAuthenticatedBuyer, asyn
       productId: resolved.item.productId,
       productTitle: resolved.item.productName,
       productImageURL: resolved.item.thumbnailURL || null,
-      originalVariantSnapshot,
+      originalVariantSnapshot: resolvedOriginalVariantSnapshot,
       reasonCode: normalizedReasonCode,
       buyerExplanation: normalizedExplanation,
       requestedResolution: normalizedResolution,
@@ -6577,6 +6650,7 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
       });
       return res.status(403).json({ error: "Seller product update denied" });
     }
+    const availableColors = availableColorsForProductWrite(body, existingProduct);
 
     if (
       requestedPriceCents >= PREMIUM_LISTING_MIN_PRICE_CENTS &&
@@ -6597,6 +6671,7 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
           ? existingProduct.priceCents
           : existingProduct?.previousPriceCents || null,
       category: body.category,
+      availableColors,
       imageURLs: body.imageURLs,
       demoVideoURL: body.demoVideoURL,
       productionPreviewURL: body.productionPreviewURL,
@@ -6670,6 +6745,7 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
 
     res.json({ product: mergedProduct });
   } catch (err) {
+    if (respondToAvailableColorsError(res, err)) return;
     console.error("update seller-product error:", err);
     res.status(500).json({ error: err.message });
   }
@@ -8144,6 +8220,7 @@ function buildDropProduct(product = {}, entry = {}, index = 0) {
     priceCents: normalizedProduct.priceCents,
     previousPriceCents: normalizedProduct.previousPriceCents,
     category: normalizedProduct.category,
+    availableColors: normalizedProduct.availableColors,
     imageURLs: normalizedProduct.imageURLs,
     demoVideoURL: normalizedProduct.demoVideoURL,
     productionPreviewURL: normalizedProduct.productionPreviewURL,
@@ -8405,6 +8482,122 @@ function getCurrentDropWindow() {
   };
 }
 
+function soldDropProductIdsForWindow({
+  sellerId,
+  productIds,
+  startsAt,
+  endsAt,
+  orders = [],
+}) {
+  const normalizedSellerId = String(sellerId || "").trim();
+  const eligibleProductIds = productIds instanceof Set ? productIds : new Set(productIds || []);
+  const windowStart = new Date(startsAt);
+  const windowEnd = new Date(endsAt);
+  const soldProductIds = new Set();
+
+  if (
+    !normalizedSellerId ||
+    !eligibleProductIds.size ||
+    Number.isNaN(windowStart.getTime()) ||
+    Number.isNaN(windowEnd.getTime())
+  ) {
+    return soldProductIds;
+  }
+
+  for (const order of orders) {
+    const createdAt = order?.createdAt ? new Date(order.createdAt) : null;
+    if (
+      !createdAt ||
+      Number.isNaN(createdAt.getTime()) ||
+      createdAt < windowStart ||
+      createdAt > windowEnd
+    ) {
+      continue;
+    }
+
+    for (const shipment of Array.isArray(order.shipments) ? order.shipments : []) {
+      if (String(shipment?.sellerId || "").trim() !== normalizedSellerId) {
+        continue;
+      }
+      for (const item of Array.isArray(shipment.items) ? shipment.items : []) {
+        const productId = String(item?.productId || "").trim();
+        if (eligibleProductIds.has(productId)) {
+          soldProductIds.add(productId);
+        }
+      }
+    }
+  }
+
+  return soldProductIds;
+}
+
+function sellerDropShelfSnapshot({
+  sellerId,
+  now = new Date(),
+  drops = {},
+  catalog = {},
+  orders = [],
+}) {
+  const normalizedSellerId = String(sellerId || "").trim();
+  const relevantFriday = getRelevantDropFridayStart(now);
+  const relevantCycle = dropCycleWindowForFridayStart(relevantFriday);
+  const isLive = now >= relevantCycle.startsAt && now <= relevantCycle.endsAt;
+
+  if (isLive) {
+    const weekData = drops[relevantCycle.weekId];
+    const products = resolveDropProducts(weekData, catalog).filter(
+      (product) => product.sellerId === normalizedSellerId
+    );
+    return {
+      sellerId: normalizedSellerId,
+      phase: products.length ? "live" : "none",
+      weekId: relevantCycle.weekId,
+      startsAt: relevantCycle.startsAt.toISOString(),
+      endsAt: relevantCycle.endsAt.toISOString(),
+      nextDropAt: null,
+      products,
+    };
+  }
+
+  const priorFriday = addDropZoneDays(relevantFriday, -7, DROP_TIME_ZONE);
+  const priorCycle = dropCycleWindowForFridayStart(priorFriday);
+  const isCarryoverWindow = now > priorCycle.endsAt && now < relevantCycle.startsAt;
+  if (!isCarryoverWindow) {
+    return {
+      sellerId: normalizedSellerId,
+      phase: "none",
+      weekId: relevantCycle.weekId,
+      startsAt: relevantCycle.startsAt.toISOString(),
+      endsAt: relevantCycle.endsAt.toISOString(),
+      nextDropAt: relevantCycle.startsAt.toISOString(),
+      products: [],
+    };
+  }
+
+  const priorWeekData = drops[priorCycle.weekId];
+  const priorProducts = resolveDropProducts(priorWeekData, catalog).filter(
+    (product) => product.sellerId === normalizedSellerId
+  );
+  const soldProductIds = soldDropProductIdsForWindow({
+    sellerId: normalizedSellerId,
+    productIds: new Set(priorProducts.map((product) => product.id)),
+    startsAt: priorCycle.startsAt,
+    endsAt: priorCycle.endsAt,
+    orders,
+  });
+  const products = priorProducts.filter((product) => !soldProductIds.has(product.id));
+
+  return {
+    sellerId: normalizedSellerId,
+    phase: products.length ? "carryover" : "none",
+    weekId: priorCycle.weekId,
+    startsAt: priorCycle.startsAt.toISOString(),
+    endsAt: priorCycle.endsAt.toISOString(),
+    nextDropAt: relevantCycle.startsAt.toISOString(),
+    products,
+  };
+}
+
 function getCurrentDropSubmissionWindow() {
   const now = new Date();
   const fridayStart = getRelevantDropFridayStart(now);
@@ -8551,6 +8744,7 @@ app.post("/drop/submit", requireAppClient, requireAuthenticatedSeller, async (re
       });
       return res.status(403).json({ error: "That product belongs to another seller." });
     }
+    const availableColors = availableColorsForProductWrite(req.body, existingProduct);
 
     if (weekEntries.some((entry) => entry.productId === resolvedProductId)) {
       return res.status(409).json({ error: "This product is already in the current Weekly Drop." });
@@ -8563,6 +8757,7 @@ app.post("/drop/submit", requireAppClient, requireAuthenticatedSeller, async (re
       name,
       priceCents,
       category,
+      availableColors,
       imageURLs,
       demoVideoURL,
       productionPreviewURL,
@@ -8612,6 +8807,7 @@ app.post("/drop/submit", requireAppClient, requireAuthenticatedSeller, async (re
 
     res.json(buildDropProduct(product, entry, nextEntries.findIndex((currentEntry) => currentEntry.productId === product.id)));
   } catch (err) {
+    if (respondToAvailableColorsError(res, err)) return;
     console.error("drop/submit error:", err);
     res.status(500).json({ error: err.message });
   }
@@ -8719,6 +8915,7 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
       });
       return res.status(403).json({ error: "Seller drop update denied" });
     }
+    const availableColors = availableColorsForProductWrite(req.body, existingProduct);
 
     const updatedProduct = normalizeCatalogProduct({
       ...existingProduct,
@@ -8727,6 +8924,7 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
       name,
       priceCents,
       category,
+      availableColors,
       imageURLs,
       demoVideoURL,
       productionPreviewURL,
@@ -8765,6 +8963,7 @@ app.put("/drop/submission/:productId", requireAppClient, requireAuthenticatedSel
 
     res.json(buildDropProduct(updatedProduct, entry, weekEntries.findIndex((currentEntry) => currentEntry.productId === productId)));
   } catch (err) {
+    if (respondToAvailableColorsError(res, err)) return;
     console.error("drop/submission update error:", err);
     res.status(500).json({ error: err.message });
   }
@@ -8802,6 +9001,32 @@ app.get("/drop/current", publicReadLimiter, async (req, res) => {
     return sendPublicJsonWithCache(req, res, payload, { maxAgeSeconds: 20, etag });
   } catch (err) {
     console.error("drop/current error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/drop/seller/:sellerId", publicReadLimiter, async (req, res) => {
+  try {
+    const sellerId = String(req.params.sellerId || "").trim();
+    if (!sellerId) {
+      return res.status(400).json({ error: "sellerId is required" });
+    }
+
+    const sellers = loadSellersFile();
+    if (!sellers[sellerId]) {
+      return res.status(404).json({ error: "Seller not found" });
+    }
+
+    const payload = sellerDropShelfSnapshot({
+      sellerId,
+      drops: loadDropsFile(),
+      catalog: await fetchCatalog(),
+      orders: loadOrdersFile(),
+    });
+    const etag = `"seller-drop-${sellerId}-${etagFromFileURL(DROPS_PATH).slice(1, -1)}-${etagFromFileURL(PRODUCTS_PATH).slice(1, -1)}-${etagFromFileURL(ORDERS_PATH).slice(1, -1)}"`;
+    return sendPublicJsonWithCache(req, res, payload, { maxAgeSeconds: 20, etag });
+  } catch (err) {
+    console.error("drop/seller error:", err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -94,6 +94,7 @@ extension SellerProductDraft {
         if !demoVideoURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
         if !productionPreviewURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
         if !material.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        if !availableColors.isEmpty { return true }
         if !durabilityNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
         if !careWarningsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
         if rightsOwnershipType != nil || rightsCertificationAccepted { return true }
@@ -117,6 +118,7 @@ extension WeeklyDropDraft {
         if !demoVideoURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
         if !productionPreviewURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
         if !material.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        if !availableColors.isEmpty { return true }
         if !durabilityNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
         if !careWarningsText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
         if rightsOwnershipType != nil || rightsCertificationAccepted { return true }

@@ -42,6 +42,14 @@ struct ShipmentCard: View {
                                 Text(item.productName)
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
+                                if let color = item.selectedColor {
+                                    HStack(spacing: 5) {
+                                        ProductColorSwatch(hex: color.hex, size: 12)
+                                        Text("Color: \(color.name)")
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                }
                                 Text("Qty \(item.quantity)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)

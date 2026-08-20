@@ -4,7 +4,12 @@ import Combine
 import UIKit
 
 private final class RemoteImageLoader: ObservableObject {
-    static let cache = NSCache<NSURL, UIImage>()
+    static let cache: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.countLimit = 120
+        cache.totalCostLimit = 96 * 1_024 * 1_024
+        return cache
+    }()
 
     @Published private(set) var image: UIImage?
     private var currentURL: URL?
@@ -44,7 +49,8 @@ private final class RemoteImageLoader: ObservableObject {
 
             await MainActor.run {
                 guard self.currentURL == url else { return }
-                Self.cache.setObject(uiImage, forKey: url as NSURL)
+                let pixelCost = Int(uiImage.size.width * uiImage.size.height * uiImage.scale * uiImage.scale * 4)
+                Self.cache.setObject(uiImage, forKey: url as NSURL, cost: pixelCost)
                 image = uiImage
             }
             #if DEBUG
@@ -210,6 +216,8 @@ struct StorefrontImageView<Placeholder: View>: View {
 
 #if canImport(UIKit)
 private struct CachedRemoteImage<Placeholder: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let url: URL
     let contentMode: ContentMode
     let loadingPriority: TaskPriority
@@ -229,10 +237,16 @@ private struct CachedRemoteImage<Placeholder: View>: View {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
+                    .transition(.opacity)
             } else {
                 placeholder()
+                    .transition(.opacity)
             }
         }
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: TBMotion.Duration.quick),
+            value: displayedImage != nil
+        )
         .task(id: url, priority: loadingPriority) {
             await loader.load(from: url)
         }

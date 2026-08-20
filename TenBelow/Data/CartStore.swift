@@ -22,18 +22,25 @@ final class CartStore: ObservableObject {
         )
     }
 
-    func add(_ product: Product, qty: Int = 1) {
+    func add(_ product: Product, selectedColor: ProductColorOption? = nil, qty: Int = 1) {
         guard qty > 0 else { return }
-        if let idx = items.firstIndex(where: { $0.product.id == product.id }) {
+        let lineID = CartItem.lineID(productId: product.id, selectedColorId: selectedColor?.id)
+        if let idx = items.firstIndex(where: { $0.id == lineID }) {
             items[idx].quantity += qty
         } else {
-            items.append(CartItem(id: product.id, product: product, quantity: qty))
+            items.append(CartItem(id: lineID, product: product, selectedColor: selectedColor, quantity: qty))
         }
 
-        if let storedIndex = storedItems.firstIndex(where: { $0.productId == product.id }) {
+        if let storedIndex = storedItems.firstIndex(where: { $0.lineID == lineID }) {
             storedItems[storedIndex].quantity += qty
         } else {
-            storedItems.append(PersistedCartItem(productId: product.id, quantity: qty))
+            storedItems.append(
+                PersistedCartItem(
+                    productId: product.id,
+                    selectedColor: selectedColor,
+                    quantity: qty
+                )
+            )
         }
         persist()
     }
@@ -44,12 +51,32 @@ final class CartStore: ObservableObject {
         persist()
     }
 
+    func remove(_ item: CartItem) {
+        items.removeAll { $0.id == item.id }
+        storedItems.removeAll { $0.lineID == item.id }
+        persist()
+    }
+
     func setQuantity(_ product: Product, qty: Int) {
         guard qty > 0 else { remove(product); return }
         if let idx = items.firstIndex(where: { $0.product.id == product.id }) {
             items[idx].quantity = qty
         }
         if let storedIndex = storedItems.firstIndex(where: { $0.productId == product.id }) {
+            storedItems[storedIndex].quantity = qty
+            persist()
+        }
+    }
+
+    func setQuantity(_ item: CartItem, qty: Int) {
+        guard qty > 0 else {
+            remove(item)
+            return
+        }
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            items[index].quantity = qty
+        }
+        if let storedIndex = storedItems.firstIndex(where: { $0.lineID == item.id }) {
             storedItems[storedIndex].quantity = qty
             persist()
         }
@@ -84,12 +111,38 @@ final class CartStore: ObservableObject {
             guard let product = productsById[storedItem.productId], storedItem.quantity > 0 else {
                 return nil
             }
-            return CartItem(id: storedItem.productId, product: product, quantity: storedItem.quantity)
+            let selectedColor: ProductColorOption?
+            if let snapshot = storedItem.selectedColor {
+                guard let currentColor = product.availableColors.first(where: { $0.id == snapshot.id }) else {
+                    return nil
+                }
+                selectedColor = currentColor
+            } else {
+                guard product.availableColors.isEmpty else {
+                    // A seller added color choices after this legacy cart row was saved.
+                    // Remove it so the buyer must make an explicit selection on the product page.
+                    return nil
+                }
+                selectedColor = nil
+            }
+            let lineID = CartItem.lineID(productId: product.id, selectedColorId: selectedColor?.id)
+            return CartItem(
+                id: lineID,
+                product: product,
+                selectedColor: selectedColor,
+                quantity: storedItem.quantity
+            )
         }
 
         let removedCount = max(0, storedItems.count - syncedItems.count)
         items = syncedItems
-        storedItems = syncedItems.map { PersistedCartItem(productId: $0.product.id, quantity: $0.quantity) }
+        storedItems = syncedItems.map {
+            PersistedCartItem(
+                productId: $0.product.id,
+                selectedColor: $0.selectedColor,
+                quantity: $0.quantity
+            )
+        }
         persist()
         return removedCount
     }
@@ -101,5 +154,27 @@ final class CartStore: ObservableObject {
 
 private struct PersistedCartItem: Codable, Hashable {
     let productId: String
+    let selectedColor: ProductColorOption?
     var quantity: Int
+
+    var lineID: String {
+        CartItem.lineID(productId: productId, selectedColorId: selectedColor?.id)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case productId, selectedColor, quantity
+    }
+
+    init(productId: String, selectedColor: ProductColorOption?, quantity: Int) {
+        self.productId = productId
+        self.selectedColor = selectedColor
+        self.quantity = quantity
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        productId = try container.decode(String.self, forKey: .productId)
+        selectedColor = try container.decodeIfPresent(ProductColorOption.self, forKey: .selectedColor)
+        quantity = try container.decode(Int.self, forKey: .quantity)
+    }
 }

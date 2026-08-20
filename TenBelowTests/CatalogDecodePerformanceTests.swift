@@ -19,6 +19,10 @@ final class CatalogDecodePerformanceTests: XCTestCase {
                 demoVideoURL: nil,
                 productionPreviewURL: nil,
                 material: "PLA",
+                availableColors: [
+                    ProductColorOption(name: "Black", hex: "#171717"),
+                    ProductColorOption(name: "White", hex: "#F7F7F5"),
+                ],
                 durabilityNote: "Indoor use.",
                 careWarnings: ["Avoid heat."],
                 shipsInMinDays: 2,

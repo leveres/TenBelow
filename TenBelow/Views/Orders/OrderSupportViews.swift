@@ -463,40 +463,7 @@ struct RefundRequestSheet: View {
                             .font(.tbBodyStrong)
 
                         ForEach(ExchangeReasonCode.refundEligibleCases) { code in
-                            Button {
-                                withAnimation(.easeOut(duration: 0.15)) {
-                                    selectedReasonCode = code
-                                }
-                            } label: {
-                                HStack(alignment: .top, spacing: 10) {
-                                    Image(systemName: selectedReasonCode == code ? "largecircle.fill.circle" : "circle")
-                                        .foregroundStyle(selectedReasonCode == code ? TBTheme.deepSky : .secondary)
-                                        .padding(.top, 2)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(code.title)
-                                            .font(.system(size: 13, weight: .semibold))
-                                            .foregroundStyle(.primary)
-                                        Text(code.helperText)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(10)
-                                .background(
-                                    selectedReasonCode == code ? TBTheme.deepSky.opacity(0.08) : Color.white.opacity(0.55),
-                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .strokeBorder(
-                                            selectedReasonCode == code ? TBTheme.deepSky.opacity(0.24) : TBTheme.frostEdge,
-                                            lineWidth: 1
-                                        )
-                                )
-                            }
-                            .buttonStyle(.plain)
+                            refundReasonButton(for: code)
                         }
                     }
 
@@ -545,6 +512,65 @@ struct RefundRequestSheet: View {
                 Task { await loadPickedItems(items) }
             }
         }
+    }
+
+    private func refundReasonButton(for code: ExchangeReasonCode) -> some View {
+        let isSelected = selectedReasonCode == code
+        let selectionColor = isSelected ? TBTheme.deepSky : Color.secondary
+        let backgroundColor = isSelected ? TBTheme.deepSky.opacity(0.08) : Color.white.opacity(0.55)
+        let borderStyle = isSelected
+            ? AnyShapeStyle(TBTheme.deepSky.opacity(0.24))
+            : AnyShapeStyle(TBTheme.frostEdge)
+
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                selectedReasonCode = code
+            }
+        } label: {
+            refundReasonLabel(
+                for: code,
+                isSelected: isSelected,
+                selectionColor: selectionColor,
+                backgroundColor: backgroundColor,
+                borderStyle: borderStyle
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func refundReasonLabel(
+        for code: ExchangeReasonCode,
+        isSelected: Bool,
+        selectionColor: Color,
+        backgroundColor: Color,
+        borderStyle: AnyShapeStyle
+    ) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                .foregroundStyle(selectionColor)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(code.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(code.helperText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(backgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(borderStyle, lineWidth: 1)
+        )
     }
 
     @ViewBuilder

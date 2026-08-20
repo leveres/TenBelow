@@ -62,6 +62,26 @@ enum DropAPI {
         return try JSONDecoder().decode(CurrentDropResponse.self, from: data)
     }
 
+    // MARK: - Get the public Weekly Drop shelf for a seller profile
+
+    static func sellerProfileDrop(sellerId: String) async throws -> SellerProfileDropResponse {
+        let normalizedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSellerId.isEmpty else {
+            throw DropAPIError(statusCode: 400, message: "Seller ID is required")
+        }
+
+        let url = baseURL
+            .appendingPathComponent("drop/seller")
+            .appendingPathComponent(normalizedSellerId)
+        var req = URLRequest(url: url)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        AppConstants.applyAppClientAuth(to: &req)
+        let (data, resp) = try await URLSession.tenBelow.data(for: req)
+        try validateResponse(data: data, resp: resp)
+        return try JSONDecoder().decode(SellerProfileDropResponse.self, from: data)
+    }
+
     // MARK: - Get seller's submissions for this week
 
     static func mySubmissions(sellerId: String? = nil) async throws -> SellerSubmissionsResponse {

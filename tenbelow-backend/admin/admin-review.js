@@ -1211,6 +1211,8 @@ function buildProductCard(product) {
   const productSubmitted = fragment.querySelector(".product-submitted");
   const productNote = fragment.querySelector(".product-note");
   const mediaPill = fragment.querySelector(".media-pill");
+  const colorOptionsBlock = fragment.querySelector(".color-options-block");
+  const colorOptionsList = fragment.querySelector(".color-options-list");
   const dropDetailBlock = fragment.querySelector(".drop-detail-block");
   const dropHeadline = fragment.querySelector(".drop-headline");
   const dropStory = fragment.querySelector(".drop-story");
@@ -1287,6 +1289,29 @@ function buildProductCard(product) {
   productSubmitted.textContent = product.submittedAt
     ? dateTimeFormatter.format(new Date(product.submittedAt))
     : "Just now";
+
+  const availableColors = Array.isArray(product.availableColors) ? product.availableColors : [];
+  if (colorOptionsBlock && colorOptionsList && availableColors.length) {
+    colorOptionsBlock.classList.remove("hidden");
+    for (const color of availableColors) {
+      const option = document.createElement("span");
+      option.className = "color-option";
+
+      const swatch = document.createElement("span");
+      swatch.className = "color-swatch";
+      swatch.setAttribute("aria-hidden", "true");
+      if (color.hex) {
+        swatch.style.backgroundColor = color.hex;
+      } else {
+        swatch.classList.add("has-no-hex");
+      }
+
+      const label = document.createElement("span");
+      label.textContent = color.hex ? `${color.name} · ${color.hex}` : color.name;
+      option.append(swatch, label);
+      colorOptionsList.appendChild(option);
+    }
+  }
 
   const isDrop = isWeeklyDropProduct(product);
   if (mediaPill) {

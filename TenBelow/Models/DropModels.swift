@@ -22,6 +22,7 @@ struct DropSubmissionRequest: Codable {
     let story: String
     let bestUseCase: String
     let material: String
+    let availableColors: [ProductColorOption]
     let durabilityNote: String
     let careWarnings: [String]
     let shipsInMinDays: Int
@@ -62,6 +63,7 @@ struct DropProduct: Codable, Identifiable, Hashable {
     let story: String
     let bestUseCase: String
     let material: String
+    var availableColors: [ProductColorOption]? = nil
     let durabilityNote: String
     let careWarnings: [String]
     let shipsInMinDays: Int
@@ -104,6 +106,22 @@ struct CurrentDropResponse: Codable {
     let endsAt: String
     let products: [DropProduct]
     let nextDropAt: String?
+}
+
+enum SellerProfileDropPhase: String, Codable {
+    case live
+    case carryover
+    case none
+}
+
+struct SellerProfileDropResponse: Codable {
+    let sellerId: String
+    let phase: SellerProfileDropPhase
+    let weekId: String
+    let startsAt: String
+    let endsAt: String
+    let nextDropAt: String?
+    let products: [DropProduct]
 }
 
 // MARK: - Seller Submissions Response
@@ -217,6 +235,7 @@ struct WeeklyDropDraft: Identifiable, Codable, Hashable {
     var demoVideoURLString: String
     var productionPreviewURLString: String
     var material: String
+    var availableColors: [ProductColorOption]
     var durabilityNote: String
     var careWarningsText: String
     var shipsInMinDays: Int
@@ -231,7 +250,7 @@ struct WeeklyDropDraft: Identifiable, Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, sellerId, name, headline, priceText, category, story, bestUseCase
         case imageURLStrings, demoVideoURLString, productionPreviewURLString
-        case material, durabilityNote, careWarningsText, shipsInMinDays, shipsInMaxDays
+        case material, availableColors, durabilityNote, careWarningsText, shipsInMinDays, shipsInMaxDays
         case rightsOwnershipType, rightsReferenceFlags, rightsCertificationAccepted
         case rightsCertificationAcceptedAt, requiresManualReview, reviewReason
     }
@@ -249,6 +268,7 @@ struct WeeklyDropDraft: Identifiable, Codable, Hashable {
         demoVideoURLString: String,
         productionPreviewURLString: String,
         material: String,
+        availableColors: [ProductColorOption] = [],
         durabilityNote: String,
         careWarningsText: String,
         shipsInMinDays: Int,
@@ -272,6 +292,7 @@ struct WeeklyDropDraft: Identifiable, Codable, Hashable {
         self.demoVideoURLString = demoVideoURLString
         self.productionPreviewURLString = productionPreviewURLString
         self.material = material
+        self.availableColors = availableColors
         self.durabilityNote = durabilityNote
         self.careWarningsText = careWarningsText
         self.shipsInMinDays = shipsInMinDays
@@ -298,6 +319,7 @@ struct WeeklyDropDraft: Identifiable, Codable, Hashable {
         demoVideoURLString = try container.decode(String.self, forKey: .demoVideoURLString)
         productionPreviewURLString = try container.decode(String.self, forKey: .productionPreviewURLString)
         material = try container.decode(String.self, forKey: .material)
+        availableColors = try container.decodeIfPresent([ProductColorOption].self, forKey: .availableColors) ?? []
         durabilityNote = try container.decode(String.self, forKey: .durabilityNote)
         careWarningsText = try container.decode(String.self, forKey: .careWarningsText)
         shipsInMinDays = try container.decode(Int.self, forKey: .shipsInMinDays)
@@ -344,6 +366,7 @@ struct WeeklyDropDraft: Identifiable, Codable, Hashable {
         demoVideoURLString = product.demoVideoURL ?? ""
         productionPreviewURLString = product.productionPreviewURL ?? ""
         material = product.material
+        availableColors = product.availableColors ?? []
         durabilityNote = product.durabilityNote
         careWarningsText = product.careWarnings.joined(separator: "\n")
         shipsInMinDays = product.shipsInMinDays
@@ -374,7 +397,15 @@ struct WeeklyDropDraft: Identifiable, Codable, Hashable {
             && !story.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !imageURLStrings.isEmpty
             && !material.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && hasValidColorOptions
             && isRightsConfirmationComplete
+    }
+
+    var hasValidColorOptions: Bool {
+        let names = availableColors.map {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        return names.allSatisfy { !$0.isEmpty } && Set(names).count == names.count
     }
 
     var isRightsConfirmationComplete: Bool {
@@ -405,6 +436,7 @@ struct WeeklyDropDraft: Identifiable, Codable, Hashable {
             story: story.trimmingCharacters(in: .whitespacesAndNewlines),
             bestUseCase: bestUseCase.trimmingCharacters(in: .whitespacesAndNewlines),
             material: material.trimmingCharacters(in: .whitespacesAndNewlines),
+            availableColors: availableColors,
             durabilityNote: durabilityNote.trimmingCharacters(in: .whitespacesAndNewlines),
             careWarnings: careWarnings,
             shipsInMinDays: min(shipsInMinDays, shipsInMaxDays),

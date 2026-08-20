@@ -76,12 +76,20 @@ struct AddProductView: View {
         !draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         draft.priceCents > 0 &&
         !draft.material.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        hasValidColorOptions &&
         !draft.productionNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !draft.durabilityNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !draft.warningLines.isEmpty &&
         draft.shipsInMaxDays >= draft.shipsInMinDays &&
         !premiumListingBlocked &&
         draft.isRightsConfirmationComplete
+    }
+
+    private var hasValidColorOptions: Bool {
+        let names = draft.availableColors.map {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        return names.allSatisfy { !$0.isEmpty } && Set(names).count == names.count
     }
 
     private var remainingPhotoSlots: Int {
@@ -102,6 +110,7 @@ struct AddProductView: View {
             draft.demoVideoURLString,
             draft.productionPreviewURLString,
             draft.material,
+            draft.availableColors.map { "\($0.id):\($0.name):\($0.hex ?? "")" }.joined(separator: "|"),
             draft.productionNote,
             draft.durabilityNote,
             draft.careWarningsText,
@@ -254,6 +263,8 @@ struct AddProductView: View {
                     .foregroundStyle(TBTheme.deepSky)
 
                 sellerFormField("Material", text: $draft.material)
+
+                ProductColorOptionsEditor(colors: $draft.availableColors)
 
                 sellerFormField("Status note", text: $draft.productionNote)
 
@@ -1739,6 +1750,7 @@ struct SellerProductsView: View {
             demoVideoURL: uploadedDemoVideoURLString.isEmpty ? fallbackProduct?.demoVideoURL?.absoluteString : uploadedDemoVideoURLString,
             productionPreviewURL: uploadedProductionPreviewURLString.isEmpty ? fallbackProduct?.productionPreviewURL?.absoluteString : uploadedProductionPreviewURLString,
             material: syncedDraft.material.isEmpty ? "PLA+" : syncedDraft.material,
+            availableColors: syncedDraft.availableColors,
             durabilityNote: syncedDraft.durabilityNote.isEmpty ? "Built for everyday use." : syncedDraft.durabilityNote,
             careWarnings: syncedDraft.warningLines.isEmpty ? ["Handle with care."] : syncedDraft.warningLines,
             shipsInMinDays: min(syncedDraft.shipsInMinDays, syncedDraft.shipsInMaxDays),
@@ -1994,6 +2006,7 @@ struct SellerProductDraft: Identifiable, Codable {
     var imageURLStrings: [String]
     var demoVideoURLString: String
     var material: String
+    var availableColors: [ProductColorOption]
     var productionNote: String
     var durabilityNote: String
     var careWarningsText: String
@@ -2014,7 +2027,7 @@ struct SellerProductDraft: Identifiable, Codable {
 
     enum CodingKeys: String, CodingKey {
         case id, sellerId, name, priceText, category, imageURLStrings, demoVideoURLString
-        case material, productionNote, durabilityNote, careWarningsText, shipsInMinDays, shipsInMaxDays
+        case material, availableColors, productionNote, durabilityNote, careWarningsText, shipsInMinDays, shipsInMaxDays
         case productionPreviewURLString, marketplaceStatusRaw, serverReviewNotes
         case rightsOwnershipType, rightsReferenceFlags, rightsCertificationAccepted
         case rightsCertificationAcceptedAt, requiresManualReview, reviewReason
@@ -2029,6 +2042,7 @@ struct SellerProductDraft: Identifiable, Codable {
         imageURLStrings = product.imageNames
         demoVideoURLString = product.demoVideoURL?.absoluteString ?? ""
         material = product.material
+        availableColors = product.availableColors
         productionNote = product.productionNote
         durabilityNote = product.durabilityNote
         careWarningsText = product.careWarnings.joined(separator: "\n")
@@ -2055,6 +2069,7 @@ struct SellerProductDraft: Identifiable, Codable {
         imageURLStrings = try container.decode([String].self, forKey: .imageURLStrings)
         demoVideoURLString = try container.decode(String.self, forKey: .demoVideoURLString)
         material = try container.decode(String.self, forKey: .material)
+        availableColors = try container.decodeIfPresent([ProductColorOption].self, forKey: .availableColors) ?? []
         productionNote = try container.decode(String.self, forKey: .productionNote)
         durabilityNote = try container.decode(String.self, forKey: .durabilityNote)
         careWarningsText = try container.decode(String.self, forKey: .careWarningsText)
@@ -2081,6 +2096,7 @@ struct SellerProductDraft: Identifiable, Codable {
             imageURLStrings: [],
             demoVideoURLString: "",
             material: "",
+            availableColors: [],
             productionNote: "Printed fresh when you order",
             durabilityNote: "",
             careWarningsText: "",
@@ -2107,6 +2123,7 @@ struct SellerProductDraft: Identifiable, Codable {
         imageURLStrings: [String],
         demoVideoURLString: String,
         material: String,
+        availableColors: [ProductColorOption] = [],
         productionNote: String,
         durabilityNote: String,
         careWarningsText: String,
@@ -2130,6 +2147,7 @@ struct SellerProductDraft: Identifiable, Codable {
         self.imageURLStrings = imageURLStrings
         self.demoVideoURLString = demoVideoURLString
         self.material = material
+        self.availableColors = availableColors
         self.productionNote = productionNote
         self.durabilityNote = durabilityNote
         self.careWarningsText = careWarningsText
@@ -2159,6 +2177,7 @@ struct SellerProductDraft: Identifiable, Codable {
             imageURLStrings: p.imageURLs,
             demoVideoURLString: p.demoVideoURL ?? "",
             material: p.material,
+            availableColors: p.availableColors,
             productionNote: "Printed fresh when you order",
             durabilityNote: p.durabilityNote,
             careWarningsText: p.careWarnings.joined(separator: "\n"),
@@ -2212,6 +2231,7 @@ struct SellerProductDraft: Identifiable, Codable {
 
     /// Replace local draft media with the server catalog row after upload/approval.
     mutating func applyRemoteMedia(from remote: RemoteProduct) {
+        availableColors = remote.availableColors
         if !remote.imageURLs.isEmpty {
             imageURLStrings = remote.imageURLs
         }
@@ -4615,6 +4635,7 @@ private extension SellerProductDraft {
                     imageURLStrings: product.imageNames,
                     demoVideoURLString: product.demoVideoURL?.absoluteString ?? "",
                     material: product.material,
+                    availableColors: product.availableColors,
                     productionNote: product.productionNote,
                     durabilityNote: product.durabilityNote,
                     careWarningsText: product.careWarnings.joined(separator: "\n"),
@@ -4647,6 +4668,7 @@ private extension Product {
             pageViewCount: 0,
             favoriteCount: 0,
             material: draft.material.isEmpty ? "PLA+" : draft.material,
+            availableColors: draft.availableColors,
             productionNote: draft.productionNote,
             durabilityNote: draft.durabilityNote.isEmpty ? "Built for everyday use." : draft.durabilityNote,
             careWarnings: draft.warningLines.isEmpty ? ["Handle with care."] : draft.warningLines,

@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="TenBelow is the mobile marketplace for affordable 3D printed finds, with every product priced at $10 and under."
+      content="TenBelow is the iPhone marketplace for affordable creator-made finds, with every product priced at $10 and under."
     />
-    <title>TenBelow | App Coming Soon</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>TenBelow | Affordable finds from real makers</title>
+    <link rel="stylesheet" href="/styles.css?v=2" />
   </head>
   <body>
     <header class="site-header">
@@ -17,141 +17,284 @@
         <span>TenBelow</span>
       </a>
       <nav class="site-nav" aria-label="Primary navigation">
-        <a href="#screens">Screens</a>
-        <a href="#buyers">Buyers</a>
-        <a href="#sellers">Sellers</a>
+        <a href="#buyers">For buyers</a>
+        <a href="#sellers">For sellers</a>
+        <a href="#showcase">Inside the app</a>
       </nav>
+      <a class="header-cta" href="mailto:admin@innovativecodeworks.com?subject=TenBelow launch updates">Get updates</a>
     </header>
 
     <main>
-      <section class="hero">
+      <section class="hero" id="top">
         <div class="hero-copy">
-          <p class="eyebrow">App Store preview</p>
-          <h1>The marketplace where every find stays under $10.</h1>
+          <p class="eyebrow">The under-$10 marketplace</p>
+          <h1>Small prices.<br />Real makers.<br />One thoughtful app.</h1>
           <p class="hero-text">
-            TenBelow is built for quick, affordable shopping and simple seller tools. Browse drops, track orders,
-            and manage a storefront from the iPhone app.
+            Discover useful, original finds from independent creators—then follow every order from checkout to
+            delivery. Sellers get the tools to build, launch, and manage their shop from iPhone.
           </p>
           <div class="hero-actions">
-            <a class="primary-link" href="mailto:admin@innovativecodeworks.com?subject=TenBelow launch updates">Get launch updates</a>
-            <a class="secondary-link" href="#screens">Preview the app</a>
+            <a class="primary-link" href="mailto:admin@innovativecodeworks.com?subject=TenBelow launch updates">Join launch updates</a>
+            <a class="secondary-link" href="#buyers">Explore TenBelow</a>
+          </div>
+          <div class="hero-proof" aria-label="TenBelow highlights">
+            <div><strong>$10</strong><span>maximum product price</span></div>
+            <div><strong>iPhone</strong><span>built natively in SwiftUI</span></div>
+            <div><strong>Direct</strong><span>buyer-to-maker connection</span></div>
           </div>
         </div>
 
-        <div class="hero-screens" id="screens" aria-label="TenBelow app screenshots">
+        <div class="hero-screens" aria-label="TenBelow app screenshots">
           <figure class="phone-shot phone-shot-main">
             <div class="phone-shell">
-              <img src="/screenshots/stores.png" alt="TenBelow Stores screen showing real maker profiles" />
+              <img src="/screenshots/stores.png" alt="TenBelow maker storefront directory" />
             </div>
-            <figcaption class="shot-caption">Discover maker storefronts</figcaption>
+            <figcaption class="shot-caption">Find your next favorite maker</figcaption>
           </figure>
-
           <figure class="phone-shot phone-shot-back">
             <div class="phone-shell">
-              <img src="/screenshots/orders.png" alt="TenBelow Orders screen showing purchase and delivery updates" />
+              <img src="/screenshots/orders.png" alt="TenBelow order tracking screen" />
             </div>
-            <figcaption class="shot-caption">Track every order</figcaption>
+            <figcaption class="shot-caption">Know where every order stands</figcaption>
           </figure>
         </div>
       </section>
 
-      <section class="section app-store-strip" aria-label="App highlights">
+      <section class="trust-strip" aria-label="Marketplace promise">
+        <p>Built for the complete marketplace journey</p>
         <div>
-          <strong>iPhone-first</strong>
-          <span>SwiftUI app experience</span>
-        </div>
-        <div>
-          <strong>$10 max</strong>
-          <span>Clear prices for buyers</span>
-        </div>
-        <div>
-          <strong>Seller tools</strong>
-          <span>Products, media, and orders</span>
+          <span>Discover</span><i></i><span>Shop</span><i></i><span>Connect</span><i></i><span>Track</span><i></i><span>Grow</span>
         </div>
       </section>
 
-      <section id="buyers" class="section feature-section">
-        <div class="section-copy">
-          <p class="eyebrow">For buyers</p>
-          <h2>Open the app, search fast, and find something affordable.</h2>
+      <section id="buyers" class="section audience-section">
+        <div class="audience-intro">
+          <div>
+            <p class="eyebrow">For buyers</p>
+            <h2>Everything you need to find, buy, and follow something special.</h2>
+          </div>
           <p>
-            TenBelow keeps the shopping flow focused: search products or sellers, browse categories, add to cart,
-            and keep finished receipts easy to find.
+            TenBelow keeps discovery personal and checkout clear. Shop by product or maker, message sellers, and
+            manage support without leaving the order.
           </p>
         </div>
-        <div class="feature-list">
-          <article>
-            <span>01</span>
-            <h3>Search that matches how people shop</h3>
-            <p>Find products by name, seller, category, material, or notes.</p>
+
+        <div class="feature-grid">
+          <article class="feature-card feature-card-lead">
+            <span class="feature-icon" aria-hidden="true">⌕</span>
+            <p class="feature-kicker">Discover</p>
+            <h3>Search products and makers</h3>
+            <p>Browse by name, category, material, seller, or the details that matter to you.</p>
           </article>
-          <article>
-            <span>02</span>
-            <h3>Receipts without endless scrolling</h3>
-            <p>Completed orders can be filtered by date when buyers need older records.</p>
+          <article class="feature-card">
+            <span class="feature-index">02</span>
+            <h3>Shop every item at $10 or less</h3>
+            <p>Simple pricing keeps browsing fun and makes checkout easier to understand.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">03</span>
+            <h3>See the maker behind the product</h3>
+            <p>Open seller profiles, browse their storefront, and understand who is fulfilling your order.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">04</span>
+            <h3>Message sellers directly</h3>
+            <p>Ask product questions before ordering or keep the conversation attached to your purchase.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">05</span>
+            <h3>Track split orders clearly</h3>
+            <p>Follow each seller shipment independently, from preparation through delivery.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">06</span>
+            <h3>Get support in context</h3>
+            <p>Eligible exchanges, optional refunds, and cancellation requests live with the order they belong to.</p>
+          </article>
+          <article class="feature-card feature-card-wide feature-card-drop">
+            <div class="feature-wide-heading">
+              <span class="feature-index">07</span>
+              <span class="feature-label">Weekly Drop</span>
+            </div>
+            <h3>A fresh release worth coming back for</h3>
+            <p>
+              Browse a focused weekly collection of newly released creator products. Weekly Drop gives buyers one
+              clear place to see what just launched without searching the entire marketplace.
+            </p>
+            <div class="feature-flow" aria-label="Weekly Drop buyer flow">
+              <span>Open the drop</span><i></i><span>Meet the featured makers</span><i></i><span>Shop the release</span>
+            </div>
+          </article>
+          <article class="feature-card feature-card-wide feature-card-custom">
+            <div class="feature-wide-heading">
+              <span class="feature-index">08</span>
+              <span class="feature-label">Custom products</span>
+            </div>
+            <h3>Start with an idea, not a listing</h3>
+            <p>
+              Describe what you need, add reference images, choose a seller, and send a custom product request.
+              The seller can review the details, respond, and decide whether the project is a fit.
+            </p>
+            <div class="feature-flow" aria-label="Custom product request flow">
+              <span>Share your idea</span><i></i><span>Add references</span><i></i><span>Hear from the seller</span>
+            </div>
           </article>
         </div>
       </section>
 
-      <section id="sellers" class="section feature-section reverse">
-        <div class="section-copy">
-          <p class="eyebrow">For sellers</p>
-          <h2>A small dashboard for listings, orders, and payouts.</h2>
+      <section class="section journey-section" aria-labelledby="buyer-journey-title">
+        <div class="journey-copy">
+          <p class="eyebrow">A cleaner buying journey</p>
+          <h2 id="buyer-journey-title">From discovery to delivery, nothing gets lost.</h2>
+          <ol class="journey-list">
+            <li><span>01</span><div><strong>Browse your way</strong><p>Move between products, categories, seller storefronts, and each new Weekly Drop.</p></div></li>
+            <li><span>02</span><div><strong>Buy with clarity</strong><p>Review the product, seller, price, and fulfillment details before checkout.</p></div></li>
+            <li><span>03</span><div><strong>Ask for something custom</strong><p>Send a seller your idea and reference images when the right product does not exist yet.</p></div></li>
+            <li><span>04</span><div><strong>Stay connected</strong><p>Track progress, view receipts, message the maker, and access order support.</p></div></li>
+          </ol>
+        </div>
+        <figure class="spotlight-shot">
+          <div class="spotlight-frame">
+            <img src="/screenshots/orders.png" alt="Buyer orders inside the TenBelow app" loading="lazy" />
+          </div>
+          <figcaption><strong>Your orders, organized.</strong><span>Active shipments and completed purchases stay easy to find.</span></figcaption>
+        </figure>
+      </section>
+
+      <section id="sellers" class="section audience-section seller-audience">
+        <div class="audience-intro">
+          <div>
+            <p class="eyebrow">For sellers</p>
+            <h2>Your storefront, fulfillment, and customer care—together.</h2>
+          </div>
           <p>
-            Sellers can create products, upload media, manage fulfillment, and use Stripe onboarding from the app
-            while the backend verifies seller-only actions.
+            Built for independent creators who need practical tools, not enterprise clutter. Set up your shop,
+            publish products, fulfill orders, and grow from one focused dashboard.
           </p>
         </div>
-        <div class="feature-list">
-          <article>
-            <span>03</span>
-            <h3>Storefront controls</h3>
-            <p>Add products, update listings, and keep customer details protected.</p>
+
+        <div class="feature-grid">
+          <article class="feature-card feature-card-lead seller-lead">
+            <span class="feature-icon" aria-hidden="true">↗</span>
+            <p class="feature-kicker">Launch</p>
+            <h3>Build a storefront that feels like yours</h3>
+            <p>Add your story, profile imagery, shipping details, and policies before publishing products.</p>
           </article>
-          <article>
-            <span>04</span>
-            <h3>Order management</h3>
-            <p>Move orders from production to shipped to completed with seller-scoped access.</p>
+          <article class="feature-card">
+            <span class="feature-index">02</span>
+            <h3>Create polished product listings</h3>
+            <p>Set variants, materials, inventory, photos, video, fulfillment details, and clear descriptions.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">03</span>
+            <h3>Manage every order stage</h3>
+            <p>Move shipments from preparation to shipped and delivered with buyer-facing updates.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">04</span>
+            <h3>Choose your shop policies</h3>
+            <p>Control cancellations and optional refund requests while TenBelow handles exchange standards.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">05</span>
+            <h3>Join Weekly Drop releases</h3>
+            <p>Submit products for focused launch moments that help buyers discover something new.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">06</span>
+            <h3>Connect payouts securely</h3>
+            <p>Complete Stripe onboarding and keep payout setup separate from customer-facing shop tools.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">07</span>
+            <h3>Handle requests and messages</h3>
+            <p>Respond to buyer questions, custom requests, cancellations, exchanges, and eligible refunds.</p>
           </article>
         </div>
       </section>
 
-      <section class="section screenshot-gallery" aria-labelledby="gallery-title">
-        <div class="gallery-heading">
-          <p class="eyebrow">Built for buyers and makers</p>
-          <h2 id="gallery-title">The actual TenBelow app. No generic mockups.</h2>
-          <p>Explore storefronts, follow fulfillment, and run a seller dashboard in one focused iPhone experience.</p>
+      <section class="section seller-command-section" aria-labelledby="seller-command-title">
+        <figure class="spotlight-shot spotlight-shot-dark">
+          <div class="spotlight-frame">
+            <img src="/screenshots/seller-dashboard.png" alt="Seller dashboard inside the TenBelow app" loading="lazy" />
+          </div>
+          <figcaption><strong>One seller command center.</strong><span>Products, orders, policies, support, requests, and payouts in one place.</span></figcaption>
+        </figure>
+        <div class="journey-copy">
+          <p class="eyebrow">Built to run the business</p>
+          <h2 id="seller-command-title">A dashboard that tells you what needs attention.</h2>
+          <div class="seller-detail-list">
+            <article><strong>Store setup</strong><span>Profile, storefront media, shipping, policies, and Stripe readiness.</span></article>
+            <article><strong>Catalog control</strong><span>Draft, publish, update, and organize the products buyers see.</span></article>
+            <article><strong>Operations</strong><span>Fulfillment, buyer conversations, support requests, and shop activity.</span></article>
+          </div>
+        </div>
+      </section>
+
+      <section id="showcase" class="section showcase-section" aria-labelledby="showcase-title">
+        <div class="showcase-heading">
+          <p class="eyebrow">Inside TenBelow</p>
+          <h2 id="showcase-title">Real screens from the real app.</h2>
+          <p>
+            See how discovery, storefronts, orders, and seller operations come together in one focused experience.
+          </p>
         </div>
 
-        <div class="gallery-grid">
-          <figure class="gallery-card">
-            <img src="/screenshots/stores.png" alt="TenBelow maker storefront directory" loading="lazy" />
-            <figcaption>
-              <strong>Discover real makers</strong>
-              <span>Browse storefronts with seller imagery, shipping speed, and direct store access.</span>
-            </figcaption>
-          </figure>
-
-          <figure class="gallery-card gallery-card-featured">
-            <img src="/screenshots/seller-dashboard.png" alt="TenBelow seller dashboard" loading="lazy" />
-            <figcaption>
-              <strong>Run your storefront</strong>
-              <span>Manage products, shipping, policies, support, custom requests, and payouts.</span>
-            </figcaption>
-          </figure>
-
-          <figure class="gallery-card">
-            <img src="/screenshots/orders.png" alt="TenBelow buyer orders screen" loading="lazy" />
-            <figcaption>
-              <strong>Stay on top of orders</strong>
-              <span>See active purchases, delivery status, totals, and completed orders at a glance.</span>
-            </figcaption>
-          </figure>
+        <div class="showcase-collection">
+          <div class="showcase-label"><span>01</span><div><strong>Marketplace discovery</strong><p>How buyers find products and the people who make them.</p></div></div>
+          <div class="showcase-grid">
+            <figure class="showcase-card showcase-card-wide">
+              <img src="/screenshots/stores.png" alt="TenBelow storefront directory" loading="lazy" />
+              <figcaption><strong>Maker storefronts</strong><span>Seller identity, shipping expectations, and direct shop access.</span></figcaption>
+            </figure>
+            <article class="showcase-note">
+              <p class="eyebrow">Shop with context</p>
+              <h3>See the product. Know the maker.</h3>
+              <p>
+                A product is more than a thumbnail. TenBelow keeps the item, its options, and the seller behind it
+                connected throughout the shopping experience.
+              </p>
+              <ul>
+                <li>Product photography and variants</li>
+                <li>Maker identity and shop story</li>
+                <li>Price, shipping, and policy context</li>
+              </ul>
+            </article>
+            <!--
+              Add future product-detail and seller-profile captures here as .showcase-card figures.
+              Recommended assets: /screenshots/product-detail.png and /screenshots/seller-profile.png.
+            -->
+          </div>
         </div>
+
+        <div class="showcase-collection">
+          <div class="showcase-label"><span>02</span><div><strong>Seller operations</strong><p>How makers manage the work behind every order.</p></div></div>
+          <div class="showcase-grid showcase-grid-reverse">
+            <figure class="showcase-card">
+              <img src="/screenshots/seller-dashboard.png" alt="TenBelow seller dashboard" loading="lazy" />
+              <figcaption><strong>Seller dashboard</strong><span>A clear starting point for products, orders, policies, and payouts.</span></figcaption>
+            </figure>
+            <figure class="showcase-card">
+              <img src="/screenshots/orders.png" alt="TenBelow order management experience" loading="lazy" />
+              <figcaption><strong>Order visibility</strong><span>Statuses and support stay visible across the buyer and seller experience.</span></figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="section final-cta">
+        <p class="eyebrow">TenBelow is coming soon</p>
+        <h2>A marketplace built to make small finds—and small businesses—feel important.</h2>
+        <p>Get launch updates, early marketplace news, and the first look at new seller storefronts.</p>
+        <a class="primary-link" href="mailto:admin@innovativecodeworks.com?subject=TenBelow launch updates">Stay in the loop</a>
       </section>
     </main>
 
     <footer class="site-footer">
+      <a class="brand footer-brand" href="/" aria-label="TenBelow home">
+        <span class="brand-badge">10</span>
+        <span>TenBelow</span>
+      </a>
       <p>&copy; 2026 TenBelow. App Store launch coming soon.</p>
       <div>
         <a href="mailto:admin@innovativecodeworks.com">Support</a>
