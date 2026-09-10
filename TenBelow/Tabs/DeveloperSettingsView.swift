@@ -58,6 +58,15 @@ struct DeveloperSettingsView: View {
             }
 
             Section {
+                Text("Seller signup: Settings → Become a seller (RolePicker). Seed backend orders with `npm run seed:seller-test-orders` (CONFIRM_SEED=1 SELLER_ID=…). See docs/seller-testing.md.")
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Seller flow testing")
+            }
+
+            Section {
                 TextField("https://192.168.x.x:3000", text: $overrideDraft)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()

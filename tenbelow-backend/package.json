@@ -31,6 +31,8 @@
     "smoke:core": "node scripts/smoke-core-endpoints.mjs",
     "smoke:account-deletion": "node scripts/smoke-account-deletion.mjs",
     "smoke:buyer-checkout": "node scripts/smoke-buyer-checkout.mjs",
+    "seed:seller-test-orders": "node scripts/seed-seller-test-orders.mjs",
+    "smoke:seller-flows": "node scripts/smoke-seller-flows.mjs",
     "release:checklist": "node scripts/release-checklist.mjs",
     "load-test:catalog": "node scripts/load-test-catalog.mjs"
   },

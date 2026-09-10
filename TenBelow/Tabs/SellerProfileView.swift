@@ -22,13 +22,14 @@ struct SellerProfileView: View {
     @State private var status: SellerStatusResponse?
     @State private var dropSubmissions: SellerSubmissionsResponse?
     @State private var isLoading = false
-    @State private var isCreating = false
     @State private var errorMessage: String?
     @State private var showDropSubmit = false
 
     private var isRegistered: Bool { accountCreated && !sellerId.isEmpty }
     private var isOnboarded: Bool { status?.onboardingComplete == true }
-    private var isShowingOperationOverlay: Bool { isCreating }
+    private var sellerHasWeeklyDropAccess: Bool {
+        sellerPreviewMode || sellerSubscription.hasActiveSubscription
+    }
     private var storeTabIndex: Int { 1 }
     private var isTrustedTesterVerified: Bool {
         if let status {
@@ -122,16 +123,7 @@ struct SellerProfileView: View {
             }
             .background(TBFrostBackground())
 
-            if isShowingOperationOverlay {
-                AppOperationOverlay(
-                    title: "Creating Seller Account",
-                    subtitle: "Setting up your seller account."
-                )
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                .zIndex(1)
-            }
-
-            if isLoading && !isCreating {
+            if isLoading {
                 ProgressView()
                     .controlSize(.regular)
                     .tint(TBTheme.deepSky)
@@ -160,35 +152,27 @@ struct SellerProfileView: View {
     @ViewBuilder
     private var registrationForm: some View {
         VStack(alignment: .leading, spacing: TBTheme.spacingMD) {
-            Text("Start selling on TenBelow. List 3D-printed products for $10 and under.")
+            Text("Seller signup requires a password, legal name, shipping origin, and agreement acceptance.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
-            TextField("Seller ID (e.g. my_shop)", text: $sellerId)
-                .textFieldStyle(.roundedBorder)
-                .autocapitalization(.none)
-                .autocorrectionDisabled()
+            Text("Use Settings → Become a seller for the full onboarding flow.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
 
-            TextField("Email", text: $sellerEmail)
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.emailAddress)
-                .autocapitalization(.none)
-
-            TextField("Business name (optional)", text: $businessName)
-                .textFieldStyle(.roundedBorder)
-
-            Button {
-                Task { await createAccount() }
+            NavigationLink {
+                RolePickerView(startInSellerAccount: true, sellerEntryMode: .create)
             } label: {
-                Text(isCreating ? "Creating account..." : "Create seller account")
+                Text("Continue to seller signup")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
             }
             .buttonStyle(PrimaryButtonStyle())
-            .disabled(sellerId.isEmpty || sellerEmail.isEmpty || isCreating)
         }
     }
 
@@ -342,8 +326,8 @@ struct SellerProfileView: View {
                 }
             }
 
-            // Weekly Drop (only for fully onboarded sellers)
-            if isOnboarded {
+            // Weekly Drop (membership-gated; Stripe onboarding is separate)
+            if sellerHasWeeklyDropAccess {
                 Button {
                     showDropSubmit = true
                 } label: {
@@ -439,58 +423,6 @@ struct SellerProfileView: View {
 
     // MARK: - Actions
 
-    private func createAccount() async {
-        errorMessage = nil
-        isCreating = true
-        let starterProfile = SellerProfile.starterProfile(
-            sellerId: sellerId,
-            businessName: businessName
-        )
-        do {
-            let response = try await SellerAPI.createAccount(
-                sellerId: sellerId,
-                email: sellerEmail,
-                businessName: businessName.isEmpty ? nil : businessName
-            )
-            if let token = response.token, !token.isEmpty {
-                MarketplaceAuthSession.storeSellerSessionToken(token)
-            }
-            sellerPreviewMode = false
-            accountCreated = true
-            userRole = "seller"
-            pendingLaunchTab = storeTabIndex
-            starterProfile.storeLocally()
-            catalog.upsertSellerProfile(starterProfile)
-            await MarketplaceAuthSession.syncAfterIdentityChange()
-            _ = try? await MarketplaceAuthSession.ensureSellerSessionReady()
-            await refreshStatus()
-            await sellerSubscription.refresh()
-        } catch {
-            if SellerAPI.isSellerAlreadyExistsError(error) {
-                sellerPreviewMode = false
-                accountCreated = true
-                userRole = "seller"
-                pendingLaunchTab = storeTabIndex
-                starterProfile.storeLocally()
-                catalog.upsertSellerProfile(starterProfile)
-                await MarketplaceAuthSession.syncAfterIdentityChange()
-                _ = try? await MarketplaceAuthSession.ensureSellerSessionReady()
-                await refreshStatus()
-                await sellerSubscription.refresh()
-                isCreating = false
-                return
-            }
-
-            accountCreated = false
-            sellerPreviewMode = false
-            status = nil
-            dropSubmissions = nil
-            errorMessage = "We couldn't create your seller account right now. Connect the backend and try again. \(error.localizedDescription)"
-            await sellerSubscription.refresh()
-        }
-        isCreating = false
-    }
-
     private func refreshStatus() async {
         guard isRegistered else { return }
 
@@ -517,7 +449,7 @@ struct SellerProfileView: View {
                 // Trusted TestFlight collaborators can be force-verified via backend flag.
                 SellerVerificationStore.setTrustedTesterVerified(status.trustedTesterVerified, sellerId: sellerId)
             }
-            if status?.onboardingComplete == true {
+            if sellerHasWeeklyDropAccess {
                 let resolvedSellerId = MarketplaceAuthSession.authenticatedSellerId() ?? sellerId
                 dropSubmissions = try await DropAPI.mySubmissions(sellerId: resolvedSellerId)
             }

@@ -336,7 +336,7 @@ struct HomeView: View {
                     products: products
                 )
             } else {
-                SellerProfileView()
+                RolePickerView(startInSellerAccount: true, sellerEntryMode: .create)
             }
         } else {
             BuyerProfileView()

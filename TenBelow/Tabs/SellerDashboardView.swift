@@ -600,7 +600,7 @@ struct SellerDashboardView: View {
     }
 }
 
-private struct PayoutSettingsViewDraft: View {
+private struct PayoutSettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("sellerSellerId") private var sellerId = ""
 
