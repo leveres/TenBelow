@@ -8,7 +8,7 @@ struct SnowfallParticleCanvas: View {
     @Environment(\.tbTabIsActive) private var tabIsActive
     // Deselected TabView tabs stay mounted, so without this the animation timeline keeps
     // ticking (and burning CPU/GPU) for every tab's header at once.
-    @State private var isVisible = false
+    @State private var isVisible = true
 
     var flakeCount: Int = 24
     var animates: Bool = true
@@ -17,14 +17,15 @@ struct SnowfallParticleCanvas: View {
         let effectiveAnimates = animates && !reduceMotion
         let effectiveFlakeCount = reduceMotion ? 0 : min(max(flakeCount, 0), 32)
         let flakes = (0..<effectiveFlakeCount).map(TitleSnowParticle.init(seed:))
+        let shouldRun = effectiveAnimates && isVisible && tabIsActive
 
         Group {
             if effectiveAnimates {
-                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: !isVisible || !tabIsActive)) { timeline in
+                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: !shouldRun)) { timeline in
                     snowCanvas(flakes: flakes, time: CGFloat(timeline.date.timeIntervalSinceReferenceDate))
                 }
             } else {
-                snowCanvas(flakes: flakes, time: 0)
+                Color.clear
             }
         }
         .onAppear { isVisible = true }

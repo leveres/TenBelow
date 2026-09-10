@@ -1064,7 +1064,7 @@ private struct DealOfDayBanner: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                SnowfallParticleCanvas(flakeCount: 24, animates: false)
+                SnowfallParticleCanvas(flakeCount: 24)
                     .allowsHitTesting(false)
             }
         }
