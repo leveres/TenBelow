@@ -11,6 +11,10 @@ private struct BuyerAccountUpdateRequest: Encodable {
     let newPassword: String?
 }
 
+private struct BuyerAccountDeleteRequest: Encodable {
+    let password: String
+}
+
 private struct BuyerLoginRequest: Encodable {
     let email: String
     let password: String
@@ -83,6 +87,12 @@ struct BuyerAccountUpdateResponse: Decodable {
     let emailChanged: Bool
     let passwordChanged: Bool
     let confirmationTargets: [String]
+}
+
+struct BuyerAccountDeleteResponse: Decodable {
+    let ok: Bool
+    let deleted: Bool
+    let message: String?
 }
 
 enum BuyerAccountAPI {
@@ -171,6 +181,22 @@ enum BuyerAccountAPI {
         }
 
         return try JSONDecoder().decode(GuestCheckoutSessionResponse.self, from: data)
+    }
+
+    static func deleteAccount(password: String) async throws -> BuyerAccountDeleteResponse {
+        let url = CheckoutAPI.baseURL.appendingPathComponent("auth/buyer-account/delete")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AppConstants.applyAppClientAuth(to: &request)
+        MarketplaceAuthSession.applyAuthenticatedUserAuth(to: &request)
+        request.httpBody = try JSONEncoder().encode(BuyerAccountDeleteRequest(password: password))
+
+        let (data, response) = try await URLSession.tenBelow.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw apiError(from: data, statusCode: http.statusCode)
+        }
+        return try JSONDecoder().decode(BuyerAccountDeleteResponse.self, from: data)
     }
 
     static func updateAccount(newEmail: String?, newPassword: String?) async throws -> BuyerAccountUpdateResponse {

@@ -212,6 +212,14 @@ final class BuyerEngagementStore: ObservableObject {
         persist()
     }
 
+    func removeSnapshot(for identityKey: String) {
+        let normalized = identityKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        guard snapshotsByIdentity[normalized] != nil else { return }
+        snapshotsByIdentity.removeValue(forKey: normalized)
+        persist()
+    }
+
     private func persist() {
         LocalCodableStore.save(snapshotsByIdentity, key: storageKey)
     }

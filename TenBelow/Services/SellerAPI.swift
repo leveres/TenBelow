@@ -20,6 +20,10 @@ private struct SellerPasswordResetVerifyRequest: Encodable {
     let newPassword: String
 }
 
+private struct SellerAccountDeleteRequest: Encodable {
+    let password: String
+}
+
 struct SellerPasswordResetChallengeResponse: Decodable {
     let ok: Bool
     let challengeId: String
@@ -38,6 +42,12 @@ struct SellerLoginResponse: Decodable {
     let sellerId: String
     let sellerEmail: String?
     let businessName: String?
+}
+
+struct SellerAccountDeleteResponse: Decodable {
+    let ok: Bool
+    let deleted: Bool
+    let message: String?
 }
 
 struct SellerAPIError: LocalizedError {
@@ -120,6 +130,21 @@ enum SellerAPI {
             throw SellerAPIError(statusCode: http.statusCode, message: serverErrorMessage(from: data))
         }
         return try JSONDecoder().decode(SellerLoginResponse.self, from: data)
+    }
+
+    static func deleteAccount(password: String) async throws -> SellerAccountDeleteResponse {
+        let url = baseURL.appendingPathComponent("auth/seller-account/delete")
+        let (data, http) = try await performSellerAuthorizedRequest {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(SellerAccountDeleteRequest(password: password))
+            return request
+        }
+        if !(200...299).contains(http.statusCode) {
+            throw SellerAPIError(statusCode: http.statusCode, message: serverErrorMessage(from: data))
+        }
+        return try JSONDecoder().decode(SellerAccountDeleteResponse.self, from: data)
     }
 
     static func requestPasswordReset(identifier: String) async throws -> SellerPasswordResetChallengeResponse {

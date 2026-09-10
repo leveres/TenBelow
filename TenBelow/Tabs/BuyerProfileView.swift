@@ -17,6 +17,7 @@ struct BuyerProfileView: View {
     @State private var showBuyerSignIn = false
     @State private var isConfirmingSignOut = false
     @State private var isConfirmingAccountDeletion = false
+    @State private var showAccountDeletionSheet = false
 
     private var isAccountHolder: Bool {
         buyerAccountCreated && !buyerFullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -195,7 +196,7 @@ struct BuyerProfileView: View {
                             Button {
                                 isConfirmingAccountDeletion = true
                             } label: {
-                                Label("Request account deletion", systemImage: "trash")
+                                Label("Delete account", systemImage: "trash")
                             }
                             .buttonStyle(SecondaryCTAButtonStyle())
                             .tint(.red)
@@ -235,16 +236,21 @@ struct BuyerProfileView: View {
             Text("Your saved buyer session will be removed from this device.")
         }
         .confirmationDialog(
-            "Request account deletion?",
+            "Delete buyer account?",
             isPresented: $isConfirmingAccountDeletion,
             titleVisibility: .visible
         ) {
             Button("Continue", role: .destructive) {
-                requestAccountDeletion()
+                showAccountDeletionSheet = true
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("TenBelow will open Mail so you can submit and confirm your deletion request.")
+            Text("This permanently removes your buyer sign-in and saved profile. Order records may be retained for legal and tax purposes.")
+        }
+        .sheet(isPresented: $showAccountDeletionSheet) {
+            AccountDeletionSheet(kind: .buyer) {
+                completeBuyerAccountDeletion()
+            }
         }
         .task(id: buyerEmail) {
             guard buyerAccountCreated else { return }
@@ -411,10 +417,13 @@ struct BuyerProfileView: View {
         pendingLaunchTab = 0
     }
 
-    private func requestAccountDeletion() {
-        if let url = AppConstants.accountDeletionMailtoURL(accountType: "Buyer", email: buyerEmail) {
-            openURL(url)
+    private func completeBuyerAccountDeletion() {
+        let email = buyerEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !email.isEmpty {
+            buyerEngagement.removeSnapshot(for: "buyer:\(email)")
         }
+        signOutBuyer()
+        PushDeviceRegistration.invalidateCachedRegistration()
     }
 }
 

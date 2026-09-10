@@ -113,6 +113,22 @@ export function registerPushDevice(userKey, deviceTokenHex) {
   saveStore(store);
 }
 
+export function removeAllPushDevicesForUser(userKey) {
+  const normalizedKey = String(userKey || "").trim();
+  if (!normalizedKey) return 0;
+
+  const store = loadStore();
+  const tokens = Array.isArray(store.byUser[normalizedKey]) ? store.byUser[normalizedKey] : [];
+  delete store.byUser[normalizedKey];
+  for (const token of tokens) {
+    if (store.tokenToUser[token] === normalizedKey) {
+      delete store.tokenToUser[token];
+    }
+  }
+  saveStore(store);
+  return tokens.length;
+}
+
 export function unregisterPushDevice(userKey, deviceTokenHex) {
   const normalizedKey = String(userKey || "").trim();
   const token = String(deviceTokenHex || "")

@@ -6,16 +6,25 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
     @EnvironmentObject private var sellerSubscription: SellerSubscriptionStore
     @ObservedObject private var accountModeration = AccountModerationStore.shared
     @AppStorage("userRole") private var userRole = ""
     @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
+    @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
+    @AppStorage("buyerEmail") private var buyerEmail = ""
+    @AppStorage("buyerFullName") private var buyerFullName = ""
+    @AppStorage("buyerCheckoutPreference") private var buyerCheckoutPreference = "guest"
     @AppStorage("sellerAccountCreated") private var sellerAccountCreated = false
     @AppStorage("sellerEmail") private var sellerEmail = ""
+    @AppStorage("sellerSellerId") private var sellerSellerId = ""
+    @AppStorage("sellerBusinessName") private var sellerBusinessName = ""
     @AppStorage("sellerPreviewMode") private var sellerPreviewMode = false
     @State private var isConfirmingSellerSignOut = false
     @State private var isConfirmingSellerAccountDeletion = false
+    @State private var isConfirmingBuyerAccountDeletion = false
+    @State private var showBuyerAccountDeletionSheet = false
+    @State private var showSellerAccountDeletionSheet = false
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
@@ -84,16 +93,38 @@ struct SettingsView: View {
                 Text("This removes the seller session from this device. Your storefront remains active.")
             }
             .confirmationDialog(
-                "Request seller account deletion?",
+                "Delete seller account?",
                 isPresented: $isConfirmingSellerAccountDeletion,
                 titleVisibility: .visible
             ) {
                 Button("Continue", role: .destructive) {
-                    requestSellerAccountDeletion()
+                    showSellerAccountDeletionSheet = true
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("TenBelow will open Mail so you can submit and confirm your deletion request.")
+                Text("This permanently removes your seller account and storefront listings. Order records may be retained for legal and tax purposes.")
+            }
+            .confirmationDialog(
+                "Delete buyer account?",
+                isPresented: $isConfirmingBuyerAccountDeletion,
+                titleVisibility: .visible
+            ) {
+                Button("Continue", role: .destructive) {
+                    showBuyerAccountDeletionSheet = true
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently removes your buyer sign-in and saved profile. Order records may be retained for legal and tax purposes.")
+            }
+            .sheet(isPresented: $showBuyerAccountDeletionSheet) {
+                AccountDeletionSheet(kind: .buyer) {
+                    completeBuyerAccountDeletion()
+                }
+            }
+            .sheet(isPresented: $showSellerAccountDeletionSheet) {
+                AccountDeletionSheet(kind: .seller) {
+                    completeSellerAccountDeletion()
+                }
             }
         }
     }
@@ -135,7 +166,7 @@ struct SettingsView: View {
                 )
 
                 settingsButtonRow(
-                    title: "Request account deletion",
+                    title: "Delete account",
                     systemImage: "trash",
                     isDestructive: true,
                     rowHeight: rowHeight,
@@ -180,6 +211,16 @@ struct SettingsView: View {
                 ) {
                     switchAppMode(to: "buyer", launchTab: 0)
                 }
+            }
+
+            if buyerAccountCreated, userRole != "seller" {
+                settingsButtonRow(
+                    title: "Delete account",
+                    systemImage: "trash",
+                    isDestructive: true,
+                    rowHeight: rowHeight,
+                    action: { isConfirmingBuyerAccountDeletion = true }
+                )
             }
         }
     }
@@ -309,11 +350,31 @@ struct SettingsView: View {
         switchAppMode(to: "buyer", launchTab: 0)
     }
 
-    private func requestSellerAccountDeletion() {
-        let email = sellerEmail.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let url = AppConstants.accountDeletionMailtoURL(accountType: "Seller", email: email) {
-            openURL(url)
+    private func completeBuyerAccountDeletion() {
+        let email = buyerEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !email.isEmpty {
+            buyerEngagement.removeSnapshot(for: "buyer:\(email)")
         }
+        MarketplaceAuthSession.clearBuyerSession()
+        accountModeration.clear()
+        buyerAccountCreated = false
+        buyerFullName = ""
+        buyerEmail = ""
+        buyerCheckoutPreference = "guest"
+        pendingLaunchTab = 0
+        PushDeviceRegistration.invalidateCachedRegistration()
+    }
+
+    private func completeSellerAccountDeletion() {
+        MarketplaceAuthSession.clearSellerSession()
+        accountModeration.clear()
+        sellerAccountCreated = false
+        sellerEmail = ""
+        sellerSellerId = ""
+        sellerBusinessName = ""
+        sellerPreviewMode = false
+        PushDeviceRegistration.invalidateCachedRegistration()
+        switchAppMode(to: "buyer", launchTab: 0)
     }
 
     private func switchAppMode(to role: String, launchTab: Int) {

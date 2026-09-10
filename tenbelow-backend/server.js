@@ -13,7 +13,7 @@ import {
   isAppStoreVerificationConfigured,
   verifySubscriptionWithAppStore,
 } from "./appStoreMembershipVerification.js";
-import { registerPushDevice, unregisterPushDevice } from "./pushDevicesStore.js";
+import { registerPushDevice, unregisterPushDevice, removeAllPushDevicesForUser } from "./pushDevicesStore.js";
 import {
   notifyOrderStatusChanged,
   notifyOrderSupportEvent,
@@ -2338,6 +2338,125 @@ function hashSellerPassword(password = "") {
   return crypto.createHash("sha256").update(String(password)).digest("hex");
 }
 
+function assertAccountPasswordForDeletion(record, password, hashFn) {
+  const storedHash = String(record?.passwordHash || "").trim();
+  if (!storedHash) return;
+  const candidate = String(password || "");
+  if (!candidate) {
+    const err = new Error("Password is required to delete this account");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (hashFn(candidate) !== storedHash) {
+    const err = new Error("Incorrect password");
+    err.statusCode = 401;
+    throw err;
+  }
+}
+
+async function deleteBuyerAccountByEmail(email, { req, initiatedBy = "self" } = {}) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const buyers = loadBuyersFile();
+  if (!buyers[normalizedEmail]) {
+    const err = new Error("Buyer account not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const orders = loadOrdersFile();
+  const exchangeRequests = loadExchangeRequestsFile();
+  const customOrderRequests = loadCustomOrderRequestsFile();
+  const productReviews = loadProductReviewsFile();
+  const activity = buyerAccountActivity(
+    normalizedEmail,
+    orders,
+    exchangeRequests,
+    customOrderRequests,
+    productReviews
+  );
+
+  delete buyers[normalizedEmail];
+  saveBuyersFile(buyers);
+
+  const pushDevicesRemoved = removeAllPushDevicesForUser(`buyer:${normalizedEmail}`);
+
+  if (req) {
+    auditLog(
+      auditContext(req, {
+        action: initiatedBy === "admin" ? "admin_buyer_account_deleted" : "buyer_account_deleted",
+        buyerEmail: normalizedEmail,
+        activity,
+        pushDevicesRemoved,
+        initiatedBy,
+      })
+    );
+  }
+
+  return { kind: "buyer", id: normalizedEmail, activity, pushDevicesRemoved };
+}
+
+async function deleteSellerAccountById(sellerId, { req, initiatedBy = "self" } = {}) {
+  const normalizedSellerId = String(sellerId || "").trim();
+  const sellers = loadSellersFile();
+  const catalog = await fetchCatalog();
+  const products = Array.isArray(catalog.products)
+    ? catalog.products.map((product) => normalizeCatalogProduct(product))
+    : [];
+  const sellerProducts = products.filter((product) => product.sellerId === normalizedSellerId);
+
+  if (!sellers[normalizedSellerId] && sellerProducts.length === 0) {
+    const err = new Error("Seller account not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const orders = loadOrdersFile();
+  const exchangeRequests = loadExchangeRequestsFile();
+  const customOrderRequests = loadCustomOrderRequestsFile();
+  const productReviews = loadProductReviewsFile();
+  const activity = sellerAccountActivity(
+    normalizedSellerId,
+    products,
+    orders,
+    exchangeRequests,
+    customOrderRequests,
+    productReviews
+  );
+
+  if (sellerProducts.length > 0) {
+    saveCatalog({
+      version: catalog.version,
+      products: products.filter((product) => product.sellerId !== normalizedSellerId),
+    });
+  }
+
+  delete sellers[normalizedSellerId];
+  saveSellersFile(sellers);
+
+  const pushDevicesRemoved = removeAllPushDevicesForUser(`seller:${normalizedSellerId}`);
+
+  if (req) {
+    auditLog(
+      auditContext(req, {
+        action: initiatedBy === "admin" ? "admin_seller_account_deleted" : "seller_account_deleted",
+        sellerId: normalizedSellerId,
+        activity,
+        deletedProductCount: sellerProducts.length,
+        pushDevicesRemoved,
+        initiatedBy,
+      })
+    );
+  }
+
+  return {
+    kind: "seller",
+    id: normalizedSellerId,
+    activity,
+    deletedProductCount: sellerProducts.length,
+    pushDevicesRemoved,
+  };
+}
+
 function transactionalEmailConfigured() {
   return Boolean(resend || smtpConfigured);
 }
@@ -3487,6 +3606,62 @@ app.post(
     }
   }
 );
+
+app.post("/auth/buyer-account/delete", authLimiter, requireAppClient, requireAuthenticatedBuyer, async (req, res) => {
+  try {
+    const email = String(req.auth?.buyerEmail || "").trim().toLowerCase();
+    const buyers = loadBuyersFile();
+    const buyer = buyers[email];
+    if (!buyer) {
+      return res.status(404).json({ error: "Buyer account not found" });
+    }
+
+    assertAccountPasswordForDeletion(buyer, req.body?.password, hashBuyerPassword);
+
+    const result = await deleteBuyerAccountByEmail(email, { req, initiatedBy: "self" });
+    res.json({
+      ok: true,
+      deleted: true,
+      ...result,
+      message:
+        "Your buyer account has been deleted. Order and payment records may be retained for legal, tax, and support purposes.",
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) {
+      console.error("buyer account delete error:", err);
+    }
+    res.status(status).json({ error: err.message });
+  }
+});
+
+app.post("/auth/seller-account/delete", authLimiter, requireAppClient, requireAuthenticatedSeller, async (req, res) => {
+  try {
+    const sellerId = String(req.auth?.sellerId || "").trim();
+    const sellers = loadSellersFile();
+    const seller = sellers[sellerId];
+    if (!seller) {
+      return res.status(404).json({ error: "Seller account not found" });
+    }
+
+    assertAccountPasswordForDeletion(seller, req.body?.password, hashSellerPassword);
+
+    const result = await deleteSellerAccountById(sellerId, { req, initiatedBy: "self" });
+    res.json({
+      ok: true,
+      deleted: true,
+      ...result,
+      message:
+        "Your seller account and storefront listings have been removed. Order, payout, and tax records may be retained as required by law.",
+    });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) {
+      console.error("seller account delete error:", err);
+    }
+    res.status(status).json({ error: err.message });
+  }
+});
 
 function resolveSellerAccountForSession({ sellerId, email }) {
   const sellers = loadSellersFile();
@@ -7363,61 +7538,21 @@ app.delete("/admin/accounts/:kind/:accountId", adminMutationLimiter, requireAdmi
   try {
     const kind = String(req.params.kind || "").trim().toLowerCase();
     const accountId = String(req.params.accountId || "").trim();
-    const orders = loadOrdersFile();
-    const exchangeRequests = loadExchangeRequestsFile();
-    const customOrderRequests = loadCustomOrderRequestsFile();
-    const productReviews = loadProductReviewsFile();
 
     if (kind === "buyers") {
-      const email = accountId.toLowerCase();
-      const buyers = loadBuyersFile();
-      if (!buyers[email]) return res.status(404).json({ error: "Buyer account not found" });
-      const activity = buyerAccountActivity(email, orders, exchangeRequests, customOrderRequests, productReviews);
-      delete buyers[email];
-      saveBuyersFile(buyers);
-      auditLog(auditContext(req, { action: "admin_buyer_account_deleted", buyerEmail: email, activity }));
-      return res.json({ deleted: true, kind: "buyer", id: email, activity });
+      const result = await deleteBuyerAccountByEmail(accountId.toLowerCase(), { req, initiatedBy: "admin" });
+      return res.json({ deleted: true, ...result });
     }
 
     if (kind === "sellers") {
-      const sellerId = accountId;
-      const sellers = loadSellersFile();
-      const catalog = await fetchCatalog();
-      const products = Array.isArray(catalog.products)
-        ? catalog.products.map((product) => normalizeCatalogProduct(product))
-        : [];
-      const sellerProducts = products.filter((product) => product.sellerId === sellerId);
-      if (!sellers[sellerId] && sellerProducts.length === 0) {
-        return res.status(404).json({ error: "Seller account not found" });
-      }
-      const activity = sellerAccountActivity(sellerId, products, orders, exchangeRequests, customOrderRequests, productReviews);
-      if (sellerProducts.length > 0) {
-        saveCatalog({
-          version: catalog.version,
-          products: products.filter((product) => product.sellerId !== sellerId),
-        });
-      }
-      delete sellers[sellerId];
-      saveSellersFile(sellers);
-      auditLog(auditContext(req, {
-        action: "admin_seller_account_deleted",
-        sellerId,
-        activity,
-        deletedProductCount: sellerProducts.length,
-      }));
-      return res.json({
-        deleted: true,
-        kind: "seller",
-        id: sellerId,
-        activity,
-        deletedProductCount: sellerProducts.length,
-      });
+      const result = await deleteSellerAccountById(accountId, { req, initiatedBy: "admin" });
+      return res.json({ deleted: true, ...result });
     }
 
     return res.status(400).json({ error: "kind must be sellers or buyers" });
   } catch (err) {
     console.error("admin account delete error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
