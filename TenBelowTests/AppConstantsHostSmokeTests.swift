@@ -15,6 +15,7 @@ final class AppConstantsHostSmokeTests: XCTestCase {
 
     func testTestingModeDefaultsKeyIsStable() {
         XCTAssertEqual(AppConstants.testingModeUserDefaultsKey, "tb.testingModeEnabled")
+        XCTAssertEqual(AppConstants.forceSimulatedCheckoutUserDefaultsKey, "tb.forceSimulatedCheckout")
     }
 
     func testStripePublishableKeyFormatWhenPresent() {

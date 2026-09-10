@@ -1055,6 +1055,7 @@ private struct ProductColorSelectionSection: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("product.color.\(color.id)")
                     .accessibilityLabel("\(color.name) color")
                     .accessibilityAddTraits(selection?.id == color.id ? .isSelected : [])
                 }

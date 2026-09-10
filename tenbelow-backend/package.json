@@ -30,6 +30,7 @@
     "verify:pg-relational": "node scripts/verify-pg-relational.mjs",
     "smoke:core": "node scripts/smoke-core-endpoints.mjs",
     "smoke:account-deletion": "node scripts/smoke-account-deletion.mjs",
+    "smoke:buyer-checkout": "node scripts/smoke-buyer-checkout.mjs",
     "release:checklist": "node scripts/release-checklist.mjs",
     "load-test:catalog": "node scripts/load-test-catalog.mjs"
   },

@@ -53,6 +53,9 @@ struct SettingsView: View {
 
                         sellerAccountSection(rowHeight: metrics.rowHeight)
                         accountSection(rowHeight: metrics.rowHeight)
+                        #if DEBUG
+                        developerSection(rowHeight: metrics.rowHeight)
+                        #endif
                         legalSection(rowHeight: metrics.compactRowHeight)
 
                         Spacer(minLength: 0)
@@ -224,6 +227,16 @@ struct SettingsView: View {
             }
         }
     }
+
+    #if DEBUG
+    private func developerSection(rowHeight: CGFloat) -> some View {
+        settingsSection("Developer") {
+            settingsNavigationRow(title: "Developer tools", systemImage: "hammer", rowHeight: rowHeight) {
+                DeveloperSettingsView()
+            }
+        }
+    }
+    #endif
 
     private func legalSection(rowHeight: CGFloat) -> some View {
         settingsSection("Legal") {

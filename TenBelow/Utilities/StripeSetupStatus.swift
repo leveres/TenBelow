@@ -51,15 +51,15 @@ enum StripeSetupStatus {
     }
 
     static var canSimulateCheckout: Bool {
-        AppConstants.isTestingOverridesEnabled && !AppConstants.hasLiveCheckoutConfiguration
+        AppConstants.prefersSimulatedCheckout
     }
 
     static var summaryLine: String {
-        if AppConstants.hasLiveCheckoutConfiguration {
-            return "Live checkout is configured."
-        }
         if canSimulateCheckout {
-            return "Testing mode: checkout will simulate success without Stripe."
+            return "Testing mode: Pay simulates a TB-TEST order (no Stripe charge)."
+        }
+        if AppConstants.hasLiveCheckoutConfiguration {
+            return "Stripe checkout is configured. Use test cards in Debug (4242… / declined 9995)."
         }
         #if DEBUG
         return "Turn on Testing mode below, or add Stripe test keys before end-of-week setup."
@@ -111,9 +111,12 @@ enum StripeSetupStatus {
 
     private static var testingModeDetail: String {
         #if DEBUG
+        if AppConstants.prefersSimulatedCheckout {
+            return "On — Pay simulates order TB-TEST-… (force simulate enabled)."
+        }
         return AppConstants.isTestingOverridesEnabled
-            ? "On — Pay button simulates order TB-TEST-…"
-            : "Off — enable to test cart/checkout without Stripe."
+            ? "On — Pay uses Stripe PaymentSheet with test keys."
+            : "Off — enable to unlock simulate / Stripe test tools."
         #else
         return "Not available in Release builds."
         #endif

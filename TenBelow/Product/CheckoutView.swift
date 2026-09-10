@@ -608,7 +608,7 @@ struct CheckoutView: View {
             return
         }
 
-        if AppConstants.isTestingOverridesEnabled && !AppConstants.hasLiveCheckoutConfiguration {
+        if AppConstants.prefersSimulatedCheckout {
             isSubmitting = true
             let simulatedOrderId = "TB-TEST-\(Int(Date().timeIntervalSince1970))"
             do {

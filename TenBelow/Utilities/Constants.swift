@@ -88,6 +88,8 @@ enum AppConstants {
 
     /// UserDefaults key for DEBUG “Testing mode” in Settings (relaxed checkout / API when backend or Stripe is unset).
     static let testingModeUserDefaultsKey = "tb.testingModeEnabled"
+    /// When Testing mode is on, force local `TB-TEST-…` checkout even if Stripe test keys are configured.
+    static let forceSimulatedCheckoutUserDefaultsKey = "tb.forceSimulatedCheckout"
 
     /// DEBUG-only: override plist `TENBELOW_BACKEND_BASE_URL` (e.g. `http://192.168.1.12:3000`) so a physical device can reach the Mac running `tenbelow-backend`.
     nonisolated static let debugBackendBaseURLOverrideKey = BackendURLConfiguration.debugBackendBaseURLOverrideKey
@@ -106,9 +108,19 @@ enum AppConstants {
         let args = Set(CommandLine.arguments)
         if args.contains("-UIEnableTestingMode") {
             UserDefaults.standard.set(true, forKey: testingModeUserDefaultsKey)
+            // UITests need deterministic Pay → Receipt without Stripe PaymentSheet.
+            if !args.contains("-UIDisableForceSimulatedCheckout") {
+                UserDefaults.standard.set(true, forKey: forceSimulatedCheckoutUserDefaultsKey)
+            }
         }
         if args.contains("-UIDisableTestingMode") {
             UserDefaults.standard.set(false, forKey: testingModeUserDefaultsKey)
+        }
+        if args.contains("-UIForceSimulatedCheckout") {
+            UserDefaults.standard.set(true, forKey: forceSimulatedCheckoutUserDefaultsKey)
+        }
+        if args.contains("-UIDisableForceSimulatedCheckout") {
+            UserDefaults.standard.set(false, forKey: forceSimulatedCheckoutUserDefaultsKey)
         }
     }
     #endif
@@ -126,9 +138,23 @@ enum AppConstants {
         #endif
     }
 
+    /// DEBUG Testing mode can force simulated checkout even when `pk_test` + backend are configured.
+    static var prefersSimulatedCheckout: Bool {
+        #if DEBUG
+        guard isTestingOverridesEnabled else { return false }
+        if !hasLiveCheckoutConfiguration { return true }
+        return UserDefaults.standard.bool(forKey: forceSimulatedCheckoutUserDefaultsKey)
+        #else
+        return false
+        #endif
+    }
+
     static let stripeSetupMessage = "Checkout is turned off until Stripe is connected. Add your publishable key when you're ready to enable payments."
 
     static var checkoutSetupMessage: String {
+        if prefersSimulatedCheckout {
+            return "Testing mode is on. Pay uses a simulated order (no Stripe charge)."
+        }
         if isTestingOverridesEnabled && !hasLiveCheckoutConfiguration {
             return "Testing mode is on. Checkout uses simulated success until backend and Stripe are configured."
         }

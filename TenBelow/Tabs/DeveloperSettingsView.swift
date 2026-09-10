@@ -4,6 +4,7 @@ import SwiftUI
 /// DEBUG-only tools for backend overrides and pre-Stripe checkout testing.
 struct DeveloperSettingsView: View {
     @AppStorage(AppConstants.testingModeUserDefaultsKey) private var testingModeEnabled = false
+    @AppStorage(AppConstants.forceSimulatedCheckoutUserDefaultsKey) private var forceSimulatedCheckout = true
     @AppStorage(AppConstants.debugBackendBaseURLOverrideKey) private var backendURLOverride = ""
     @State private var overrideDraft = ""
 
@@ -37,11 +38,23 @@ struct DeveloperSettingsView: View {
 
             Section {
                 Toggle("Testing mode", isOn: $testingModeEnabled)
-                Text("Simulates a successful order when Stripe or the backend is not configured. Use for UI and flow testing before Stripe keys are ready.")
+                Text("Unlocks developer checkout tools. Leave on while iterating buyer flows.")
                     .font(.tbCaption)
                     .foregroundStyle(.secondary)
+
+                Toggle("Force simulated checkout", isOn: $forceSimulatedCheckout)
+                    .disabled(!testingModeEnabled)
+                Text(
+                    testingModeEnabled
+                        ? (forceSimulatedCheckout
+                            ? "Pay creates a local TB-TEST order (no Stripe). Turn off to use Stripe test cards against the live backend."
+                            : "Pay uses Stripe PaymentSheet with your pk_test key. Use 4242… for success and 4000…9995 to break payment.")
+                        : "Enable Testing mode first."
+                )
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
             } header: {
-                Text("Without Stripe (this week)")
+                Text("Buyer checkout testing")
             }
 
             Section {
@@ -73,6 +86,11 @@ struct DeveloperSettingsView: View {
         #endif
         .onAppear {
             overrideDraft = backendURLOverride
+        }
+        .onChange(of: testingModeEnabled) { _, isOn in
+            if isOn, UserDefaults.standard.object(forKey: AppConstants.forceSimulatedCheckoutUserDefaultsKey) == nil {
+                forceSimulatedCheckout = true
+            }
         }
     }
 }
