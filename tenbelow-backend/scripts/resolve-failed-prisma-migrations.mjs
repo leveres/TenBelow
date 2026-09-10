@@ -74,11 +74,19 @@ async function resolveColorMigration(pool, { autoFix }) {
     return true;
   }
 
+  if (!autoFix) {
+    console.log(
+      `\n${COLOR_MIGRATION}: columns missing — mark rolled back, then redeploy to retry:`
+    );
+    console.log(`  npx prisma migrate resolve --rolled-back ${COLOR_MIGRATION}`);
+    return false;
+  }
+
   console.log(
-    `\n${COLOR_MIGRATION}: columns missing — mark rolled back, then redeploy to retry:`
+    `\n${COLOR_MIGRATION}: columns missing — marking rolled back so migrate deploy can retry.`
   );
-  console.log(`  npx prisma migrate resolve --rolled-back ${COLOR_MIGRATION}`);
-  return false;
+  run(`npx prisma migrate resolve --rolled-back ${COLOR_MIGRATION}`);
+  return true;
 }
 
 async function main() {
