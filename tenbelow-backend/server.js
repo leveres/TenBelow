@@ -155,7 +155,16 @@ const ALLOWED_CORS_ORIGINS = String(process.env.CORS_ALLOWED_ORIGINS || "")
   .filter(Boolean);
 
 const smtpConfigured = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS && Number.isFinite(SMTP_PORT));
+const BYPASS_EMAIL =
+  String(process.env.BYPASS_EMAIL || process.env.BYPASS_EMAIL_VERIFICATION || "")
+    .trim() === "1";
 let smtpTransporter = null;
+
+if (BYPASS_EMAIL) {
+  console.warn(
+    "BYPASS_EMAIL=1 — transactional email is skipped and buyer emails are auto-verified. Remove before production launch."
+  );
+}
 
 if (ALLOWED_CORS_ORIGINS.length === 0) {
   ALLOWED_CORS_ORIGINS.push(
@@ -1000,6 +1009,13 @@ function createEmailOtpChallenge({ req, purpose, email, subjectId = "" }) {
 }
 
 async function sendEmailOtp({ to, code, expiresAt, title, intro, warning }) {
+  if (transactionalEmailBypassEnabled()) {
+    console.warn(
+      `[email bypass] OTP ${code} → ${to} (${title}; expires ${new Date(expiresAt).toISOString()})`
+    );
+    return;
+  }
+
   if (!transactionalEmailConfigured()) {
     throw new Error("Email codes require RESEND_API_KEY or SMTP settings on the backend.");
   }
@@ -2461,6 +2477,10 @@ function transactionalEmailConfigured() {
   return Boolean(resend || smtpConfigured);
 }
 
+function transactionalEmailBypassEnabled() {
+  return BYPASS_EMAIL;
+}
+
 function emailFromUsesResendSandbox() {
   const raw = String(EMAIL_FROM || "").trim().toLowerCase();
   const match = raw.match(/<([^>]+)>/);
@@ -2513,6 +2533,11 @@ async function sendTransactionalEmail({ to, subject, html, attachments = [], ide
   const recipients = emailRecipientsList(to);
   if (!recipients.length) {
     throw new Error("No email recipient provided");
+  }
+
+  if (transactionalEmailBypassEnabled()) {
+    console.warn(`[email bypass] skipped "${subject}" → ${recipients.join(", ")}`);
+    return { recipients, messageId: null, bypassed: true };
   }
 
   if (resend) {
@@ -3159,6 +3184,11 @@ app.post("/auth/buyer-account", authLimiter, requireAppClient, async (req, res) 
       },
       email
     );
+    if (transactionalEmailBypassEnabled() && !buyers[email].emailVerified) {
+      buyers[email].emailVerified = true;
+      buyers[email].emailVerifiedAt = new Date().toISOString();
+    }
+
     saveBuyersFile(buyers);
     let verification = null;
     if (!buyers[email].emailVerified) {
@@ -3201,6 +3231,14 @@ app.post("/auth/buyer-email-verification/request", authLimiter, requireAppClient
       return res.status(404).json({ error: "Buyer account not found" });
     }
     if (buyer.emailVerified === true) {
+      return res.json({ ok: true, email, emailVerified: true });
+    }
+
+    if (transactionalEmailBypassEnabled()) {
+      buyer.emailVerified = true;
+      buyer.emailVerifiedAt = new Date().toISOString();
+      buyers[email] = buyer;
+      saveBuyersFile(buyers);
       return res.json({ ok: true, email, emailVerified: true });
     }
 
@@ -3305,12 +3343,19 @@ app.post("/auth/buyer-session", authLimiter, requireAppClient, (req, res) => {
     if (respondIfAccountModerationBlocked(res, "buyer", buyer)) {
       return;
     }
-    if (buyer.emailVerified !== true) {
+    if (buyer.emailVerified !== true && !transactionalEmailBypassEnabled()) {
       return res.status(403).json({
         error: "Buyer email verification required",
         code: "buyer_email_verification_required",
         emailVerified: false,
       });
+    }
+
+    if (transactionalEmailBypassEnabled() && buyer.emailVerified !== true) {
+      buyer.emailVerified = true;
+      buyer.emailVerifiedAt = new Date().toISOString();
+      buyers[email] = buyer;
+      saveBuyersFile(buyers);
     }
 
     const token = issueUserSessionToken({
@@ -3561,7 +3606,12 @@ app.post(
       });
 
       let verification = null;
-      if (emailChanged) {
+      if (emailChanged && transactionalEmailBypassEnabled()) {
+        updatedBuyer.emailVerified = true;
+        updatedBuyer.emailVerifiedAt = new Date().toISOString();
+        buyers[nextEmail] = updatedBuyer;
+        saveBuyersFile(buyers);
+      } else if (emailChanged) {
         const challenge = createEmailOtpChallenge({
           req,
           purpose: "buyer_email_verification",
