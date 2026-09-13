@@ -86,7 +86,12 @@ const VIDEO_MIME_BY_EXTENSION = {
 };
 
 const SELLER_IMAGE_MEDIA_KINDS = new Set(["image", "avatar", "banner"]);
-const SELLER_VIDEO_MEDIA_KINDS = new Set(["demo-video", "production-preview"]);
+const SELLER_VIDEO_MEDIA_KINDS = new Set([
+  "demo-video",
+  "production-preview",
+  // Order fulfillment maker clips (legacy iOS clients used this kind name)
+  "order-maker-video",
+]);
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value || "").trim(), 10);
@@ -221,7 +226,8 @@ function validateAgainstPolicy({
 }
 
 export function validateSellerMediaUpload({ buffer, contentType, fileExtension, mediaKind }) {
-  const kind = String(mediaKind || "").trim().toLowerCase();
+  const requestedKind = String(mediaKind || "").trim().toLowerCase();
+  const kind = requestedKind === "video" ? "demo-video" : requestedKind;
   if (SELLER_IMAGE_MEDIA_KINDS.has(kind)) {
     return validateAgainstPolicy({
       buffer,

@@ -19,16 +19,23 @@ struct HomeView: View {
     @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
     @AppStorage("sellerSellerId") private var sellerId = ""
     @AppStorage("sellerBusinessName") private var sellerBusinessName = ""
+    @AppStorage("sellerAccountCreated") private var sellerAccountCreated = false
+    @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
+    @AppStorage(AppConstants.showMockCatalogUserDefaultsKey) private var showMockCatalog = false
     @State private var showCart = false
+    @State private var showBuyerProfile = false
+    @State private var showSellerSetup = false
+    @State private var showNotificationsHub = false
     @State private var liveDrop: CurrentDropResponse?
     @State private var selectedFeaturedCreator: SellerProfile?
+    @State private var selectedSellerStorefront: SellerProfile?
     @State private var featuredRotationIndex = 0
     @State private var creatorRotationIndex = 0
     @State private var cachedFeaturedProducts: [Product] = []
     @State private var lastLiveDropRefresh = Date.distantPast
     @State private var isLiveDropRefreshInFlight = false
-    @State private var isHomeVisible = false
     @State private var catalogCache = HomeCatalogCache()
+    @Environment(\.tbTabIsActive) private var isHomeTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let rotationInterval: TimeInterval = 120
     private let rotationTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
@@ -250,7 +257,7 @@ struct HomeView: View {
     /// resolution), and Home re-renders on rotation timers. Memoize per catalog revision so
     /// repeated body evaluations and per-card lookups stay O(1).
     private var catalogSnapshot: HomeCatalogSnapshot {
-        let key = "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(catalog.isUsingCachedData)|\(orderStore.orders.count)"
+        let key = "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(catalog.isUsingCachedData)|\(orderStore.orders.count)|\(showMockCatalog)"
         if let cached = catalogCache.snapshot, cached.key == key {
             return cached
         }
@@ -283,20 +290,27 @@ struct HomeView: View {
         catalogSnapshot.freshFavoritesSellerProfilesByID
     }
 
+    /// DEBUG builds can opt into bundled sample listings from Developer tools. Shipped builds never show them.
+    private var includesMockCatalog: Bool {
+#if DEBUG
+        return showMockCatalog
+#else
+        return false
+#endif
+    }
+
     private func computeProductsForSnapshot() -> [Product] {
         let resolvedProducts = resolvedStorefrontProducts(
             remoteProducts: catalog.products,
             fallbackProducts: localProducts.products
         )
-#if DEBUG
-        return resolvedProducts
-#else
-        return resolvedProducts.filter(CatalogSeedPolicy.isRealStorefrontProduct)
-#endif
+        guard !includesMockCatalog else { return resolvedProducts }
+        return resolvedProducts.filter { CatalogSeedPolicy.isRealStorefrontProduct($0) }
     }
 
-    /// Fresh favorites only: keep mock filler for thin live catalogs, but do not re-add local seller drafts after
-    /// the backend catalog has loaded. Deleted/archived server products must disappear everywhere.
+    /// Fresh favorites only: pad a thin catalog from cached local products, but do not re-add local seller drafts
+    /// after the backend catalog has loaded. Deleted/archived server products must disappear everywhere.
+    /// Bundled `MockData` filler is opt-in via Developer tools and never reaches a shipped build.
     private func computeFreshFavoritesCatalog(base: [Product]) -> [Product] {
         if base.count >= HomeMetrics.freshFavoritesMaxStripCards { return base }
 
@@ -313,48 +327,20 @@ struct HomeView: View {
         }
 
         if catalog.isUsingCachedData {
-            appendUnique(localProducts.products)
+            appendUnique(
+                includesMockCatalog
+                    ? localProducts.products
+                    : localProducts.products.filter { CatalogSeedPolicy.isRealStorefrontProduct($0) }
+            )
         }
-        #if DEBUG
-        if merged.count < HomeMetrics.freshFavoritesMaxStripCards {
+        if includesMockCatalog, merged.count < HomeMetrics.freshFavoritesMaxStripCards {
             appendUnique(MockData.products)
         }
-        #endif
         return merged
     }
 
     private var orders: [Order] {
         orderStore.orders
-    }
-
-    @ViewBuilder
-    private var profileDestination: some View {
-        if userRole == "seller" {
-            if let sellerStoreProfile {
-                SellerStorePreviewView(
-                    seller: sellerStoreProfile,
-                    products: products
-                )
-            } else {
-                RolePickerView(startInSellerAccount: true, sellerEntryMode: .create)
-            }
-        } else {
-            BuyerProfileView()
-        }
-    }
-
-    private var sellerStoreProfile: SellerProfile? {
-        let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedSellerId.isEmpty else { return nil }
-
-        return resolvedSellerProfile(
-            sellerId: trimmedSellerId,
-            storefrontProducts: products.filter { $0.sellerId == trimmedSellerId },
-            remoteProfiles: catalog.sellerProfiles
-        ) ?? .previewProfile(
-            sellerId: trimmedSellerId,
-            businessName: sellerBusinessName
-        )
     }
 
     private var profileToolbarIcon: some View {
@@ -372,6 +358,38 @@ struct HomeView: View {
         }
         .frame(width: 44, height: 44)
         .contentShape(Rectangle())
+    }
+
+    private var currentSellerStorefrontProfile: SellerProfile? {
+        let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSellerId.isEmpty else { return nil }
+        return resolvedSellerProfile(
+            sellerId: trimmedSellerId,
+            storefrontProducts: products.filter { $0.sellerId == trimmedSellerId },
+            remoteProfiles: catalog.sellerProfiles
+        ) ?? .previewProfile(sellerId: trimmedSellerId, businessName: sellerBusinessName)
+    }
+
+    private func openProfileFromToolbar() {
+        if userRole == "seller" {
+            let trimmedSellerId = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
+            if sellerAccountCreated, !trimmedSellerId.isEmpty {
+                guard let profile = currentSellerStorefrontProfile else { return }
+                // Reset first so repeat taps always push, even after popping back.
+                if selectedSellerStorefront?.id == profile.id {
+                    selectedSellerStorefront = nil
+                    DispatchQueue.main.async {
+                        selectedSellerStorefront = profile
+                    }
+                } else {
+                    selectedSellerStorefront = profile
+                }
+            } else {
+                showSellerSetup = true
+            }
+        } else {
+            showBuyerProfile = true
+        }
     }
 
     private var buyerInitials: String {
@@ -505,7 +523,7 @@ struct HomeView: View {
     }
 
     private var featuredProductsTaskKey: String {
-        "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(liveDrop?.active ?? false)"
+        "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(liveDrop?.active ?? false)|\(showMockCatalog)"
     }
 
     private func refreshFeaturedProductsCache() {
@@ -747,7 +765,7 @@ struct HomeView: View {
                 cornerRadius: 30,
                 horizontalPadding: TBTheme.spacingLG + 2,
                 verticalPadding: HomeMetrics.logoSnowfallVerticalPadding,
-                flakeCount: 84
+                flakeCount: 20
             ) {
                 Image("Logo")
                     .resizable()
@@ -825,14 +843,10 @@ struct HomeView: View {
                 refreshFeaturedProductsCache()
             }
             .onAppear {
-                isHomeVisible = true
                 seedRotations()
             }
-            .onDisappear {
-                isHomeVisible = false
-            }
             .onReceive(rotationTimer) { _ in
-                guard isHomeVisible else { return }
+                guard isHomeTabActive else { return }
                 advanceRotations()
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -847,20 +861,19 @@ struct HomeView: View {
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     HStack(spacing: 2) {
-                        NavigationLink {
-                            profileDestination
-                        } label: {
+                        Button(action: openProfileFromToolbar) {
                             profileToolbarIcon
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(userRole == "seller" ? "Open seller profile" : "Open buyer profile")
+                        .accessibilityLabel(userRole == "seller" ? "View your storefront" : "Open buyer profile")
 
-                        NavigationLink {
-                            NotificationsHubView()
+                        Button {
+                            showNotificationsHub = true
                         } label: {
                             NotificationBellButton(unreadCount: notifications.unreadCount())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Open notifications")
                     }
                 }
                 .sharedBackgroundVisibility(.hidden)
@@ -880,20 +893,19 @@ struct HomeView: View {
                 }
                 ToolbarItem(placement: .automatic) {
                     HStack(spacing: 2) {
-                        NavigationLink {
-                            profileDestination
-                        } label: {
+                        Button(action: openProfileFromToolbar) {
                             profileToolbarIcon
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(userRole == "seller" ? "Open seller profile" : "Open buyer profile")
+                        .accessibilityLabel(userRole == "seller" ? "View your storefront" : "Open buyer profile")
 
-                        NavigationLink {
-                            NotificationsHubView()
+                        Button {
+                            showNotificationsHub = true
                         } label: {
                             NotificationBellButton(unreadCount: notifications.unreadCount())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Open notifications")
                     }
                 }
                 .sharedBackgroundVisibility(.hidden)
@@ -911,7 +923,22 @@ struct HomeView: View {
                     .environmentObject(catalog)
                     .environmentObject(localProducts)
             }
+            .navigationDestination(isPresented: $showBuyerProfile) {
+                BuyerProfileView()
+            }
+            .navigationDestination(isPresented: $showSellerSetup) {
+                RolePickerView(startInSellerAccount: true, sellerEntryMode: .create)
+            }
+            .navigationDestination(isPresented: $showNotificationsHub) {
+                NotificationsHubView()
+            }
             .navigationDestination(item: $selectedFeaturedCreator) { seller in
+                PublicSellerProfileView(
+                    seller: seller,
+                    products: products(for: seller)
+                )
+            }
+            .navigationDestination(item: $selectedSellerStorefront) { seller in
                 PublicSellerProfileView(
                     seller: seller,
                     products: products(for: seller)
@@ -1064,7 +1091,7 @@ private struct DealOfDayBanner: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                SnowfallParticleCanvas(flakeCount: 24)
+                SnowfallParticleCanvas(flakeCount: 10)
                     .allowsHitTesting(false)
             }
         }

@@ -91,6 +91,10 @@ enum AppConstants {
     /// When Testing mode is on, force local `TB-TEST-…` checkout even if Stripe test keys are configured.
     static let forceSimulatedCheckoutUserDefaultsKey = "tb.forceSimulatedCheckout"
 
+    /// DEBUG-only: show bundled `MockData` / photo-less seed listings on Home. Off by default so debug builds
+    /// present the same storefront a shipped build would.
+    static let showMockCatalogUserDefaultsKey = "tb.showMockCatalog"
+
     /// DEBUG-only: override plist `TENBELOW_BACKEND_BASE_URL` (e.g. `http://192.168.1.12:3000`) so a physical device can reach the Mac running `tenbelow-backend`.
     nonisolated static let debugBackendBaseURLOverrideKey = BackendURLConfiguration.debugBackendBaseURLOverrideKey
 

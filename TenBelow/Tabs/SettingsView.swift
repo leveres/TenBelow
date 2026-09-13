@@ -392,7 +392,7 @@ struct SettingsView: View {
 
     private func switchAppMode(to role: String, launchTab: Int) {
         userRole = role
-        pendingLaunchTab = launchTab
+        TabLaunchBridge.requestTab(launchTab)
 
         Task {
             await MarketplaceAuthSession.syncAfterIdentityChange()

@@ -16,7 +16,6 @@ struct SellerDashboardView: View {
     @AppStorage("sellerSellerId") private var sellerSellerId = ""
     let products: [Product]
     @State private var seller: SellerProfile
-    @State private var showAddProductFlow = false
     @State private var customOrderPendingCount: Int?
     @State private var lastDashboardRefresh = Date.distantPast
     private var shippingSnapshot: SellerDashboardShippingSnapshot { .load() }
@@ -131,13 +130,6 @@ struct SellerDashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(TBFrostBackground())
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(isPresented: $showAddProductFlow) {
-            SellerProductsView(
-                seller: seller,
-                products: sellerProducts,
-                startInAddMode: true
-            )
-        }
         .task {
             #if DEBUG
             print("[SellerDashboard] task start sellerId=\(seller.id)")

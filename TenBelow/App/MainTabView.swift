@@ -26,6 +26,7 @@ struct MainTabView: View {
     @AppStorage("sellerSellerId") private var sellerSellerId = ""
     @AppStorage("shouldShowHomeEntrySplash") private var shouldShowHomeEntrySplash = false
     @AppStorage("pendingLaunchTab") private var pendingLaunchTab = 0
+    @AppStorage(TabLaunchBridge.pendingLaunchTabTokenKey) private var pendingLaunchTabToken = ""
     @AppStorage("catalogRefreshToken") private var catalogRefreshToken = 0
     var showsLoadingOverlay: Bool = true
     @State private var isShowingEntrySplash = false
@@ -111,10 +112,10 @@ struct MainTabView: View {
             dismissEntrySplashIfReady()
         }
         .onChange(of: pendingLaunchTab) { _, newValue in
-            guard let launchTab = MainTab(rawValue: newValue), !isEntrySplashActive else { return }
-            withAnimation(.easeInOut(duration: 0.22)) {
-                selectedTab = launchTab
-            }
+            applyPendingLaunchTab(newValue)
+        }
+        .onChange(of: pendingLaunchTabToken) { _, _ in
+            applyPendingLaunchTab(pendingLaunchTab)
         }
         .onChange(of: selectedTab) { _, newValue in
             guard newValue == .drop else { return }
@@ -267,10 +268,12 @@ struct MainTabView: View {
     private func openNotificationBanner(_ notification: AppNotification) {
         notifications.markAsRead(notification.id)
 
-        if notification.relatedOrderId != nil
-            || notification.relatedExchangeRequestId != nil
-            || notification.type == .orderSupportUpdate {
-            selectedTab = .orders
+        if shouldOpenOrdersTab(for: notification) {
+            if let orderId = notification.relatedOrderId {
+                OrderNavigationBridge.requestOpenOrder(orderId: orderId)
+            } else {
+                TabLaunchBridge.requestTab(MainTab.orders.rawValue)
+            }
         } else if notification.relatedProductId != nil {
             selectedTab = .store
         } else {
@@ -278,6 +281,20 @@ struct MainTabView: View {
         }
 
         dismissNotificationBanner()
+    }
+
+    private func shouldOpenOrdersTab(for notification: AppNotification) -> Bool {
+        switch notification.type {
+        case .orderReceived:
+            return userRole == "seller"
+        case .orderStatusUpdate, .orderSupportUpdate:
+            return notification.relatedOrderId != nil
+        case .exchangeUpdate:
+            return notification.relatedOrderId != nil
+                || notification.relatedExchangeRequestId != nil
+        default:
+            return notification.relatedOrderId != nil
+        }
     }
 
     private var settingsTabBadge: String? {
@@ -363,6 +380,13 @@ struct MainTabView: View {
         }
 
         pendingLaunchTab = MainTab.home.rawValue
+    }
+
+    private func applyPendingLaunchTab(_ rawValue: Int) {
+        guard let launchTab = MainTab(rawValue: rawValue), !isEntrySplashActive else { return }
+        withAnimation(.easeInOut(duration: 0.22)) {
+            selectedTab = launchTab
+        }
     }
 }
 

@@ -803,8 +803,8 @@ private struct WeeklyDropEditorView: View {
     @State private var draft: WeeklyDropDraft
     @State private var stage: WeeklyDropEditorStage
     @State private var selectedImageItems: [PhotosPickerItem] = []
-    @State private var selectedVideoItem: PhotosPickerItem?
-    @State private var selectedProductionPreviewItem: PhotosPickerItem?
+    @State private var isShowingCreatorClipPicker = false
+    @State private var isShowingMakerVideoPicker = false
     @State private var selectedVideoPlayer: AVPlayer?
     @State private var selectedProductionPreviewPlayer: AVPlayer?
     @State private var selectedVideoDurationSeconds: Double?
@@ -817,6 +817,7 @@ private struct WeeklyDropEditorView: View {
     private let maxCreatorClipDurationSeconds: Double = 45
     /// Private maker / production preview: allow longer clips (at least 20s per product requirements).
     private let maxMakerVideoDurationSeconds: Double = 120
+    private let maxVideoUploadBytes: Int64 = 50 * 1024 * 1024
 
     init(
         context: WeeklyDropEditorContext,
@@ -951,12 +952,22 @@ private struct WeeklyDropEditorView: View {
         .onChange(of: selectedImageItems) { _, items in
             Task { await loadSelectedImages(from: items) }
         }
-        .onChange(of: selectedVideoItem) { _, item in
-            Task { await loadSelectedVideo(from: item) }
+        #if os(iOS)
+        .sheet(isPresented: $isShowingCreatorClipPicker) {
+            SystemVideoLibraryPicker(isPresented: $isShowingCreatorClipPicker) { url in
+                Task { await applySelectedVideo(from: url, isProductionPreview: false) }
+            } onError: { message in
+                mediaErrorMessage = message
+            }
         }
-        .onChange(of: selectedProductionPreviewItem) { _, item in
-            Task { await loadSelectedProductionPreview(from: item) }
+        .sheet(isPresented: $isShowingMakerVideoPicker) {
+            SystemVideoLibraryPicker(isPresented: $isShowingMakerVideoPicker) { url in
+                Task { await applySelectedVideo(from: url, isProductionPreview: true) }
+            } onError: { message in
+                mediaErrorMessage = message
+            }
         }
+        #endif
         .onChange(of: draft.demoVideoURLString) { _, newValue in
             updatePlayer(
                 binding: &selectedVideoPlayer,
@@ -1152,10 +1163,9 @@ private struct WeeklyDropEditorView: View {
                     .disabled(!mediaEditingAllowed)
                     .opacity(mediaEditingAllowed ? 1 : 0.55)
 
-                    PhotosPicker(
-                        selection: $selectedVideoItem,
-                        matching: .videos
-                    ) {
+                    Button {
+                        isShowingCreatorClipPicker = true
+                    } label: {
                         Label(draft.demoVideoURLString.isEmpty ? "Add Creator Clip" : "Replace Clip", systemImage: "video.badge.plus")
                     }
                     .buttonStyle(SecondaryCTAButtonStyle())
@@ -1181,7 +1191,6 @@ private struct WeeklyDropEditorView: View {
                         canRemove: mediaEditingAllowed,
                         onRemove: {
                             draft.demoVideoURLString = ""
-                            selectedVideoItem = nil
                             selectedVideoPlayer = nil
                             selectedVideoDurationSeconds = nil
                         }
@@ -1194,10 +1203,9 @@ private struct WeeklyDropEditorView: View {
                         .foregroundStyle(creatorClipDurationValid ? Color.secondary : Color.orange)
                 }
 
-                PhotosPicker(
-                    selection: $selectedProductionPreviewItem,
-                    matching: .videos
-                ) {
+                Button {
+                    isShowingMakerVideoPicker = true
+                } label: {
                     Label(
                         draft.productionPreviewURLString.isEmpty ? "Add Maker Video" : "Replace Maker Video",
                         systemImage: "sparkles.tv"
@@ -1219,7 +1227,6 @@ private struct WeeklyDropEditorView: View {
                         canRemove: mediaEditingAllowed,
                         onRemove: {
                             draft.productionPreviewURLString = ""
-                            selectedProductionPreviewItem = nil
                             selectedProductionPreviewPlayer = nil
                             selectedProductionPreviewDurationSeconds = nil
                         }
@@ -1435,72 +1442,38 @@ private struct WeeklyDropEditorView: View {
         }
     }
 
-    private func loadSelectedVideo(from item: PhotosPickerItem?) async {
-        guard let item else {
-            await MainActor.run {
-                draft.demoVideoURLString = ""
-                selectedVideoDurationSeconds = nil
-            }
-            return
-        }
-
+    private func applySelectedVideo(from url: URL, isProductionPreview: Bool) async {
         do {
-            guard let data = try await item.loadTransferable(type: Data.self),
-                  let videoURL = WeeklyDropSubmissionUploader.writeTempFile(data: data, fileExtension: "mov")
-            else {
+            let fileSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
+            guard fileSize <= maxVideoUploadBytes else {
                 await MainActor.run {
-                    mediaErrorMessage = "We couldn't load that video clip."
+                    mediaErrorMessage = "Videos must be under 50 MB. Try a shorter clip or export at a lower quality."
                 }
                 return
             }
 
-            let durationSeconds = try await videoDurationSeconds(for: videoURL)
+            let durationSeconds = try await videoDurationSeconds(for: url)
 
             await MainActor.run {
-                draft.demoVideoURLString = videoURL.absoluteString
-                selectedVideoDurationSeconds = durationSeconds
-                mediaErrorMessage = durationSeconds > maxCreatorClipDurationSeconds
-                    ? "Creator clips need to stay under \(Int(maxCreatorClipDurationSeconds)) seconds."
-                    : nil
-            }
-        } catch {
-            await MainActor.run {
-                mediaErrorMessage = "We couldn't load that video clip."
-            }
-        }
-    }
-
-    private func loadSelectedProductionPreview(from item: PhotosPickerItem?) async {
-        guard let item else {
-            await MainActor.run {
-                draft.productionPreviewURLString = ""
-                selectedProductionPreviewDurationSeconds = nil
-            }
-            return
-        }
-
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self),
-                  let videoURL = WeeklyDropSubmissionUploader.writeTempFile(data: data, fileExtension: "mov")
-            else {
-                await MainActor.run {
-                    mediaErrorMessage = "We couldn't load that maker video."
+                if isProductionPreview {
+                    draft.productionPreviewURLString = url.absoluteString
+                    selectedProductionPreviewDurationSeconds = durationSeconds
+                    mediaErrorMessage = durationSeconds > maxMakerVideoDurationSeconds
+                        ? "Maker videos need to stay under \(Int(maxMakerVideoDurationSeconds)) seconds."
+                        : nil
+                } else {
+                    draft.demoVideoURLString = url.absoluteString
+                    selectedVideoDurationSeconds = durationSeconds
+                    mediaErrorMessage = durationSeconds > maxCreatorClipDurationSeconds
+                        ? "Creator clips need to stay under \(Int(maxCreatorClipDurationSeconds)) seconds."
+                        : nil
                 }
-                return
-            }
-
-            let durationSeconds = try await videoDurationSeconds(for: videoURL)
-
-            await MainActor.run {
-                draft.productionPreviewURLString = videoURL.absoluteString
-                selectedProductionPreviewDurationSeconds = durationSeconds
-                mediaErrorMessage = durationSeconds > maxMakerVideoDurationSeconds
-                    ? "Maker videos need to stay under \(Int(maxMakerVideoDurationSeconds)) seconds."
-                    : nil
             }
         } catch {
             await MainActor.run {
-                mediaErrorMessage = "We couldn't load that maker video."
+                mediaErrorMessage = isProductionPreview
+                    ? "We couldn't load that maker video."
+                    : "We couldn't load that video clip."
             }
         }
     }
@@ -2706,7 +2679,7 @@ private enum WeeklyDropSubmissionUploader {
             draft.demoVideoURLString,
             sellerId: draft.sellerId,
             productId: draft.id,
-            mediaKind: "video"
+            mediaKind: "demo-video"
         )
         prepared.productionPreviewURLString = try await uploadVideoIfNeeded(
             draft.productionPreviewURLString,
@@ -2776,6 +2749,13 @@ private enum WeeklyDropSubmissionUploader {
         }
 
         let data = try Data(contentsOf: fileURL)
+        guard Int64(data.count) <= 50 * 1024 * 1024 else {
+            throw NSError(
+                domain: "WeeklyDropSubmissionUploader",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Videos must be under 50 MB."]
+            )
+        }
         let fileExtension = fileURL.pathExtension.lowercased().isEmpty ? "mov" : fileURL.pathExtension.lowercased()
         return try await SellerAPI.uploadMedia(
             sellerId: sellerId,
@@ -2783,7 +2763,7 @@ private enum WeeklyDropSubmissionUploader {
             mediaKind: mediaKind,
             slot: "0",
             fileExtension: fileExtension,
-            contentType: videoContentType(for: fileExtension),
+            contentType: MediaUploadTypes.videoContentType(for: fileExtension),
             data: data
         )
     }
@@ -2811,18 +2791,6 @@ private enum WeeklyDropSubmissionUploader {
         }
     }
 
-    private static func videoContentType(for fileExtension: String) -> String {
-        switch fileExtension.lowercased() {
-        case "mp4", "m4v":
-            return "video/mp4"
-        case "mov":
-            return "video/quicktime"
-        case "webm":
-            return "video/webm"
-        default:
-            return "application/octet-stream"
-        }
-    }
 }
 
 private struct DropMediaImageReorderDelegate: DropDelegate {

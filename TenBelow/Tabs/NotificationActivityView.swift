@@ -6,15 +6,12 @@ import SwiftUI
 
 private enum NotificationDestination: Identifiable, Hashable {
     case product(Product)
-    case order(String)
     case exchange(String)
 
     var id: String {
         switch self {
         case .product(let product):
             return "product:\(product.id)"
-        case .order(let orderId):
-            return "order:\(orderId)"
         case .exchange(let exchangeRequestId):
             return "exchange:\(exchangeRequestId)"
         }
@@ -73,12 +70,6 @@ struct NotificationActivityView: View {
             switch destination {
             case .product(let product):
                 ProductDetailView(product: product)
-            case .order(let orderId):
-                OrderDetailView(
-                    orderId: orderId,
-                    mode: userRole == "seller" ? .seller : .buyer,
-                    currentSellerId: userRole == "seller" ? activeSellerId : nil
-                )
             case .exchange(let exchangeRequestId):
                 ExchangeStatusScreen(exchangeRequestId: exchangeRequestId)
             }
@@ -89,11 +80,6 @@ struct NotificationActivityView: View {
         userRole == "seller"
             ? "Orders and account updates appear here when there’s something new."
             : "Order updates, price drops, and alerts you’ve turned on appear here."
-    }
-
-    private var activeSellerId: String {
-        let trimmed = sellerId.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "SELL-01" : trimmed
     }
 
     private var favoritesSection: some View {
@@ -283,14 +269,10 @@ struct NotificationActivityView: View {
     private func open(_ notification: AppNotification) {
         notificationStore.markAsRead(notification.id)
 
-        if let product = productForNotification(notification) {
-            selectedDestination = .product(product)
-            return
-        }
-
-        if let orderId = notification.relatedOrderId,
-           orderStore.order(withId: orderId) != nil {
-            selectedDestination = .order(orderId)
+        if let orderId = notification.relatedOrderId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !orderId.isEmpty,
+           shouldOpenOrdersTab(for: notification) || orderStore.order(withId: orderId) != nil {
+            OrderNavigationBridge.requestOpenOrder(orderId: orderId)
             return
         }
 
@@ -299,6 +281,24 @@ struct NotificationActivityView: View {
             return
         }
 
+        if let product = productForNotification(notification) {
+            selectedDestination = .product(product)
+            return
+        }
+    }
+
+    /// Seller order alerts should land in fulfillment, not the buyer product page.
+    private func shouldOpenOrdersTab(for notification: AppNotification) -> Bool {
+        switch notification.type {
+        case .orderReceived:
+            return userRole == "seller"
+        case .orderStatusUpdate, .orderSupportUpdate:
+            return notification.relatedOrderId != nil
+        case .exchangeUpdate:
+            return notification.relatedOrderId != nil
+        default:
+            return false
+        }
     }
 
     private func icon(for type: NotificationType) -> String {

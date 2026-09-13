@@ -5,6 +5,7 @@ import SwiftUI
 /// Same snowfall system as weekly-drop title art; use behind glass or on colored card backgrounds.
 struct SnowfallParticleCanvas: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tbTabIsActive) private var tabIsActive
     // Deselected TabView tabs stay mounted, so without this the animation timeline keeps
     // ticking (and burning CPU/GPU) for every tab's header at once.
@@ -17,11 +18,11 @@ struct SnowfallParticleCanvas: View {
         let effectiveAnimates = animates && !reduceMotion
         let effectiveFlakeCount = reduceMotion ? 0 : min(max(flakeCount, 0), 32)
         let flakes = (0..<effectiveFlakeCount).map(TitleSnowParticle.init(seed:))
-        let shouldRun = effectiveAnimates && isVisible && tabIsActive
+        let shouldRun = effectiveAnimates && isVisible && tabIsActive && scenePhase == .active
 
         Group {
             if effectiveAnimates {
-                TimelineView(.animation(minimumInterval: 1.0 / 15.0, paused: !shouldRun)) { timeline in
+                TimelineView(.animation(minimumInterval: 1.0 / 10.0, paused: !shouldRun)) { timeline in
                     snowCanvas(flakes: flakes, time: CGFloat(timeline.date.timeIntervalSinceReferenceDate))
                 }
             } else {

@@ -11,6 +11,10 @@ import UIKit
 import UniformTypeIdentifiers
 #endif
 
+private struct OrderNavigationTarget: Identifiable, Hashable {
+    let id: String
+}
+
 private enum OrderDateFilter: String, CaseIterable, Identifiable {
     case allTime
     case last30Days
@@ -103,6 +107,8 @@ struct OrdersView: View {
     @State private var selectedFilter: OrderListFilter = .all
     @State private var selectedDateFilter: OrderDateFilter = .allTime
     @State private var lastOrdersRefresh = Date.distantPast
+    @State private var autoPresentedOrder: OrderNavigationTarget?
+    @AppStorage(OrderNavigationBridge.pendingOrderIdKey) private var pendingOrderNavigationId = ""
 
 #if os(iOS)
     private enum Haptics {
@@ -155,6 +161,41 @@ struct OrdersView: View {
             transaction.disablesAnimations = true
             withTransaction(transaction) {
                 selectedDateFilter = .allTime
+            }
+        }
+        .navigationDestination(item: $autoPresentedOrder) { target in
+            OrderDetailView(
+                orderId: target.id,
+                mode: mode,
+                currentSellerId: effectiveSellerId
+            )
+            .onDisappear {
+                if autoPresentedOrder?.id == target.id {
+                    autoPresentedOrder = nil
+                }
+            }
+        }
+        .onAppear {
+            handlePendingOrderNavigation()
+        }
+        .onChange(of: pendingOrderNavigationId) { _, _ in
+            handlePendingOrderNavigation()
+        }
+    }
+
+    private func handlePendingOrderNavigation() {
+        let trimmed = pendingOrderNavigationId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        pendingOrderNavigationId = ""
+        presentOrder(orderId: trimmed)
+    }
+
+    private func presentOrder(orderId: String) {
+        guard autoPresentedOrder?.id != orderId else { return }
+        Task {
+            await refreshOrders(force: true)
+            await MainActor.run {
+                autoPresentedOrder = OrderNavigationTarget(id: orderId)
             }
         }
     }
@@ -1036,10 +1077,10 @@ struct BuyerOrderDetailView: View {
                 .padding(.horizontal, 2)
 
             ForEach(productionPreviewEntries) { preview in
-                GlassCard(cornerRadius: 20) {
-                    Button {
-                        selectedProductionPreview = preview
-                    } label: {
+                Button {
+                    selectedProductionPreview = preview
+                } label: {
+                    GlassCard(cornerRadius: 20) {
                         HStack(spacing: 12) {
                             ZStack {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1082,9 +1123,12 @@ struct BuyerOrderDetailView: View {
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(TBTheme.icyBlue)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Watch maker video for \(preview.productName)")
             }
         }
     }
@@ -1681,13 +1725,14 @@ struct SellerOrderDetailView: View {
                     )
                 }
             } else {
+                // Backend allowlist: demo-video | production-preview (see mediaUploadPolicy.js)
                 let uploadedURL = try await SellerAPI.uploadMedia(
                     sellerId: target.sellerId,
                     productId: target.productId,
-                    mediaKind: "order-maker-video",
+                    mediaKind: "production-preview",
                     slot: target.orderItemId,
                     fileExtension: normalizedExtension,
-                    contentType: normalizedExtension == "mp4" ? "video/mp4" : "video/quicktime",
+                    contentType: MediaUploadTypes.videoContentType(for: normalizedExtension),
                     data: data
                 )
 
@@ -1807,95 +1852,6 @@ struct SellerOrderDetailView: View {
         return current
     }
 }
-
-#if os(iOS)
-private struct SystemVideoLibraryPicker: UIViewControllerRepresentable {
-    @Binding var isPresented: Bool
-    let onPick: (URL) -> Void
-    let onError: (String) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeUIViewController(context: Context) -> PHPickerViewController {
-        var configuration = PHPickerConfiguration(photoLibrary: .shared())
-        configuration.selectionLimit = 1
-        configuration.filter = nil
-        configuration.preferredAssetRepresentationMode = .current
-
-        let picker = PHPickerViewController(configuration: configuration)
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
-
-    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        private let parent: SystemVideoLibraryPicker
-
-        init(_ parent: SystemVideoLibraryPicker) {
-            self.parent = parent
-        }
-
-        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            guard let result = results.first else {
-                parent.isPresented = false
-                return
-            }
-
-            let provider = result.itemProvider
-            let movieTypeIdentifiers = [UTType.movie.identifier, UTType.video.identifier]
-            guard let movieTypeIdentifier = movieTypeIdentifiers.first(where: { provider.hasItemConformingToTypeIdentifier($0) }) else {
-                parent.onError("Please choose a video from your library.")
-                parent.isPresented = false
-                return
-            }
-
-            provider.loadFileRepresentation(forTypeIdentifier: movieTypeIdentifier) { url, error in
-                if let error {
-                    Task { @MainActor in
-                        self.parent.onError(error.localizedDescription)
-                        self.parent.isPresented = false
-                    }
-                    return
-                }
-
-                guard let url else {
-                    Task { @MainActor in
-                        self.parent.onError("We couldn't load that maker video.")
-                        self.parent.isPresented = false
-                    }
-                    return
-                }
-
-                Task.detached(priority: .userInitiated) {
-                    let fileExtension = url.pathExtension.isEmpty ? "mov" : url.pathExtension
-                    let destinationURL = FileManager.default.temporaryDirectory
-                        .appendingPathComponent(UUID().uuidString)
-                        .appendingPathExtension(fileExtension)
-
-                    do {
-                        if FileManager.default.fileExists(atPath: destinationURL.path) {
-                            try FileManager.default.removeItem(at: destinationURL)
-                        }
-                        try FileManager.default.copyItem(at: url, to: destinationURL)
-                        await MainActor.run {
-                            self.parent.onPick(destinationURL)
-                            self.parent.isPresented = false
-                        }
-                    } catch {
-                        await MainActor.run {
-                            self.parent.onError("We couldn't prepare that maker video.")
-                            self.parent.isPresented = false
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-#endif
 
 private struct SellerProductionPreviewTarget: Identifiable {
     let orderId: String

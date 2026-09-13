@@ -100,9 +100,15 @@ enum ExchangeAPI {
             .appendingPathComponent("proof")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue(asset.type == .video ? "video/mp4" : "image/jpeg", forHTTPHeaderField: "Content-Type")
+        let fileExtension = localFileURL.pathExtension.isEmpty
+            ? (asset.type == .video ? "mp4" : "jpg")
+            : localFileURL.pathExtension
+        request.setValue(
+            asset.type == .video ? MediaUploadTypes.videoContentType(for: fileExtension) : "image/jpeg",
+            forHTTPHeaderField: "Content-Type"
+        )
         request.setValue(asset.type.rawValue, forHTTPHeaderField: "X-Proof-Type")
-        request.setValue(localFileURL.pathExtension.isEmpty ? (asset.type == .video ? "mp4" : "jpg") : localFileURL.pathExtension, forHTTPHeaderField: "X-File-Extension")
+        request.setValue(fileExtension, forHTTPHeaderField: "X-File-Extension")
         if let videoDurationSeconds {
             request.setValue("\(videoDurationSeconds)", forHTTPHeaderField: "X-Video-Duration-Seconds")
         }

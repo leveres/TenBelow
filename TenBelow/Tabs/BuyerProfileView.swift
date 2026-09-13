@@ -111,8 +111,8 @@ struct BuyerProfileView: View {
                             subtitle: ""
                         )
 
-                        NavigationLink {
-                            OrdersView()
+                        Button {
+                            TabLaunchBridge.requestTab(3)
                         } label: {
                             accountRow(
                                 icon: "bag",

@@ -17,8 +17,8 @@ struct AddProductView: View {
 
     @State private var draft: SellerProductDraft
     @State private var selectedImageItems: [PhotosPickerItem] = []
-    @State private var selectedVideoItem: PhotosPickerItem?
-    @State private var selectedProductionPreviewItem: PhotosPickerItem?
+    @State private var isShowingCreatorClipPicker = false
+    @State private var isShowingMakerVideoPicker = false
     @State private var selectedVideoURL: URL?
     @State private var selectedProductionPreviewURL: URL?
     @State private var isShowingVideoPreview = false
@@ -82,7 +82,8 @@ struct AddProductView: View {
         !draft.warningLines.isEmpty &&
         draft.shipsInMaxDays >= draft.shipsInMinDays &&
         !premiumListingBlocked &&
-        draft.isRightsConfirmationComplete
+        draft.isRightsConfirmationComplete &&
+        !draft.imageURLStrings.isEmpty
     }
 
     private var hasValidColorOptions: Bool {
@@ -170,12 +171,22 @@ struct AddProductView: View {
             guard !items.isEmpty else { return }
             Task { await loadSelectedImages(from: items) }
         }
-        .onChange(of: selectedVideoItem) { _, item in
-            Task { await loadSelectedVideo(from: item) }
+        #if os(iOS)
+        .sheet(isPresented: $isShowingCreatorClipPicker) {
+            SystemVideoLibraryPicker(isPresented: $isShowingCreatorClipPicker) { url in
+                Task { await applySelectedProductVideo(from: url, isProductionPreview: false) }
+            } onError: { message in
+                mediaErrorMessage = message
+            }
         }
-        .onChange(of: selectedProductionPreviewItem) { _, item in
-            Task { await loadSelectedProductionPreview(from: item) }
+        .sheet(isPresented: $isShowingMakerVideoPicker) {
+            SystemVideoLibraryPicker(isPresented: $isShowingMakerVideoPicker) { url in
+                Task { await applySelectedProductVideo(from: url, isProductionPreview: true) }
+            } onError: { message in
+                mediaErrorMessage = message
+            }
         }
+        #endif
         .onChange(of: composerAutosaveFingerprint) { _, _ in
             persistComposerDraftIfNeeded()
         }
@@ -349,11 +360,9 @@ struct AddProductView: View {
                     .transition(.opacity)
                 }
 
-                PhotosPicker(
-                    selection: $selectedVideoItem,
-                    matching: .videos,
-                    photoLibrary: .shared()
-                ) {
+                Button {
+                    isShowingCreatorClipPicker = true
+                } label: {
                     mediaPickerButtonLabel(
                         title: isLoadingCreatorClip
                             ? "Loading Creator Clip..."
@@ -392,11 +401,9 @@ struct AddProductView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                PhotosPicker(
-                    selection: $selectedProductionPreviewItem,
-                    matching: .videos,
-                    photoLibrary: .shared()
-                ) {
+                Button {
+                    isShowingMakerVideoPicker = true
+                } label: {
                     mediaPickerButtonLabel(
                         title: isLoadingProductionPreview
                             ? "Loading Maker Video..."
@@ -471,6 +478,12 @@ struct AddProductView: View {
 
             if showRightsValidationMessage || !draft.isRightsConfirmationComplete {
                 Text("Complete this section before submitting your product.")
+                    .font(.tbCaption)
+                    .foregroundStyle(.orange)
+            }
+
+            if draft.imageURLStrings.isEmpty {
+                Text("Add at least one product photo before submitting.")
                     .font(.tbCaption)
                     .foregroundStyle(.orange)
             }
@@ -716,109 +729,60 @@ struct AddProductView: View {
             draft.imageURLStrings.append(contentsOf: loadedReferences)
             draft.imageURLStrings = Array(draft.imageURLStrings.prefix(6))
             refreshVisiblePhotoReferences()
-            mediaErrorMessage = items.count > availableSlots
-                ? "You can add up to 6 photos."
-                : nil
+            if loadedReferences.isEmpty, !items.isEmpty {
+                mediaErrorMessage = "We couldn't load the selected photos. Try again or pick different images."
+            } else if items.count > availableSlots {
+                mediaErrorMessage = "You can add up to 6 photos."
+            } else {
+                mediaErrorMessage = nil
+            }
             isLoadingPhotos = false
             loadingPhotoPlaceholderCount = 0
             selectedImageItems = []
         }
     }
 
-    private func loadSelectedVideo(from item: PhotosPickerItem?) async {
-        guard let item else {
-            await MainActor.run {
-                draft.demoVideoURLString = ""
-                selectedVideoURL = nil
-            }
-            return
-        }
-
+    private func applySelectedProductVideo(from url: URL, isProductionPreview: Bool) async {
+        let maxBytes: Int64 = 50 * 1024 * 1024
         await MainActor.run {
-            isLoadingCreatorClip = true
+            if isProductionPreview {
+                isLoadingProductionPreview = true
+            } else {
+                isLoadingCreatorClip = true
+            }
             mediaErrorMessage = nil
         }
 
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
+            let fileSize = try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
+            guard fileSize <= maxBytes else {
                 await MainActor.run {
+                    mediaErrorMessage = "Videos must be under 50 MB. Try a shorter clip or export at a lower quality."
                     isLoadingCreatorClip = false
-                    mediaErrorMessage = "We couldn't load that video clip."
-                }
-                return
-            }
-
-            let fileExtension = item.supportedContentTypes.first?.preferredFilenameExtension ?? "mov"
-            guard let outputURL = await SellerProductMediaUploader.videoTempURL(
-                from: data,
-                fileExtension: fileExtension
-            ) else {
-                await MainActor.run {
-                    isLoadingCreatorClip = false
-                    mediaErrorMessage = "We couldn't load that video clip."
+                    isLoadingProductionPreview = false
                 }
                 return
             }
 
             await MainActor.run {
+                if isProductionPreview {
+                    draft.productionPreviewURLString = url.absoluteString
+                    selectedProductionPreviewURL = url
+                    isLoadingProductionPreview = false
+                } else {
+                    draft.demoVideoURLString = url.absoluteString
+                    selectedVideoURL = url
+                    isLoadingCreatorClip = false
+                }
                 mediaErrorMessage = nil
-                draft.demoVideoURLString = outputURL.absoluteString
-                selectedVideoURL = outputURL
-                isLoadingCreatorClip = false
             }
         } catch {
             await MainActor.run {
+                mediaErrorMessage = isProductionPreview
+                    ? "We couldn't load that production preview clip."
+                    : "We couldn't load that video clip."
                 isLoadingCreatorClip = false
-                mediaErrorMessage = "We couldn't load that video clip."
-            }
-        }
-    }
-
-    private func loadSelectedProductionPreview(from item: PhotosPickerItem?) async {
-        guard let item else {
-            await MainActor.run {
-                draft.productionPreviewURLString = ""
-                selectedProductionPreviewURL = nil
-            }
-            return
-        }
-
-        await MainActor.run {
-            isLoadingProductionPreview = true
-            mediaErrorMessage = nil
-        }
-
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                await MainActor.run {
-                    isLoadingProductionPreview = false
-                    mediaErrorMessage = "We couldn't load that production preview clip."
-                }
-                return
-            }
-
-            let fileExtension = item.supportedContentTypes.first?.preferredFilenameExtension ?? "mov"
-            guard let outputURL = await SellerProductMediaUploader.videoTempURL(
-                from: data,
-                fileExtension: fileExtension
-            ) else {
-                await MainActor.run {
-                    isLoadingProductionPreview = false
-                    mediaErrorMessage = "We couldn't load that production preview clip."
-                }
-                return
-            }
-
-            await MainActor.run {
-                mediaErrorMessage = nil
-                draft.productionPreviewURLString = outputURL.absoluteString
-                selectedProductionPreviewURL = outputURL
                 isLoadingProductionPreview = false
-            }
-        } catch {
-            await MainActor.run {
-                isLoadingProductionPreview = false
-                mediaErrorMessage = "We couldn't load that production preview clip."
             }
         }
     }
@@ -832,7 +796,6 @@ struct AddProductView: View {
 
         draft.demoVideoURLString = ""
         selectedVideoURL = nil
-        selectedVideoItem = nil
     }
 
     private func clearSelectedProductionPreview() {
@@ -844,7 +807,6 @@ struct AddProductView: View {
 
         draft.productionPreviewURLString = ""
         selectedProductionPreviewURL = nil
-        selectedProductionPreviewItem = nil
     }
 
     private func removePhoto(at index: Int) {
@@ -993,6 +955,7 @@ struct SellerProductsView: View {
     @State private var productSwipeOffset: CGFloat = 0
     @State private var isRefreshingInventory = false
     @State private var submittingProductIDs = Set<String>()
+    @State private var activeSyncProductIDs = Set<String>()
     @State private var productIDsAwaitingServerConfirmation = Set<String>()
     @State private var locallyDeletedProductIDs: Set<String>
 
@@ -1030,11 +993,11 @@ struct SellerProductsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                ForEach(productDrafts) { draft in
+                ForEach(visibleProductDrafts) { draft in
                     sellerProductSwipeRow(draft)
                 }
 
-                if productDrafts.isEmpty {
+                if visibleProductDrafts.isEmpty {
                     Text("No products yet. Add your first listing to get started.")
                         .font(.tbBody)
                         .foregroundStyle(.secondary)
@@ -1054,6 +1017,7 @@ struct SellerProductsView: View {
         }
         .onChange(of: catalog.contentRevision) { _, _ in
             applyApprovedCatalogProductsToDrafts()
+            applyInventoryNormalization()
         }
         .background(TBFrostBackground())
         .navigationTitle("My Products")
@@ -1085,7 +1049,6 @@ struct SellerProductsView: View {
                     restoreLocallyDeletedProductIfNeeded(submittedDraft.id)
                     productDrafts.insert(submittedDraft, at: 0)
                     persistDrafts()
-                    markSubmissionStarted(for: submittedDraft.id)
                     Task(priority: .userInitiated) {
                         await MainActor.run {
                             localProducts.saveDraft(submittedDraft)
@@ -1109,7 +1072,6 @@ struct SellerProductsView: View {
                         productDrafts.insert(submittedDraft, at: 0)
                     }
                     persistDrafts()
-                    markSubmissionStarted(for: submittedDraft.id)
                     Task(priority: .userInitiated) {
                         await MainActor.run {
                             localProducts.saveDraft(submittedDraft)
@@ -1120,6 +1082,9 @@ struct SellerProductsView: View {
             }
         }
         .onAppear {
+            draggingProductId = nil
+            productSwipeOffset = 0
+            applyInventoryNormalization()
             refreshSavedShopComposer()
             guard startInAddMode, !hasPresentedInitialAdd else { return }
             hasPresentedInitialAdd = true
@@ -1237,6 +1202,90 @@ struct SellerProductsView: View {
         await sellerSubscription.refresh()
     }
 
+    /// Rows and counts should ignore stale local-only duplicates and empty ghost drafts.
+    private var visibleProductDrafts: [SellerProductDraft] {
+        normalizedInventoryDrafts(from: productDrafts)
+    }
+
+    private var knownRemoteProductIDs: Set<String> {
+        Set(
+            catalog.products
+                .filter { $0.sellerId == seller.id }
+                .map(\.id)
+        )
+    }
+
+    private func normalizedInventoryDrafts(from drafts: [SellerProductDraft]) -> [SellerProductDraft] {
+        var byID: [String: SellerProductDraft] = [:]
+        for draft in drafts where !locallyDeletedProductIDs.contains(draft.id) {
+            byID[draft.id] = draft
+        }
+
+        let remoteIDs = knownRemoteProductIDs
+        var result = Array(byID.values)
+        result.removeAll { shouldRemoveEmptyDraft($0) }
+        let draftsSnapshot = result
+        result.removeAll { shouldRemoveDuplicatePendingDraft($0, in: draftsSnapshot, remoteProductIDs: remoteIDs) }
+        return result.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private func shouldRemoveEmptyDraft(_ draft: SellerProductDraft) -> Bool {
+        if submittingProductIDs.contains(draft.id) || activeSyncProductIDs.contains(draft.id) {
+            return false
+        }
+
+        let trimmedName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasPhotos = !draft.imageURLStrings.isEmpty
+        if draft.marketplaceStatus == .draft, trimmedName.isEmpty, !hasPhotos {
+            return true
+        }
+        if trimmedName.isEmpty, !hasPhotos, draft.priceCents <= 0 {
+            return true
+        }
+        return false
+    }
+
+    private func shouldRemoveDuplicatePendingDraft(
+        _ draft: SellerProductDraft,
+        in drafts: [SellerProductDraft],
+        remoteProductIDs: Set<String>
+    ) -> Bool {
+        guard !remoteProductIDs.contains(draft.id) else { return false }
+        guard draft.marketplaceStatus == .pendingReview else { return false }
+        if submittingProductIDs.contains(draft.id) || activeSyncProductIDs.contains(draft.id) {
+            return false
+        }
+
+        let normalizedName = draft.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedName.isEmpty else { return false }
+
+        return drafts.contains { other in
+            guard other.id != draft.id else { return false }
+            let otherName = other.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard otherName == normalizedName else { return false }
+            return remoteProductIDs.contains(other.id) || other.marketplaceStatus == .live
+        }
+    }
+
+    private func applyInventoryNormalization() {
+        let normalized = normalizedInventoryDrafts(from: productDrafts)
+        let currentIDs = Set(productDrafts.map(\.id))
+        let normalizedIDs = Set(normalized.map(\.id))
+        guard normalized.count != productDrafts.count || normalizedIDs != currentIDs else { return }
+
+        let removedIDs = currentIDs.subtracting(normalizedIDs)
+        productDrafts = normalized
+        for productID in removedIDs {
+            productIDsAwaitingServerConfirmation.remove(productID)
+            submittingProductIDs.remove(productID)
+            activeSyncProductIDs.remove(productID)
+            localProducts.removeDraft(productId: productID)
+        }
+        persistDrafts()
+    }
+
     private func sellerProductSwipeRow(_ draft: SellerProductDraft) -> some View {
         sellerProductCard(draft)
         .offset(x: draggingProductId == draft.id ? productSwipeOffset : 0)
@@ -1304,8 +1353,8 @@ struct SellerProductsView: View {
                 HStack(spacing: 12) {
                     productMetricCard(
                         title: "Products",
-                        value: "\(productDrafts.count)",
-                        subtitle: productDrafts.isEmpty ? "Add your first listing" : "Ready to manage"
+                        value: "\(visibleProductDrafts.count)",
+                        subtitle: visibleProductDrafts.isEmpty ? "Add your first listing" : "Ready to manage"
                     )
 
                     productMetricCard(
@@ -1337,7 +1386,7 @@ struct SellerProductsView: View {
                     }
                 }
 
-                if let latestDraft = productDrafts.first {
+                if let latestDraft = visibleProductDrafts.first {
                     Text("Latest update: \(latestDraft.name.isEmpty ? "Untitled product" : latestDraft.name)")
                         .font(.tbCaption)
                         .foregroundStyle(.secondary)
@@ -1437,17 +1486,17 @@ struct SellerProductsView: View {
     }
 
     private var totalListingValueText: String {
-        guard !productDrafts.isEmpty else { return "$0" }
-        let total = productDrafts.map(\.priceCents).reduce(0, +)
+        guard !visibleProductDrafts.isEmpty else { return "$0" }
+        let total = visibleProductDrafts.map(\.priceCents).reduce(0, +)
         return Money.format(cents: total)
     }
 
     private var pendingReviewCount: Int {
-        productDrafts.filter { $0.marketplaceStatus == .pendingReview }.count
+        visibleProductDrafts.filter { $0.marketplaceStatus == .pendingReview }.count
     }
 
     private var rejectedOrArchivedCount: Int {
-        productDrafts.filter { $0.marketplaceStatus == .rejected || $0.marketplaceStatus == .archived }.count
+        visibleProductDrafts.filter { $0.marketplaceStatus == .rejected || $0.marketplaceStatus == .archived }.count
     }
 
     private func syncMessageForeground(for message: String) -> Color {
@@ -1509,9 +1558,9 @@ struct SellerProductsView: View {
             }
         } catch {
             await MainActor.run {
-                if applyApprovedCatalogProductsToDrafts() {
-                    syncMessage = nil
-                } else if !submittingProductIDs.isEmpty {
+                applyApprovedCatalogProductsToDrafts()
+                applyInventoryNormalization()
+                if !submittingProductIDs.isEmpty {
                     syncMessage = "Submitting listing for TenBelow review..."
                 } else if !showFailureMessage {
                     syncMessage = nil
@@ -1573,6 +1622,7 @@ struct SellerProductsView: View {
         productDrafts = result.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
+        applyInventoryNormalization()
         persistDrafts()
         for productId in removedProductIDs {
             localProducts.removeDraft(productId: productId)
@@ -1704,7 +1754,11 @@ struct SellerProductsView: View {
     ) async {
         guard !locallyDeletedProductIDs.contains(draft.id) else { return }
 
-        await MainActor.run {
+        let shouldSync = await MainActor.run { () -> Bool in
+            if activeSyncProductIDs.contains(draft.id) {
+                return false
+            }
+            activeSyncProductIDs.insert(draft.id)
             markSubmissionStarted(for: draft.id)
             let submittedDraft = draftForMarketplaceSubmission(draft)
             if let index = productDrafts.firstIndex(where: { $0.id == submittedDraft.id }) {
@@ -1713,26 +1767,66 @@ struct SellerProductsView: View {
                 productDrafts.insert(submittedDraft, at: 0)
             }
             persistDrafts()
+            return true
+        }
+        guard shouldSync else { return }
+
+        defer {
+            Task { @MainActor in
+                activeSyncProductIDs.remove(draft.id)
+                markSubmissionFinished(for: draft.id)
+            }
         }
 
         let fallbackProduct = products.first(where: { $0.id == draft.id })
             ?? localProducts.product(withId: draft.id)
-        let uploadedImageURLStrings = await uploadImagesIfNeeded(
-            draft.imageURLStrings,
-            draft: draft
-        )
-        let uploadedDemoVideoURLString = await uploadVideoIfNeeded(
-            mediaSelection.selectedVideoURL,
-            draft: draft,
-            fallbackURLString: draft.demoVideoURLString,
-            mediaKind: "demo-video"
-        )
-        let uploadedProductionPreviewURLString = await uploadVideoIfNeeded(
-            mediaSelection.selectedProductionPreviewURL,
-            draft: draft,
-            fallbackURLString: draft.productionPreviewURLString,
-            mediaKind: "production-preview"
-        )
+        let uploadedImageURLStrings: [String]
+        let uploadedDemoVideoURLString: String
+        let uploadedProductionPreviewURLString: String
+        do {
+            uploadedImageURLStrings = try await uploadImagesIfNeeded(
+                draft.imageURLStrings,
+                draft: draft
+            )
+            uploadedDemoVideoURLString = try await uploadVideoIfNeeded(
+                mediaSelection.selectedVideoURL,
+                draft: draft,
+                fallbackURLString: draft.demoVideoURLString,
+                mediaKind: "demo-video"
+            )
+            uploadedProductionPreviewURLString = try await uploadVideoIfNeeded(
+                mediaSelection.selectedProductionPreviewURL,
+                draft: draft,
+                fallbackURLString: draft.productionPreviewURLString,
+                mediaKind: "production-preview"
+            )
+        } catch {
+            await MainActor.run {
+                let details = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                syncMessage = details.isEmpty
+                    ? "We couldn't upload your product media. Check your connection and try again."
+                    : "We couldn't upload your product media. \(details)"
+            }
+            return
+        }
+
+        let resolvedImageURLs = uploadedImageURLStrings.isEmpty
+            ? (fallbackProduct?.imageNames ?? [])
+            : uploadedImageURLStrings
+        if resolvedImageURLs.isEmpty {
+            await MainActor.run {
+                syncMessage = "Add at least one product photo before submitting."
+            }
+            return
+        }
+        if MediaUploadTypes.isLocalOnlyMediaReference(uploadedDemoVideoURLString)
+            || MediaUploadTypes.isLocalOnlyMediaReference(uploadedProductionPreviewURLString) {
+            await MainActor.run {
+                syncMessage = "We couldn't upload one of your videos. Open the listing, re-attach the clip, and submit again."
+            }
+            return
+        }
+
         var syncedDraft = draft
         syncedDraft.imageURLStrings = uploadedImageURLStrings
         syncedDraft.demoVideoURLString = uploadedDemoVideoURLString
@@ -1746,7 +1840,7 @@ struct SellerProductsView: View {
             name: syncedDraft.name.isEmpty ? "Untitled Product" : syncedDraft.name,
             priceCents: max(syncedDraft.priceCents, 0),
             category: syncedDraft.category.rawValue,
-            imageURLs: uploadedImageURLStrings.isEmpty ? (fallbackProduct?.imageNames ?? []) : uploadedImageURLStrings,
+            imageURLs: resolvedImageURLs,
             demoVideoURL: uploadedDemoVideoURLString.isEmpty ? fallbackProduct?.demoVideoURL?.absoluteString : uploadedDemoVideoURLString,
             productionPreviewURL: uploadedProductionPreviewURLString.isEmpty ? fallbackProduct?.productionPreviewURL?.absoluteString : uploadedProductionPreviewURLString,
             material: syncedDraft.material.isEmpty ? "PLA+" : syncedDraft.material,
@@ -1783,13 +1877,11 @@ struct SellerProductsView: View {
                 persistDrafts()
                 localProducts.saveDraft(syncedDraft)
                 catalog.upsertRemoteProduct(remoteProduct)
-                markSubmissionFinished(for: draft.id)
                 productIDsAwaitingServerConfirmation.remove(draft.id)
                 syncMessage = syncSummaryMessage(for: syncedDraft.marketplaceStatus)
             }
         } catch {
             await MainActor.run {
-                markSubmissionFinished(for: draft.id)
                 if error is DecodingError {
                     syncMessage = "Saved on this device. The server returned an unexpected response. Open the listing and save again."
                     return
@@ -1907,7 +1999,7 @@ struct SellerProductsView: View {
     private func uploadImagesIfNeeded(
         _ imageReferences: [String],
         draft: SellerProductDraft
-    ) async -> [String] {
+    ) async throws -> [String] {
         let trimmedReferences = imageReferences
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -1925,29 +2017,29 @@ struct SellerProductsView: View {
 
             guard let localURL = Product.previewMediaURL(for: reference),
                   localURL.isFileURL,
-                  FileManager.default.fileExists(atPath: localURL.path),
-                  let imageData = try? await SellerProductMediaUploader.loadFileData(from: localURL)
+                  FileManager.default.fileExists(atPath: localURL.path)
             else {
-                continue
+                throw NSError(
+                    domain: "SellerProductUpload",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "One of the selected photos could not be prepared."]
+                )
             }
 
+            let imageData = try await SellerProductMediaUploader.loadFileData(from: localURL)
             let fileExtension = localURL.pathExtension.lowercased().isEmpty ? "jpg" : localURL.pathExtension.lowercased()
 
-            do {
-                let url = try await SellerAPI.uploadMedia(
-                    sellerId: seller.id,
-                    productId: draft.id,
-                    mediaKind: "image",
-                    slot: "\(nextUploadSlot)",
-                    fileExtension: fileExtension,
-                    contentType: imageContentType(for: fileExtension),
-                    data: imageData
-                )
-                uploadedURLs.append(url)
-                nextUploadSlot += 1
-            } catch {
-                continue
-            }
+            let url = try await SellerAPI.uploadMedia(
+                sellerId: seller.id,
+                productId: draft.id,
+                mediaKind: "image",
+                slot: "\(nextUploadSlot)",
+                fileExtension: fileExtension,
+                contentType: imageContentType(for: fileExtension),
+                data: imageData
+            )
+            uploadedURLs.append(url)
+            nextUploadSlot += 1
         }
 
         return Product.persistableMediaReferences(uploadedURLs)
@@ -1958,29 +2050,77 @@ struct SellerProductsView: View {
         draft: SellerProductDraft,
         fallbackURLString: String,
         mediaKind: String
-    ) async -> String {
-        guard let selectedVideoURL else { return fallbackURLString }
-        guard selectedVideoURL.isFileURL else {
-            return selectedVideoURL.absoluteString
-        }
-        guard let videoData = try? await SellerProductMediaUploader.loadFileData(from: selectedVideoURL) else {
-            return selectedVideoURL.absoluteString
+    ) async throws -> String {
+        let trimmedFallback = fallbackURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard selectedVideoURL != nil || !trimmedFallback.isEmpty else { return "" }
+
+        if selectedVideoURL == nil, Product.mediaURL(for: trimmedFallback) != nil {
+            return trimmedFallback
         }
 
-        let fileExtension = selectedVideoURL.pathExtension.isEmpty ? "mov" : selectedVideoURL.pathExtension
-        do {
-            return try await SellerAPI.uploadMedia(
-                sellerId: seller.id,
-                productId: draft.id,
-                mediaKind: mediaKind,
-                slot: "0",
-                fileExtension: fileExtension,
-                contentType: "video/\(fileExtension == "mp4" ? "mp4" : "quicktime")",
-                data: videoData
+        guard let localVideoURL = localMediaFileURL(selectedVideoURL, fallbackReference: trimmedFallback) else {
+            if trimmedFallback.isEmpty { return "" }
+            if Product.mediaURL(for: trimmedFallback) != nil {
+                return trimmedFallback
+            }
+            throw NSError(
+                domain: "SellerProductUpload",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "One of the selected videos could not be prepared."]
             )
-        } catch {
-            return fallbackURLString.isEmpty ? selectedVideoURL.absoluteString : fallbackURLString
         }
+
+        let videoData = try await SellerProductMediaUploader.loadFileData(from: localVideoURL)
+        guard Int64(videoData.count) <= 50 * 1024 * 1024 else {
+            throw NSError(
+                domain: "SellerProductUpload",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Videos must be under 50 MB."]
+            )
+        }
+
+        let fileExtension = localVideoURL.pathExtension.isEmpty ? "mov" : localVideoURL.pathExtension
+        let uploadedURL = try await SellerAPI.uploadMedia(
+            sellerId: seller.id,
+            productId: draft.id,
+            mediaKind: mediaKind,
+            slot: "0",
+            fileExtension: fileExtension,
+            contentType: MediaUploadTypes.videoContentType(for: fileExtension),
+            data: videoData
+        )
+        guard !MediaUploadTypes.isLocalOnlyMediaReference(uploadedURL) else {
+            throw NSError(
+                domain: "SellerProductUpload",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "We couldn't upload that video. Check your connection and try again."]
+            )
+        }
+        return uploadedURL
+    }
+
+    private func localMediaFileURL(_ selectedURL: URL?, fallbackReference: String) -> URL? {
+        if let selectedURL {
+            if selectedURL.isFileURL, FileManager.default.fileExists(atPath: selectedURL.path) {
+                return selectedURL
+            }
+            if !selectedURL.isFileURL {
+                return nil
+            }
+        }
+
+        let trimmed = fallbackReference.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let url = URL(string: trimmed), url.isFileURL, FileManager.default.fileExists(atPath: url.path) {
+            return url
+        }
+        if let previewURL = Product.previewMediaURL(for: trimmed),
+           previewURL.isFileURL,
+           FileManager.default.fileExists(atPath: previewURL.path) {
+            return previewURL
+        }
+        return nil
     }
 
     private func imageContentType(for fileExtension: String) -> String {

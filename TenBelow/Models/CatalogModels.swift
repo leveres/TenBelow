@@ -350,25 +350,25 @@ func resolvedStorefrontProducts(remoteProducts: [RemoteProduct], fallbackProduct
     #if DEBUG
     return resolvedProducts
     #else
-    return resolvedProducts.filter(CatalogSeedPolicy.isRealStorefrontProduct)
+    return resolvedProducts.filter { CatalogSeedPolicy.isRealStorefrontProduct($0) }
     #endif
 }
 
 // MARK: - Seed / mock catalog filtering
 
 enum CatalogSeedPolicy {
-    static let seedSellerIDs: Set<String> = ["seller_001", "seller_002"]
-    static let bundledPlaceholderImageNames: Set<String> = [
+    nonisolated static let seedSellerIDs: Set<String> = ["seller_001", "seller_002"]
+    nonisolated static let bundledPlaceholderImageNames: Set<String> = [
         "products_image",
         "filament_image",
         "printer_image",
     ]
 
-    static func isSeedSeller(_ sellerId: String) -> Bool {
+    nonisolated static func isSeedSeller(_ sellerId: String) -> Bool {
         seedSellerIDs.contains(sellerId.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    static func hasUploadedMedia(in imageReferences: [String]) -> Bool {
+    nonisolated static func hasUploadedMedia(in imageReferences: [String]) -> Bool {
         imageReferences.contains { reference in
             let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return false }
@@ -383,16 +383,16 @@ enum CatalogSeedPolicy {
         }
     }
 
-    static func isRealStorefrontProduct(_ product: Product) -> Bool {
+    nonisolated static func isRealStorefrontProduct(_ product: Product) -> Bool {
         !isSeedSeller(product.sellerId) && hasUploadedMedia(in: product.imageNames)
     }
 
-    static func isRealDropProduct(_ product: DropProduct) -> Bool {
+    nonisolated static func isRealDropProduct(_ product: DropProduct) -> Bool {
         !isSeedSeller(product.sellerId) && hasUploadedMedia(in: product.imageURLs)
     }
 
     /// Weekly Drop lineups must only include catalog rows explicitly enrolled via drop submission.
-    static func isEnrolledWeeklyDropProduct(id: String, catalog: [RemoteProduct]) -> Bool {
+    nonisolated static func isEnrolledWeeklyDropProduct(id: String, catalog: [RemoteProduct]) -> Bool {
         catalog.first(where: { $0.id == id })?.isDrop == true
     }
 }

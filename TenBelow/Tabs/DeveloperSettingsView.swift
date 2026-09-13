@@ -6,6 +6,7 @@ struct DeveloperSettingsView: View {
     @AppStorage(AppConstants.testingModeUserDefaultsKey) private var testingModeEnabled = false
     @AppStorage(AppConstants.forceSimulatedCheckoutUserDefaultsKey) private var forceSimulatedCheckout = true
     @AppStorage(AppConstants.debugBackendBaseURLOverrideKey) private var backendURLOverride = ""
+    @AppStorage(AppConstants.showMockCatalogUserDefaultsKey) private var showMockCatalog = false
     @State private var overrideDraft = ""
 
     var body: some View {
@@ -55,6 +56,20 @@ struct DeveloperSettingsView: View {
                 .foregroundStyle(.secondary)
             } header: {
                 Text("Buyer checkout testing")
+            }
+
+            Section {
+                Toggle("Show mock catalog on Home", isOn: $showMockCatalog)
+                Text(
+                    showMockCatalog
+                        ? "Home includes bundled sample listings (Nozzle Works, Phone Stand, Cup Holder Insert) and photo-less seed rows. Useful for layout work on a thin catalog."
+                        : "Home shows only real listings with uploaded photos — the same storefront a shipped build renders."
+                )
+                .font(.tbCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Catalog preview")
             }
 
             Section {
