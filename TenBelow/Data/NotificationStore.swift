@@ -100,6 +100,33 @@ final class NotificationStore: ObservableObject {
         persistNotifications()
     }
 
+    func deleteNotification(_ notificationId: String) {
+        let beforeCount = notifications.count
+        notifications.removeAll { $0.id == notificationId }
+        guard notifications.count != beforeCount else { return }
+        persistNotifications()
+    }
+
+    /// Removes every inbox row for the signed-in buyer or seller identity.
+    func clearCurrentUserNotifications() {
+        let userId = currentUserId
+        let beforeCount = notifications.count
+        notifications.removeAll { $0.userId == userId }
+        guard notifications.count != beforeCount else { return }
+        persistNotifications()
+    }
+
+    func markAllCurrentUserNotificationsAsRead() {
+        let userId = currentUserId
+        var didChange = false
+        for index in notifications.indices where notifications[index].userId == userId && !notifications[index].isRead {
+            notifications[index].isRead = true
+            didChange = true
+        }
+        guard didChange else { return }
+        persistNotifications()
+    }
+
     private func processUnseenEvents(in events: [CommerceEvent]) {
         for event in events.reversed() where !processedEventIDs.contains(event.id) {
             process(event)

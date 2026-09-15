@@ -29,6 +29,7 @@ struct NotificationActivityView: View {
     @AppStorage("sellerSellerId") private var sellerId = ""
 
     @State private var selectedDestination: NotificationDestination?
+    @State private var isConfirmingClearNotifications = false
 
     private var notifications: [AppNotification] {
         notificationStore.currentNotifications.filter { NotificationPreferences.isTypeEnabled($0.type) }
@@ -73,6 +74,18 @@ struct NotificationActivityView: View {
             case .exchange(let exchangeRequestId):
                 ExchangeStatusScreen(exchangeRequestId: exchangeRequestId)
             }
+        }
+        .confirmationDialog(
+            "Clear all notifications?",
+            isPresented: $isConfirmingClearNotifications,
+            titleVisibility: .visible
+        ) {
+            Button("Clear all", role: .destructive) {
+                notificationStore.clearCurrentUserNotifications()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes every notification in your inbox. It can’t be undone.")
         }
     }
 
@@ -137,11 +150,36 @@ struct NotificationActivityView: View {
 
     private var notificationsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Notifications")
-                .font(.tbHeadline)
-                .foregroundStyle(TBTheme.icyBlue)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Notifications")
+                    .font(.tbHeadline)
+                    .foregroundStyle(TBTheme.icyBlue)
 
-            Text("Tap a notification for details. Change types in Settings → Notification settings.")
+                Spacer(minLength: 8)
+
+                if !notifications.isEmpty {
+                    Menu {
+                        Button {
+                            notificationStore.markAllCurrentUserNotificationsAsRead()
+                        } label: {
+                            Label("Mark all as read", systemImage: "envelope.open")
+                        }
+
+                        Button(role: .destructive) {
+                            isConfirmingClearNotifications = true
+                        } label: {
+                            Label("Clear all", systemImage: "trash")
+                        }
+                    } label: {
+                        Text("Manage")
+                            .font(.tbCaption.weight(.semibold))
+                            .foregroundStyle(TBTheme.icyBlue)
+                    }
+                    .accessibilityLabel("Manage notifications")
+                }
+            }
+
+            Text("Tap a notification for details. Long-press to delete one, or use Manage to clear all. Change types in Settings → Notification settings.")
                 .font(.tbCaption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -209,9 +247,24 @@ struct NotificationActivityView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 2)
+        .contextMenu {
+            if !notification.isRead {
+                Button {
+                    notificationStore.markAsRead(notification.id)
+                } label: {
+                    Label("Mark as read", systemImage: "envelope.open")
+                }
+            }
+
+            Button(role: .destructive) {
+                notificationStore.deleteNotification(notification.id)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(notificationAccessibilityLabel(notification))
-        .accessibilityHint("Opens this notification.")
+        .accessibilityHint("Opens this notification. Long-press for delete options.")
     }
 
     @ViewBuilder
