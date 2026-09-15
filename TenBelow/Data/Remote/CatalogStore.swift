@@ -134,6 +134,10 @@ final class CatalogStore: ObservableObject {
     ) {
         guard let eventStore else { return }
 
+        // First remote hydrate (empty → full catalog) is not a wave of new drops.
+        // Only emit when we already had a catalog snapshot and something newly appears/changes.
+        guard !previous.isEmpty else { return }
+
         let previousByID = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, $0) })
         let sellersByID = Dictionary(uniqueKeysWithValues: sellers.map { ($0.id, $0) })
 

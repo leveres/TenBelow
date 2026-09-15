@@ -128,12 +128,6 @@ struct NotificationSettingsView: View {
                     )
                     Divider().padding(.leading, 4)
                     NotificationTypeToggle(
-                        type: .itemFavorited,
-                        title: "Listing favorites",
-                        subtitle: "When someone saves one of your products."
-                    )
-                    Divider().padding(.leading, 4)
-                    NotificationTypeToggle(
                         type: .system,
                         title: "Reminders & to-dos",
                         subtitle: "Operational reminders, such as updating order status."
@@ -142,13 +136,13 @@ struct NotificationSettingsView: View {
                     NotificationTypeToggle(
                         type: .priceDrop,
                         title: "Price drops",
-                        subtitle: "When a viewed or saved product drops in price."
+                        subtitle: "When a favorited product drops, or a seller you follow / bought from lowers a price."
                     )
                     Divider().padding(.leading, 4)
                     NotificationTypeToggle(
                         type: .newProduct,
                         title: "New products from creators",
-                        subtitle: "When sellers you follow (or bought from) add listings."
+                        subtitle: "Only sellers you follow or have ordered from."
                     )
                     Divider().padding(.leading, 4)
                     NotificationTypeToggle(
@@ -159,8 +153,8 @@ struct NotificationSettingsView: View {
                     Divider().padding(.leading, 4)
                     NotificationTypeToggle(
                         type: .orderSupportUpdate,
-                        title: "Request & seller updates",
-                        subtitle: "Cancel/refund decisions and messages from sellers on your orders."
+                        title: "Messages & order requests",
+                        subtitle: "Cancel/refund decisions and seller messages on your orders — works whether or not you follow them."
                     )
                 }
             }
@@ -240,7 +234,7 @@ struct NotificationSettingsView: View {
 
     private var roleNotificationTypes: [NotificationType] {
         if userRole == "seller" {
-            return [.orderReceived, .orderSupportUpdate, .itemFavorited, .system]
+            return [.orderReceived, .orderSupportUpdate, .system]
         } else {
             return [.priceDrop, .newProduct, .orderStatusUpdate, .orderSupportUpdate]
         }

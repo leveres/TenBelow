@@ -1829,11 +1829,48 @@ function saveCatalog(catalog = {}) {
     ? catalog.products.map((product) => normalizeCatalogProduct(product))
     : [];
   const payload = {
-    version: Math.max(1, asFiniteNumber(catalog.version, 1)),
+    version: Math.max(1, asFiniteNumber(catalog.version, 1)) + 1,
     updatedAt: new Date().toISOString(),
     products: normalizedProducts,
   };
   writeManagedJSON("products", payload);
+  return payload;
+}
+
+async function saveCatalogAndAwaitPersistence(catalog = {}) {
+  const payload = saveCatalog(catalog);
+  if (isPgEnabled()) {
+    try {
+      await upsertDocumentRow("products", payload);
+      await upsertRelationalForManagedDocument("products", payload);
+    } catch (err) {
+      console.error("Catalog Postgres persistence failed:", err?.message || err);
+      throw err;
+    }
+  }
+  return payload;
+}
+
+async function fetchCatalogFreshForAdmin() {
+  if (isPgEnabled()) {
+    try {
+      const pool = getPool();
+      if (pool) {
+        const { rows } = await pool.query("SELECT body FROM tb_documents WHERE key = $1", ["products"]);
+        if (rows[0]?.body) {
+          setCachedDocument("products", rows[0].body);
+        } else {
+          DOCUMENT_MEMORY_CACHE.delete("products");
+        }
+      }
+    } catch (err) {
+      console.warn("Admin catalog PG refresh failed:", err?.message || err);
+      DOCUMENT_MEMORY_CACHE.delete("products");
+    }
+  } else {
+    DOCUMENT_MEMORY_CACHE.delete("products");
+  }
+  return fetchCatalog();
 }
 
 function loadProductReviewsFile() {
@@ -2651,6 +2688,56 @@ async function sendBuyerAccountUpdateConfirmation({
   });
 
   return targets;
+}
+
+async function sendSellerProductReviewEmail({ sellerId, productName, decision, notes }) {
+  const normalizedSellerId = String(sellerId || "").trim();
+  if (!normalizedSellerId) return null;
+
+  const sellers = loadSellersFile();
+  const sellerEmail = String(sellers[normalizedSellerId]?.email || "").trim().toLowerCase();
+  if (!sellerEmail) {
+    console.warn(`Product review email skipped: no seller email for ${normalizedSellerId}`);
+    return null;
+  }
+
+  const approved = String(decision || "").trim().toLowerCase() === "approve";
+  const safeName = String(productName || "Your listing")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const safeNotes = String(notes || "")
+    .trim()
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const subject = approved
+    ? `TenBelow approved "${String(productName || "your listing")}"`
+    : `TenBelow needs updates on "${String(productName || "your listing")}"`;
+
+  const notesBlock = safeNotes
+    ? `<p><strong>Reviewer notes:</strong></p><p>${safeNotes}</p>`
+    : approved
+      ? ""
+      : `<p>Open My Products in the TenBelow app to review feedback and resubmit.</p>`;
+
+  const html = approved
+    ? `<h2>Your listing is live</h2>
+<p><strong>${safeName}</strong> was approved and is now visible in the TenBelow marketplace.</p>
+${notesBlock}
+<p>Buyers can find it in Shop and on your storefront.</p>`
+    : `<h2>Your listing needs updates</h2>
+<p><strong>${safeName}</strong> was not approved for the marketplace yet.</p>
+${notesBlock}
+<p>Open <strong>My Products</strong> in the TenBelow app, update the listing, and submit it again for review.</p>`;
+
+  const result = await sendTransactionalEmail({
+    to: sellerEmail,
+    subject,
+    html,
+    idempotencyKey: `product-review-${normalizedSellerId}-${approved ? "approve" : "reject"}-${Date.now()}`,
+  });
+
+  return { sellerEmail, messageId: result?.messageId || null };
 }
 
 function loadBuyersFile() {
@@ -5629,7 +5716,7 @@ app.post(
           await notifyOrderSupportEvent({
             buyerEmail: updatedOrder.buyerEmail,
             notifyBuyer: true,
-            title: "Seller update",
+            title: "Seller message",
             body: `Reply on order ${orderId}: ${preview}`,
           });
         }
@@ -6955,7 +7042,7 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
       updatedProducts.unshift(mergedProduct);
     }
 
-    saveCatalog({
+    await saveCatalogAndAwaitPersistence({
       version: catalog.version,
       products: updatedProducts,
     });
@@ -6968,6 +7055,7 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
       })
     );
 
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json({ product: mergedProduct });
   } catch (err) {
     if (respondToAvailableColorsError(res, err)) return;
@@ -7031,7 +7119,7 @@ app.post("/seller-products/:sellerId/:productId/remove", sellerWriteLimiter, req
 
 app.get("/admin/products/review-queue", adminMutationLimiter, requireAdmin, async (req, res) => {
   try {
-    const catalog = await fetchCatalog();
+    const catalog = await fetchCatalogFreshForAdmin();
     const sellers = await fetchSellers();
     const requestedStatus = String(req.query.status || "submitted").trim().toLowerCase();
     const products = Array.isArray(catalog.products) ? catalog.products : [];
@@ -7055,6 +7143,7 @@ app.get("/admin/products/review-queue", adminMutationLimiter, requireAdmin, asyn
         return rhsSubmittedAt - lhsSubmittedAt;
       });
 
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json({ products: queue });
   } catch (err) {
     console.error("review queue error:", err);
@@ -7882,7 +7971,7 @@ app.post("/admin/products/:productId/review", adminMutationLimiter, requireAdmin
     const updatedProducts = [...existingProducts];
     updatedProducts[productIndex] = reviewedProduct;
 
-    saveCatalog({
+    await saveCatalogAndAwaitPersistence({
       version: catalog.version,
       products: updatedProducts,
     });
@@ -7907,6 +7996,18 @@ app.post("/admin/products/:productId/review", adminMutationLimiter, requireAdmin
       console.warn("Product review push notification error:", pushErr?.message || pushErr);
     }
 
+    try {
+      await sendSellerProductReviewEmail({
+        sellerId: reviewedProduct.sellerId,
+        productName: reviewedProduct.name || "Your listing",
+        decision,
+        notes,
+      });
+    } catch (emailErr) {
+      console.error("Product review seller email error:", emailErr?.message || emailErr);
+    }
+
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json({ product: reviewedProduct });
   } catch (err) {
     console.error("product review error:", err);

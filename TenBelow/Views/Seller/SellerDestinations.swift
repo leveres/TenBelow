@@ -30,6 +30,9 @@ struct AddProductView: View {
     @State private var isLoadingProductionPreview = false
     @State private var showRightsValidationMessage = false
     @State private var visiblePhotoReferences: [String] = []
+    /// Once the seller confirms submit, stop autosaving — otherwise `onDisappear` / fingerprint
+    /// changes rewrite the unfinished-composer draft and resurrect "Pick up where you left off".
+    @State private var suppressComposerAutosave = false
 
     init(
         title: String = "Add Product",
@@ -124,7 +127,7 @@ struct AddProductView: View {
     }
 
     private func persistComposerDraftIfNeeded() {
-        guard persistsComposerDraft, !isEditingProduct else { return }
+        guard persistsComposerDraft, !isEditingProduct, !suppressComposerAutosave else { return }
         SellerProductComposerDraftStore.saveShop(draft: draft)
     }
 
@@ -450,6 +453,7 @@ struct AddProductView: View {
     private var saveSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
+                suppressComposerAutosave = true
                 var updatedDraft = draft
                 updatedDraft.demoVideoURLString = selectedVideoURL?.absoluteString ?? draft.demoVideoURLString
                 updatedDraft.productionPreviewURLString = selectedProductionPreviewURL?.absoluteString ?? draft.productionPreviewURLString
@@ -458,6 +462,9 @@ struct AddProductView: View {
                 }
                 updatedDraft.refreshRightsReviewFlag()
                 draft = updatedDraft
+                if persistsComposerDraft {
+                    SellerProductComposerDraftStore.clearShop(sellerId: updatedDraft.sellerId)
+                }
                 onSave(
                     updatedDraft,
                     SellerProductMediaSelection(
@@ -980,7 +987,7 @@ struct SellerProductsView: View {
             LazyVStack(alignment: .leading, spacing: TBTheme.spacingLG) {
                 headerCard
 
-                if let saved = savedShopComposer, saved.draft.hasComposerProgress {
+                if let saved = resumableShopComposer {
                     shopComposerResumeCard(saved)
                 }
 
@@ -1147,8 +1154,29 @@ struct SellerProductsView: View {
         )
     }
 
+    /// Unfinished composer only — never for listings already sitting in My Products.
+    private var resumableShopComposer: ShopProductComposerDraft? {
+        guard let saved = savedShopComposer, saved.draft.hasComposerProgress else { return nil }
+        if productDrafts.contains(where: { $0.id == saved.draft.id }) {
+            return nil
+        }
+        return saved
+    }
+
     private func refreshSavedShopComposer() {
-        savedShopComposer = SellerProductComposerDraftStore.loadShop(sellerId: seller.id)
+        guard let saved = SellerProductComposerDraftStore.loadShop(sellerId: seller.id) else {
+            savedShopComposer = nil
+            return
+        }
+
+        // Submitted / inventory listings are edited by tapping the product card — not via resume.
+        if productDrafts.contains(where: { $0.id == saved.draft.id }) {
+            SellerProductComposerDraftStore.clearShop(sellerId: seller.id)
+            savedShopComposer = nil
+            return
+        }
+
+        savedShopComposer = saved.draft.hasComposerProgress ? saved : nil
     }
 
     private func shopComposerResumeCard(_ saved: ShopProductComposerDraft) -> some View {
@@ -1190,7 +1218,8 @@ struct SellerProductsView: View {
         await MainActor.run {
             guard !sellerPreviewMode else { return }
             if let saved = SellerProductComposerDraftStore.loadShop(sellerId: seller.id),
-               saved.draft.hasComposerProgress {
+               saved.draft.hasComposerProgress,
+               !productDrafts.contains(where: { $0.id == saved.draft.id }) {
                 isShowingComposerResumeDialog = true
             } else {
                 openAddProductSheet()
@@ -1878,6 +1907,8 @@ struct SellerProductsView: View {
                 localProducts.saveDraft(syncedDraft)
                 catalog.upsertRemoteProduct(remoteProduct)
                 productIDsAwaitingServerConfirmation.remove(draft.id)
+                SellerProductComposerDraftStore.clearShop(sellerId: seller.id)
+                refreshSavedShopComposer()
                 syncMessage = syncSummaryMessage(for: syncedDraft.marketplaceStatus)
             }
         } catch {

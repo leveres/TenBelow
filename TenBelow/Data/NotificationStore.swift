@@ -42,6 +42,7 @@ final class NotificationStore: ObservableObject {
         notifications = LocalCodableStore.load(key: storageKey, default: [])
         processedEventIDs = LocalCodableStore.load(key: processedEventsKey, default: Set<String>())
         migrateLegacyGuestNotificationsIfNeeded()
+        purgeNoisySellerFavoriteNotifications()
 
         processUnseenEvents(in: eventStore.recentEvents)
         evaluateActionNeededNotifications()
@@ -130,7 +131,7 @@ final class NotificationStore: ObservableObject {
         case .orderSupportMessageSent:
             handleOrderSupportMessageSent(event)
         case .productFavorited:
-            handleProductFavorited(event)
+            break // Favorites are not seller-notified — too noisy for a marketplace inbox.
         case .exchangeSubmitted:
             handleExchangeSubmitted(event)
         case .exchangeStatusUpdated:
@@ -147,15 +148,15 @@ final class NotificationStore: ObservableObject {
         let sellerId = event.sellerId ?? product?.sellerId
         let currentPriceCents = Int(event.metadata["newPriceCents"] ?? "") ?? product?.priceCents ?? 0
 
+        let broadcastRecipients = Set(buyerUserIDsEligibleForSellerBroadcast(sellerId: sellerId))
         let recipients = buyerEngagement.snapshotsByIdentity.compactMap { userId, snapshot -> String? in
+            // Favorited items always qualify; otherwise only followed / in-business sellers.
             if snapshot.favoriteProductIDs.contains(productId) {
                 return userId
             }
-
-            if snapshot.productInteractions[productId] != nil {
+            if broadcastRecipients.contains(userId) {
                 return userId
             }
-
             return nil
         }
 
@@ -190,18 +191,9 @@ final class NotificationStore: ObservableObject {
                 storefrontProducts: localProducts.products
             )?.displayName ?? sellerId
 
-        let recipients = buyerEngagement.snapshotsByIdentity.compactMap { userId, snapshot -> String? in
-            if snapshot.followedSellerIDs.contains(sellerId) {
-                return userId
-            }
-
-            let hasPurchasedFromSeller = snapshot.productInteractions.values.contains {
-                $0.sellerId == sellerId && $0.interactionKinds.contains(.purchased)
-            }
-            return hasPurchasedFromSeller ? userId : nil
-        }
-
-        let uniqueRecipients = Array(Set(recipients))
+        // Broadcast only to buyers who follow this seller or already have business with them.
+        // Order messages / shipping alerts are separate and do not use this gate.
+        let uniqueRecipients = buyerUserIDsEligibleForSellerBroadcast(sellerId: sellerId)
         guard !uniqueRecipients.isEmpty else { return }
 
         for userId in uniqueRecipients {
@@ -217,6 +209,43 @@ final class NotificationStore: ObservableObject {
                 )
             )
         }
+    }
+
+    /// Seller broadcast audience: followed sellers, or buyers with a prior purchase / order from that seller.
+    private func buyerUserIDsEligibleForSellerBroadcast(sellerId: String?) -> [String] {
+        let trimmedSellerId = sellerId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedSellerId.isEmpty else { return [] }
+
+        var recipients = Set<String>()
+
+        for (userId, snapshot) in buyerEngagement.snapshotsByIdentity {
+            if snapshot.followedSellerIDs.contains(trimmedSellerId) {
+                recipients.insert(userId)
+                continue
+            }
+
+            let hasPurchasedFromSeller = snapshot.productInteractions.values.contains {
+                $0.sellerId == trimmedSellerId && $0.interactionKinds.contains(.purchased)
+            }
+            if hasPurchasedFromSeller {
+                recipients.insert(userId)
+            }
+        }
+
+        for order in orderStore.orders {
+            let hasBusinessWithSeller = order.shipments.contains {
+                $0.sellerId.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedSellerId
+            }
+            guard hasBusinessWithSeller else { continue }
+            guard let email = order.buyerEmail?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased(),
+                !email.isEmpty
+            else { continue }
+            recipients.insert(Self.buyerUserId(for: email))
+        }
+
+        return Array(recipients)
     }
 
     private func handleNewOrder(_ event: CommerceEvent) {
@@ -429,23 +458,11 @@ final class NotificationStore: ObservableObject {
         }
     }
 
-    private func handleProductFavorited(_ event: CommerceEvent) {
-        guard let sellerId = event.sellerId,
-              let productId = event.productId,
-              let product = localProducts.product(withId: productId)
-        else { return }
-
-        appendNotification(
-            AppNotification(
-                userId: Self.sellerUserId(for: sellerId),
-                type: .itemFavorited,
-                title: "Your product is getting attention 👀",
-                message: "\(product.name) was just saved by a buyer.",
-                relatedProductId: product.id,
-                relatedSellerId: sellerId,
-                dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "itemFavorited.\(productId)")
-            )
-        )
+    private func purgeNoisySellerFavoriteNotifications() {
+        let beforeCount = notifications.count
+        notifications.removeAll { $0.type == .itemFavorited }
+        guard notifications.count != beforeCount else { return }
+        persistNotifications()
     }
 
     private func handleOrderSupportRequestCreated(_ event: CommerceEvent) {
@@ -558,7 +575,7 @@ final class NotificationStore: ObservableObject {
                 AppNotification(
                     userId: buyerIdentity,
                     type: .orderSupportUpdate,
-                    title: "Seller update",
+                    title: "Seller message",
                     message: body,
                     relatedOrderId: orderId,
                     relatedSellerId: sellerId,

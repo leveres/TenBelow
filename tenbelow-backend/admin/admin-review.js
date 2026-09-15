@@ -93,6 +93,8 @@ let accountPage = 1;
 let auditEntriesCache = [];
 let productQueueCache = [];
 let sellerDirectoryCache = [];
+let productQueuePollTimer = null;
+const PRODUCT_QUEUE_POLL_MS = 12000;
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -2586,6 +2588,24 @@ async function archiveProduct(productId, notes, approveButton, rejectButton, arc
 }
 
 refreshButton.addEventListener("click", () => refreshAdminSessionState());
+
+function startProductQueuePolling() {
+  if (productQueuePollTimer) {
+    clearInterval(productQueuePollTimer);
+  }
+  productQueuePollTimer = setInterval(() => {
+    if (!isAdminAuthenticated || document.hidden) return;
+    loadQueue(false);
+  }, PRODUCT_QUEUE_POLL_MS);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && isAdminAuthenticated) {
+    loadQueue(false);
+  }
+});
+
+startProductQueuePolling();
 refreshAuditButton.addEventListener("click", () => Promise.all([loadAuditLog(), loadSecurityMetrics(), loadIncidentHistory()]));
 if (exportAuditJsonButton) {
   exportAuditJsonButton.addEventListener("click", () => exportAuditLog("json"));

@@ -175,29 +175,18 @@ final class LocalProductStore: ObservableObject {
     }
 
     private func recordEvents(for updated: StoredProduct, previous: StoredProduct?) {
-        if previous == nil {
-            eventStore.record(
-                CommerceEvent(
-                    kind: .productCreated,
-                    productId: updated.id,
-                    sellerId: updated.sellerId,
-                    metadata: [
-                        "name": updated.name,
-                        "priceCents": "\(updated.priceCents)"
-                    ]
-                )
-            )
-            return
-        }
+        // Local seller saves must not fan out "New Drop" alerts. Marketplace new-product
+        // notifications fire only when CatalogStore sees a newly live remote listing.
+        guard let previous else { return }
 
-        if previous?.priceCents != updated.priceCents {
+        if previous.priceCents != updated.priceCents {
             eventStore.record(
                 CommerceEvent(
                     kind: .productPriceChanged,
                     productId: updated.id,
                     sellerId: updated.sellerId,
                     metadata: [
-                        "oldPriceCents": "\(previous?.priceCents ?? updated.priceCents)",
+                        "oldPriceCents": "\(previous.priceCents)",
                         "newPriceCents": "\(updated.priceCents)"
                     ]
                 )
