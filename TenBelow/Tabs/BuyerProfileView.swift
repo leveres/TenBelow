@@ -87,7 +87,7 @@ struct BuyerProfileView: View {
             inquiryThreads: inquiryStore.buyerThreads,
             sellerProfiles: catalog.sellerProfiles,
             storefrontProducts: storefrontProducts
-        ).count
+        ).filter(\.hasConversation).count
     }
 
     private var messageThreadCountDescription: String {
@@ -261,24 +261,22 @@ struct BuyerProfileView: View {
     }
 
     private var accountHeroCard: some View {
-        GlassCard(cornerRadius: 26) {
-            VStack(spacing: 16) {
+        GlassCard(cornerRadius: 22, contentPadding: 14) {
+            VStack(spacing: 10) {
                 ZStack {
                     if isAccountHolder {
                         Text(avatarInitials)
-                            .font(.system(size: 52, weight: .heavy, design: .rounded))
+                            .font(.system(size: 36, weight: .heavy, design: .rounded))
                             .foregroundStyle(TBTheme.deepSky)
                     } else {
                         guestAccountBadge
                     }
                 }
-                .frame(minHeight: 100)
+                .frame(minHeight: isAccountHolder ? 40 : 96)
 
-                VStack(spacing: 8) {
-                    Text(accountTitle)
-                        .font(.tbProductTitleXL)
-                        .foregroundStyle(TBTheme.deepSky)
-                }
+                Text(accountTitle)
+                    .font(.tbSectionTitle)
+                    .foregroundStyle(TBTheme.deepSky)
 
                 HStack(spacing: 10) {
                     capsuleTag(
@@ -294,12 +292,12 @@ struct BuyerProfileView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
 
                 if isAccountHolder {
-                    VStack(spacing: 12) {
-                        if !buyerEmail.isEmpty {
-                            Text(buyerEmail)
-                                .font(.tbBodyStrong)
-                                .foregroundStyle(TBTheme.bannerCTAForeground)
-                        }
+                    if !buyerEmail.isEmpty {
+                        Text(buyerEmail)
+                            .font(.tbBody)
+                            .foregroundStyle(TBTheme.bannerCTAForeground)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 } else {
                     VStack(spacing: 10) {

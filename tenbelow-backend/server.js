@@ -50,6 +50,7 @@ import {
   ensureDirectory,
 } from "./storagePaths.js";
 import { ensureSchema, getPool, isPgEnabled, loadAllDocumentsInto, upsertDocumentRow } from "./db/pgDocuments.mjs";
+import { enforceRowLevelSecurity } from "./db/rowLevelSecurity.mjs";
 import {
   ensureRelationalSchema,
   recordSellerMediaUpload,
@@ -156,10 +157,14 @@ const ALLOWED_CORS_ORIGINS = String(process.env.CORS_ALLOWED_ORIGINS || "")
 
 const smtpConfigured = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS && Number.isFinite(SMTP_PORT));
 const BYPASS_EMAIL =
+  !IS_PRODUCTION &&
   String(process.env.BYPASS_EMAIL || process.env.BYPASS_EMAIL_VERIFICATION || "")
     .trim() === "1";
 let smtpTransporter = null;
 
+if (IS_PRODUCTION && String(process.env.BYPASS_EMAIL || process.env.BYPASS_EMAIL_VERIFICATION || "").trim() === "1") {
+  console.warn("BYPASS_EMAIL is ignored in production. Email verification stays required.");
+}
 if (BYPASS_EMAIL) {
   console.warn(
     "BYPASS_EMAIL=1 — transactional email is skipped and buyer emails are auto-verified. Remove before production launch."
@@ -182,16 +187,51 @@ if (ALLOWED_CORS_ORIGINS.length === 0) {
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 60,
+  max: 40,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => clientIp(req) || req.ip || "unknown",
+});
+
+function credentialAbuseKey(req) {
+  const email = String(req.body?.email || req.body?.identifier || "")
+    .trim()
+    .toLowerCase()
+    .slice(0, 180);
+  const ip = clientIp(req) || req.ip || "unknown";
+  return `${ip}|${email || "no-email"}`;
+}
+
+const credentialAbuseLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: credentialAbuseKey,
+  message: { error: "Too many attempts. Wait a few minutes and try again." },
+  validate: { keyGeneratorIpFallback: false },
+});
+
+const aiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const identity = String(req.auth?.buyerEmail || req.auth?.sellerId || "").trim().toLowerCase();
+    return `${clientIp(req) || req.ip || "unknown"}|${identity || "anonymous"}`;
+  },
+  message: { error: "Too many AI requests. Wait a few minutes and try again." },
+  validate: { keyGeneratorIpFallback: false },
 });
 
 const adminLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 25,
+  max: 8,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => clientIp(req) || req.ip || "unknown",
+  message: { error: "Too many admin login attempts. Wait a few minutes and try again." },
 });
 
 const adminMutationLimiter = rateLimit({
@@ -831,7 +871,7 @@ function requireAppClient(req, res, next) {
   }
 
   const headerToken = String(req.headers["x-tenbelow-app-key"] || "").trim();
-  if (!headerToken || headerToken !== APP_API_KEY) {
+  if (!headerToken || !constantTimeEquals(headerToken, APP_API_KEY)) {
     recordSecurityAudit(req, {
       action: "app_client_auth_failed",
       reason: "missing_or_invalid_app_key",
@@ -3129,6 +3169,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 
 app.use(express.json());
 app.set("trust proxy", 1);
+app.use("/ai", aiLimiter, requireAppClient);
 app.use((req, res, next) => {
   const requestId = crypto.randomUUID();
   req.requestId = requestId;
@@ -3243,7 +3284,7 @@ app.get("/admin/review", (req, res) => {
   res.sendFile(ADMIN_REVIEW_HTML_PATH);
 });
 
-app.post("/auth/buyer-account", authLimiter, requireAppClient, async (req, res) => {
+app.post("/auth/buyer-account", credentialAbuseLimiter, requireAppClient, async (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();
     const fullName = String(req.body?.fullName || "").trim();
@@ -3306,7 +3347,7 @@ app.post("/auth/buyer-account", authLimiter, requireAppClient, async (req, res) 
   }
 });
 
-app.post("/auth/buyer-email-verification/request", authLimiter, requireAppClient, async (req, res) => {
+app.post("/auth/buyer-email-verification/request", credentialAbuseLimiter, requireAppClient, async (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();
     if (!isValidBuyerEmail(email)) {
@@ -3356,7 +3397,7 @@ app.post("/auth/buyer-email-verification/request", authLimiter, requireAppClient
   }
 });
 
-app.post("/auth/buyer-email-verification/verify", authLimiter, requireAppClient, (req, res) => {
+app.post("/auth/buyer-email-verification/verify", credentialAbuseLimiter, requireAppClient, (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();
     const challengeId = String(req.body?.challengeId || "").trim();
@@ -3527,7 +3568,7 @@ app.post("/auth/guest-checkout-session", authLimiter, requireAppClient, (req, re
   }
 });
 
-app.post("/auth/buyer-login", authLimiter, requireAppClient, (req, res) => {
+app.post("/auth/buyer-login", credentialAbuseLimiter, requireAppClient, (req, res) => {
   try {
     const email = String(req.body?.email || "").trim().toLowerCase();
     const password = String(req.body?.password || "");
@@ -3927,7 +3968,7 @@ app.post("/auth/seller-session-bootstrap", authLimiter, requireAppClient, (req, 
   }
 });
 
-app.post("/auth/seller-login", authLimiter, requireAppClient, (req, res) => {
+app.post("/auth/seller-login", credentialAbuseLimiter, requireAppClient, (req, res) => {
   try {
     const identifier = String(req.body?.identifier || "").trim().toLowerCase();
     const password = String(req.body?.password || "");
@@ -3981,7 +4022,7 @@ app.post("/auth/seller-login", authLimiter, requireAppClient, (req, res) => {
   }
 });
 
-app.post("/auth/seller-password-reset/request", authLimiter, requireAppClient, async (req, res) => {
+app.post("/auth/seller-password-reset/request", credentialAbuseLimiter, requireAppClient, async (req, res) => {
   try {
     const identifier = String(req.body?.identifier || "").trim().toLowerCase();
     if (!identifier) {
@@ -4045,7 +4086,7 @@ app.post("/auth/seller-password-reset/request", authLimiter, requireAppClient, a
   }
 });
 
-app.post("/auth/seller-password-reset/verify", authLimiter, requireAppClient, (req, res) => {
+app.post("/auth/seller-password-reset/verify", credentialAbuseLimiter, requireAppClient, (req, res) => {
   try {
     const identifier = String(req.body?.identifier || "").trim().toLowerCase();
     const challengeId = String(req.body?.challengeId || "").trim();
@@ -6136,7 +6177,7 @@ app.get("/legal/seller-agreement/:documentId", async (req, res) => {
   }
 });
 
-app.post("/create-seller-account", requireAppClient, async (req, res) => {
+app.post("/create-seller-account", credentialAbuseLimiter, requireAppClient, async (req, res) => {
   try {
     const rawSellerId = String(req.body.sellerId || "").trim().toLowerCase();
     const sellerId = rawSellerId.replace(/\s+/g, "-");
@@ -9633,6 +9674,11 @@ async function startServer() {
     try {
       await ensureSchema();
       await ensureRelationalSchema();
+      try {
+        await enforceRowLevelSecurity(getPool());
+      } catch (rlsErr) {
+        console.error("Row-level security setup failed:", rlsErr.message || rlsErr);
+      }
       if (process.env.PG_READS === "1") {
         DOCUMENT_MEMORY_CACHE.clear();
         await loadAllDocumentsInto(DOCUMENT_MEMORY_CACHE);

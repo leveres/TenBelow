@@ -987,7 +987,7 @@ private struct DealOfDayBanner: View {
     }
 
     private var artworkContainerSize: CGFloat {
-        min(max(bannerContentWidth * 0.242, 84), 96)
+        min(max(bannerContentWidth * 0.275, 92), 110)
     }
 
     private var artworkImageSize: CGFloat {

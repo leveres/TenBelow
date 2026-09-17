@@ -17,6 +17,8 @@ struct MessagingInboxEntry: Identifiable, Hashable {
     let lastMessageText: String
     let lastMessageTimestamp: String
     let lastMessageDate: Date
+    let hasConversation: Bool
+    let lastSenderRole: String?
 
     var id: String {
         switch kind {
@@ -60,7 +62,9 @@ enum MessagingInbox {
                     contextLabel: "Shop chat",
                     lastMessageText: last?.text ?? "Ask about products, shipping, or custom work.",
                     lastMessageTimestamp: last?.timestampLabel ?? thread.updatedAt.formatted(date: .abbreviated, time: .omitted),
-                    lastMessageDate: last?.createdAt ?? thread.updatedAt
+                    lastMessageDate: last?.createdAt ?? thread.updatedAt,
+                    hasConversation: last != nil,
+                    lastSenderRole: last?.senderRole
                 )
             )
         }
@@ -77,10 +81,12 @@ enum MessagingInbox {
                     sellerName: orderRef.sellerName,
                     inquiryBuyerEmail: nil,
                     buyerLabel: orderRef.buyerLabel,
-                    contextLabel: "Order \(orderRef.orderId)",
+                    contextLabel: Self.orderContextLabel(orderId: orderRef.orderId, date: orderRef.lastMessageDate),
                     lastMessageText: orderRef.lastMessageText,
                     lastMessageTimestamp: orderRef.lastMessageTimestamp,
-                    lastMessageDate: orderRef.lastMessageDate
+                    lastMessageDate: orderRef.lastMessageDate,
+                    hasConversation: orderRef.hasMessages,
+                    lastSenderRole: orderRef.lastSenderRole
                 )
             )
         }
@@ -109,7 +115,9 @@ enum MessagingInbox {
                     contextLabel: "Shop chat",
                     lastMessageText: last?.text ?? "Buyer question from your storefront.",
                     lastMessageTimestamp: last?.timestampLabel ?? thread.updatedAt.formatted(date: .abbreviated, time: .omitted),
-                    lastMessageDate: last?.createdAt ?? thread.updatedAt
+                    lastMessageDate: last?.createdAt ?? thread.updatedAt,
+                    hasConversation: last != nil,
+                    lastSenderRole: last?.senderRole
                 )
             )
         }
@@ -122,10 +130,12 @@ enum MessagingInbox {
                     sellerName: orderRef.sellerName,
                     inquiryBuyerEmail: nil,
                     buyerLabel: orderRef.buyerLabel,
-                    contextLabel: "Order \(orderRef.orderId)",
+                    contextLabel: Self.orderContextLabel(orderId: orderRef.orderId, date: orderRef.lastMessageDate),
                     lastMessageText: orderRef.lastMessageText,
                     lastMessageTimestamp: orderRef.lastMessageTimestamp,
-                    lastMessageDate: orderRef.lastMessageDate
+                    lastMessageDate: orderRef.lastMessageDate,
+                    hasConversation: orderRef.hasMessages,
+                    lastSenderRole: orderRef.lastSenderRole
                 )
             )
         }
@@ -148,8 +158,19 @@ enum MessagingInbox {
             contextLabel: "Shop chat",
             lastMessageText: last?.text ?? "Ask about products, shipping, or custom work.",
             lastMessageTimestamp: last?.timestampLabel ?? "",
-            lastMessageDate: last?.createdAt ?? .distantPast
+            lastMessageDate: last?.createdAt ?? .distantPast,
+            hasConversation: last != nil,
+            lastSenderRole: last?.senderRole
         )
+    }
+
+    static func orderContextLabel(orderId: String, date: Date) -> String {
+        let trimmed = orderId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let looksLikeUUID = trimmed.count > 18 || trimmed.contains("-")
+        if looksLikeUUID, !trimmed.uppercased().hasPrefix("ORD-") {
+            return "Order · \(date.formatted(date: .abbreviated, time: .omitted))"
+        }
+        return "Order \(trimmed)"
     }
 
     private static func resolveSellerName(

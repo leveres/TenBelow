@@ -10,6 +10,7 @@ struct OrderSupportThreadRef: Identifiable, Hashable {
     let lastMessageTimestamp: String
     let lastMessageDate: Date
     let hasMessages: Bool
+    let lastSenderRole: String?
 
     var id: String { "\(orderId)|\(sellerId)" }
 }
@@ -47,7 +48,8 @@ enum OrderSupportThreads {
                         lastMessageText: last?.text ?? "No messages yet — tap to ask about this order.",
                         lastMessageTimestamp: last?.timestampLabel ?? order.createdAt.formatted(date: .abbreviated, time: .omitted),
                         lastMessageDate: last?.createdAt ?? order.createdAt,
-                        hasMessages: !messages.isEmpty
+                        hasMessages: !messages.isEmpty,
+                        lastSenderRole: last?.senderRole
                     )
                 )
             }
@@ -90,7 +92,8 @@ enum OrderSupportThreads {
                     lastMessageText: last?.text ?? "No messages yet — tap to reply about this order.",
                     lastMessageTimestamp: last?.timestampLabel ?? order.createdAt.formatted(date: .abbreviated, time: .omitted),
                     lastMessageDate: last?.createdAt ?? order.createdAt,
-                    hasMessages: !messages.isEmpty
+                    hasMessages: !messages.isEmpty,
+                    lastSenderRole: last?.senderRole
                 )
             )
         }

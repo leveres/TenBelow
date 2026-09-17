@@ -80,6 +80,8 @@ struct BuyerMessagesListView: View {
     @EnvironmentObject private var localProducts: LocalProductStore
     @AppStorage("buyerEmail") private var buyerEmail = ""
     @AppStorage("buyerAccountCreated") private var buyerAccountCreated = false
+    @State private var inboxFilter: MessageInboxFilter = .conversations
+    @State private var inboxRevision = 0
 
     private var storefrontProducts: [Product] {
         resolvedStorefrontProducts(
@@ -88,12 +90,27 @@ struct BuyerMessagesListView: View {
         )
     }
 
+    private var inboxOwner: String {
+        let email = buyerEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return email.isEmpty ? "buyer" : "buyer:\(email)"
+    }
+
     private var inboxEntries: [MessagingInboxEntry] {
         MessagingInbox.buyerEntries(
             orders: orderStore.orders,
             inquiryThreads: inquiryStore.buyerThreads,
             sellerProfiles: catalog.sellerProfiles,
             storefrontProducts: storefrontProducts
+        )
+    }
+
+    private var visibleInboxEntries: [MessagingInboxEntry] {
+        _ = inboxRevision
+        return MessageInboxOrganizer.visibleEntries(
+            inboxEntries,
+            filter: inboxFilter,
+            owner: inboxOwner,
+            viewerIsBuyer: true
         )
     }
 
@@ -107,14 +124,55 @@ struct BuyerMessagesListView: View {
                 )
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(inboxEntries) { entry in
-                            NavigationLink {
-                                messagingThreadView(for: entry)
-                            } label: {
-                                MessagingInboxRow(entry: entry)
+                    VStack(spacing: 12) {
+                        MessageInboxFilterBar(
+                            filter: $inboxFilter,
+                            archivedCount: MessageInboxOrganizer.hiddenCount(in: inboxEntries, owner: inboxOwner),
+                            onClearOld: {
+                                MessageInboxOrganizer.hide(
+                                    MessageInboxOrganizer.oldEntryIDs(in: inboxEntries),
+                                    owner: inboxOwner
+                                )
+                                inboxRevision += 1
+                            },
+                            onRestoreArchived: {
+                                MessageInboxOrganizer.restoreHidden(owner: inboxOwner)
+                                inboxRevision += 1
                             }
-                            .buttonStyle(.plain)
+                        )
+
+                        if visibleInboxEntries.isEmpty {
+                            Text(emptyFilterMessage)
+                                .font(.tbBody)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 18)
+                        } else {
+                            LazyVStack(spacing: 10) {
+                                ForEach(visibleInboxEntries) { entry in
+                                    NavigationLink {
+                                        messagingThreadView(for: entry)
+                                            .onAppear {
+                                                MessageInboxOrganizer.markRead(entry.id, owner: inboxOwner, at: entry.lastMessageDate)
+                                                inboxRevision += 1
+                                            }
+                                    } label: {
+                                        MessagingInboxRow(
+                                            entry: entry,
+                                            isUnread: MessageInboxOrganizer.isUnread(entry, viewerIsBuyer: true, owner: inboxOwner)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            MessageInboxOrganizer.hide([entry.id], owner: inboxOwner)
+                                            inboxRevision += 1
+                                        } label: {
+                                            Label("Hide from inbox", systemImage: "archivebox")
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -140,6 +198,19 @@ struct BuyerMessagesListView: View {
             async let orders: Void = orderStore.refreshBuyerOrders(email: buyerEmail)
             async let inquiries: Void = inquiryStore.refreshBuyerThreads()
             _ = await (orders, inquiries)
+        }
+    }
+
+    private var emptyFilterMessage: String {
+        switch inboxFilter {
+        case .unread:
+            return "No unread messages."
+        case .recent:
+            return "No messages from the last 30 days."
+        case .conversations:
+            return "No conversations yet. New order chats show up here after the first message."
+        case .all:
+            return "Nothing in this inbox."
         }
     }
 
@@ -173,12 +244,29 @@ struct SellerInboxListView: View {
     @EnvironmentObject private var orderStore: OrderStore
     @EnvironmentObject private var inquiryStore: SellerInquiryStore
     @AppStorage("sellerSellerId") private var sellerSellerId = ""
+    @State private var inboxFilter: MessageInboxFilter = .conversations
+    @State private var inboxRevision = 0
+
+    private var inboxOwner: String {
+        let sellerID = seller.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sellerID.isEmpty ? "seller" : "seller:\(sellerID)"
+    }
 
     private var inboxEntries: [MessagingInboxEntry] {
         MessagingInbox.sellerEntries(
             orders: orderStore.orders,
             inquiryThreads: inquiryStore.sellerThreads,
             sellerId: seller.id
+        )
+    }
+
+    private var visibleInboxEntries: [MessagingInboxEntry] {
+        _ = inboxRevision
+        return MessageInboxOrganizer.visibleEntries(
+            inboxEntries,
+            filter: inboxFilter,
+            owner: inboxOwner,
+            viewerIsBuyer: false
         )
     }
 
@@ -192,14 +280,56 @@ struct SellerInboxListView: View {
                 )
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(inboxEntries) { entry in
-                            NavigationLink {
-                                sellerMessagingThreadView(for: entry)
-                            } label: {
-                                MessagingInboxRow(entry: entry, isSellerInbox: true)
+                    VStack(spacing: 12) {
+                        MessageInboxFilterBar(
+                            filter: $inboxFilter,
+                            archivedCount: MessageInboxOrganizer.hiddenCount(in: inboxEntries, owner: inboxOwner),
+                            onClearOld: {
+                                MessageInboxOrganizer.hide(
+                                    MessageInboxOrganizer.oldEntryIDs(in: inboxEntries),
+                                    owner: inboxOwner
+                                )
+                                inboxRevision += 1
+                            },
+                            onRestoreArchived: {
+                                MessageInboxOrganizer.restoreHidden(owner: inboxOwner)
+                                inboxRevision += 1
                             }
-                            .buttonStyle(.plain)
+                        )
+
+                        if visibleInboxEntries.isEmpty {
+                            Text("No messages in this view.")
+                                .font(.tbBody)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 18)
+                        } else {
+                            LazyVStack(spacing: 10) {
+                                ForEach(visibleInboxEntries) { entry in
+                                    NavigationLink {
+                                        sellerMessagingThreadView(for: entry)
+                                            .onAppear {
+                                                MessageInboxOrganizer.markRead(entry.id, owner: inboxOwner, at: entry.lastMessageDate)
+                                                inboxRevision += 1
+                                            }
+                                    } label: {
+                                        MessagingInboxRow(
+                                            entry: entry,
+                                            isSellerInbox: true,
+                                            isUnread: MessageInboxOrganizer.isUnread(entry, viewerIsBuyer: false, owner: inboxOwner)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            MessageInboxOrganizer.hide([entry.id], owner: inboxOwner)
+                                            inboxRevision += 1
+                                        } label: {
+                                            Label("Hide from inbox", systemImage: "archivebox")
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -255,9 +385,59 @@ struct SellerInboxListView: View {
     }
 }
 
+private struct MessageInboxFilterBar: View {
+    @Binding var filter: MessageInboxFilter
+    let archivedCount: Int
+    let onClearOld: () -> Void
+    let onRestoreArchived: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(MessageInboxFilter.allCases) { option in
+                        Button {
+                            filter = option
+                        } label: {
+                            Text(option.rawValue)
+                                .font(.tbCaption.weight(.semibold))
+                                .foregroundStyle(filter == option ? .white : TBTheme.deepSky)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(
+                                    filter == option ? TBTheme.deepSky : Color.white.opacity(0.72),
+                                    in: Capsule(style: .continuous)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            HStack {
+                Text("Long-press a thread to hide it.")
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Menu {
+                    Button("Clear messages older than 30 days", action: onClearOld)
+                    if archivedCount > 0 {
+                        Button("Restore hidden (\(archivedCount))", action: onRestoreArchived)
+                    }
+                } label: {
+                    Text("Manage")
+                        .font(.tbCaption.weight(.semibold))
+                        .foregroundStyle(TBTheme.icyBlue)
+                }
+            }
+        }
+    }
+}
+
 struct MessagingInboxRow: View {
     let entry: MessagingInboxEntry
     var isSellerInbox: Bool = false
+    var isUnread: Bool = false
 
     private var title: String {
         isSellerInbox ? entry.buyerLabel : entry.sellerName
@@ -279,10 +459,15 @@ struct MessagingInboxRow: View {
 
                     Spacer(minLength: 8)
 
-                    if !entry.lastMessageTimestamp.isEmpty {
-                        Text(entry.lastMessageTimestamp)
-                            .font(.tbCaption)
-                            .foregroundStyle(.secondary)
+                    Text(entry.lastMessageDate.formatted(.relative(presentation: .named)))
+                        .font(.tbCaption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    if isUnread {
+                        Circle()
+                            .fill(TBTheme.accent)
+                            .frame(width: 8, height: 8)
                     }
                 }
 
@@ -291,11 +476,10 @@ struct MessagingInboxRow: View {
                     .foregroundStyle(TBTheme.icyBlue)
                     .lineLimit(1)
 
-                Text(entry.lastMessageText)
+                Text(entry.hasConversation ? entry.lastMessageText : "No messages yet")
                     .font(.tbBody)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
             }
 
             Image(systemName: "chevron.right")
@@ -310,7 +494,7 @@ struct MessagingInboxRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(.white.opacity(0.72), lineWidth: 1)
+                .strokeBorder(isUnread ? TBTheme.accent.opacity(0.28) : .white.opacity(0.72), lineWidth: 1)
         )
     }
 }

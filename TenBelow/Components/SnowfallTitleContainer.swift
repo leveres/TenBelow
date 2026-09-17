@@ -22,7 +22,7 @@ struct SnowfallParticleCanvas: View {
 
         Group {
             if effectiveAnimates {
-                TimelineView(.animation(minimumInterval: 1.0 / 10.0, paused: !shouldRun)) { timeline in
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !shouldRun)) { timeline in
                     snowCanvas(flakes: flakes, time: CGFloat(timeline.date.timeIntervalSinceReferenceDate))
                 }
             } else {

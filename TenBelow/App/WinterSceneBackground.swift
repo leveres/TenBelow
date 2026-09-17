@@ -38,11 +38,11 @@ private struct WinterSnowfallOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let flakes = (0..<36).map(WinterSnowParticle.init(seed:))
+        let flakes = (0..<24).map(WinterSnowParticle.init(seed:))
         let shouldRun = scenePhase == .active && !reduceMotion
 
         GeometryReader { _ in
-            TimelineView(.animation(minimumInterval: 1.0 / 12.0, paused: !shouldRun)) { timeline in
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !shouldRun)) { timeline in
                 let time = CGFloat(timeline.date.timeIntervalSinceReferenceDate)
 
                 Canvas { context, size in
@@ -94,7 +94,7 @@ private struct WinterSnowParticle {
         x = n1
         size = 2.8 + (n2 * 5.2)
         opacity = 0.34 + Double(n3) * 0.36
-        speed = 12.0 + (n4 * 20.0)
+        speed = 8.0 + (n4 * 10.0)
         phase = n5
         driftAmount = 5.0 + (n6 * 12.0)
         driftFrequency = 0.25 + (n7 * 0.45)

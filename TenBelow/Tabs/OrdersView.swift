@@ -363,7 +363,9 @@ struct OrdersView: View {
             } label: {
                 dateFilterPill
             }
-            .menuStyle(.button)
+            // `.menuStyle(.button)` briefly draws a rectangular system button
+            // behind the capsule when the selected range changes.
+            .buttonStyle(PlainChipButtonStyle())
             .accessibilityLabel("Filter completed orders by date")
             .accessibilityValue(selectedDateFilter.title)
 

@@ -938,6 +938,25 @@ private struct AddProductPresentationToken: Identifiable {
     let draft: SellerProductDraft
 }
 
+private enum SellerCatalogSort: String, CaseIterable, Identifiable {
+    case name = "Name"
+    case status = "Status"
+    case priceLowToHigh = "Price: Low to High"
+    case priceHighToLow = "Price: High to Low"
+
+    var id: String { rawValue }
+}
+
+private enum SellerCatalogFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case live = "Live"
+    case pendingReview = "Pending review"
+    case draft = "Draft"
+    case needsAttention = "Needs attention"
+
+    var id: String { rawValue }
+}
+
 struct SellerProductsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var catalog: CatalogStore
@@ -958,13 +977,14 @@ struct SellerProductsView: View {
     @State private var hasPresentedInitialAdd = false
     @State private var syncMessage: String?
     @State private var pendingDeleteDraft: SellerProductDraft?
-    @State private var draggingProductId: String?
-    @State private var productSwipeOffset: CGFloat = 0
     @State private var isRefreshingInventory = false
     @State private var submittingProductIDs = Set<String>()
     @State private var activeSyncProductIDs = Set<String>()
     @State private var productIDsAwaitingServerConfirmation = Set<String>()
     @State private var locallyDeletedProductIDs: Set<String>
+    @State private var catalogSort: SellerCatalogSort = .name
+    @State private var catalogFilter: SellerCatalogFilter = .all
+    @State private var visibleCatalogLimit = 12
 
     init(
         seller: SellerProfile = .sample,
@@ -1000,15 +1020,32 @@ struct SellerProductsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                ForEach(visibleProductDrafts) { draft in
-                    sellerProductSwipeRow(draft)
+                catalogControlRow
+
+                LazyVStack(spacing: 8) {
+                    ForEach(displayedCatalogDrafts) { draft in
+                        sellerProductSwipeRow(draft)
+                    }
                 }
 
-                if visibleProductDrafts.isEmpty {
-                    Text("No products yet. Add your first listing to get started.")
+                if filteredCatalogDrafts.isEmpty {
+                    Text(emptyCatalogMessage)
                         .font(.tbBody)
                         .foregroundStyle(.secondary)
                         .padding(.top, 8)
+                }
+
+                if hasMoreCatalogProducts {
+                    Button {
+                        visibleCatalogLimit += 12
+                    } label: {
+                        Text("Load More")
+                            .font(.tbBodyStrong)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(TBTheme.skyBlue)
                 }
             }
             .padding(TBTheme.spacingLG)
@@ -1025,6 +1062,12 @@ struct SellerProductsView: View {
         .onChange(of: catalog.contentRevision) { _, _ in
             applyApprovedCatalogProductsToDrafts()
             applyInventoryNormalization()
+        }
+        .onChange(of: catalogSort) { _, _ in
+            visibleCatalogLimit = 12
+        }
+        .onChange(of: catalogFilter) { _, _ in
+            visibleCatalogLimit = 12
         }
         .background(TBFrostBackground())
         .navigationTitle("My Products")
@@ -1089,8 +1132,6 @@ struct SellerProductsView: View {
             }
         }
         .onAppear {
-            draggingProductId = nil
-            productSwipeOffset = 0
             applyInventoryNormalization()
             refreshSavedShopComposer()
             guard startInAddMode, !hasPresentedInitialAdd else { return }
@@ -1236,6 +1277,71 @@ struct SellerProductsView: View {
         normalizedInventoryDrafts(from: productDrafts)
     }
 
+    private var filteredCatalogDrafts: [SellerProductDraft] {
+        let filtered = visibleProductDrafts.filter { draft in
+            switch catalogFilter {
+            case .all:
+                return true
+            case .live:
+                return draft.marketplaceStatus == .live
+            case .pendingReview:
+                return draft.marketplaceStatus == .pendingReview
+            case .draft:
+                return draft.marketplaceStatus == .draft
+            case .needsAttention:
+                return draft.marketplaceStatus == .rejected || draft.marketplaceStatus == .archived
+            }
+        }
+
+        return filtered.sorted { lhs, rhs in
+            switch catalogSort {
+            case .name:
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            case .status:
+                let lhsRank = catalogStatusRank(lhs.marketplaceStatus)
+                let rhsRank = catalogStatusRank(rhs.marketplaceStatus)
+                if lhsRank == rhsRank {
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+                return lhsRank < rhsRank
+            case .priceLowToHigh:
+                if lhs.priceCents == rhs.priceCents {
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+                return lhs.priceCents < rhs.priceCents
+            case .priceHighToLow:
+                if lhs.priceCents == rhs.priceCents {
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                }
+                return lhs.priceCents > rhs.priceCents
+            }
+        }
+    }
+
+    private var displayedCatalogDrafts: [SellerProductDraft] {
+        Array(filteredCatalogDrafts.prefix(visibleCatalogLimit))
+    }
+
+    private var hasMoreCatalogProducts: Bool {
+        displayedCatalogDrafts.count < filteredCatalogDrafts.count
+    }
+
+    private var emptyCatalogMessage: String {
+        catalogFilter == .all
+            ? "No products yet. Add your first listing to get started."
+            : "No products match this filter."
+    }
+
+    private func catalogStatusRank(_ status: SellerMarketplaceStatus) -> Int {
+        switch status {
+        case .pendingReview: return 0
+        case .rejected: return 1
+        case .draft: return 2
+        case .live: return 3
+        case .archived: return 4
+        }
+    }
+
     private var knownRemoteProductIDs: Set<String> {
         Set(
             catalog.products
@@ -1316,45 +1422,193 @@ struct SellerProductsView: View {
     }
 
     private func sellerProductSwipeRow(_ draft: SellerProductDraft) -> some View {
-        sellerProductCard(draft)
-        .offset(x: draggingProductId == draft.id ? productSwipeOffset : 0)
-        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .onTapGesture {
-            selectedDraft = draft
+        HStack(spacing: 6) {
+            Button {
+                selectedDraft = draft
+            } label: {
+                HStack(spacing: 12) {
+                    StorefrontImageView(
+                        reference: draft.imageURLStrings.first,
+                        contentMode: .fill,
+                        loadingPriority: .utility
+                    ) {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(TBTheme.skyLight.opacity(0.55))
+                            .overlay {
+                                Image(systemName: "shippingbox.fill")
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundStyle(TBTheme.icyBlue.opacity(0.75))
+                            }
+                    }
+                    .frame(width: 60, height: 60)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 0.8)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(draft.name.isEmpty ? "Untitled product" : draft.name)
+                            .font(.tbBodyStrong)
+                            .foregroundStyle(TBTheme.deepSky)
+                            .lineLimit(1)
+
+                        Text(draft.priceDisplay)
+                            .font(.tbMeta)
+                            .foregroundStyle(TBTheme.icyBlue)
+
+                        Text("\(draft.category.rawValue) · \(draft.material) · \(draft.shipsInMinDays)–\(draft.shipsInMaxDays) days")
+                            .font(.tbCaption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        if let notes = draft.serverReviewNotes?
+                            .trimmingCharacters(in: .whitespacesAndNewlines),
+                           !notes.isEmpty,
+                           draft.marketplaceStatus == .rejected {
+                            Text("Feedback: \(notes)")
+                                .font(.tbCaption)
+                                .foregroundStyle(.orange)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    catalogStatusPill(draft.marketplaceStatus)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                Button {
+                    selectedDraft = draft
+                } label: {
+                    Label("Edit product", systemImage: "square.and.pencil")
+                }
+
+                Button(role: .destructive) {
+                    pendingDeleteDraft = draft
+                } label: {
+                    Label("Remove product", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .frame(width: 32, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("More options for \(draft.name)")
         }
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 24)
-                .onChanged { value in
-                    guard value.translation.width < 0,
-                          abs(value.translation.width) > abs(value.translation.height) else { return }
-                    draggingProductId = draft.id
-                    productSwipeOffset = max(value.translation.width, -42)
-                }
-                .onEnded { value in
-                    guard value.translation.width < -56,
-                          abs(value.translation.width) > abs(value.translation.height) else {
-                        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
-                            productSwipeOffset = 0
-                            draggingProductId = nil
-                        }
-                        return
-                    }
-                    #if os(iOS)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    #endif
-                    withAnimation(.spring(response: 0.18, dampingFraction: 0.88)) {
-                        draggingProductId = draft.id
-                        productSwipeOffset = -34
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                        pendingDeleteDraft = draft
-                        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
-                            productSwipeOffset = 0
-                            draggingProductId = nil
-                        }
+        .padding(10)
+        .background(.white.opacity(0.82), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(TBTheme.skyBlue.opacity(0.13), lineWidth: 0.8)
+        }
+        .shadow(color: .black.opacity(0.035), radius: 7, y: 3)
+    }
+
+    private var catalogControlRow: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 10) {
+                Text("\(visibleProductDrafts.count) \(visibleProductDrafts.count == 1 ? "Product" : "Products")")
+                    .font(.tbBodyStrong)
+                    .foregroundStyle(TBTheme.deepSky)
+                    .fixedSize(horizontal: true, vertical: false)
+
+                Button {
+                    Task { await refreshInventoryFromServer(showFailureMessage: true) }
+                } label: {
+                    if isRefreshingInventory {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
                     }
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(TBTheme.icyBlue)
+                .frame(width: 30, height: 30)
+                .disabled(isRefreshingInventory)
+                .accessibilityLabel("Refresh products")
+
+                Spacer(minLength: 8)
+
+                Menu {
+                    Picker("Filter", selection: animatedCatalogFilter) {
+                        ForEach(SellerCatalogFilter.allCases) { filter in
+                            Text(filter.rawValue).tag(filter)
+                        }
+                    }
+                } label: {
+                    Label("Filter", systemImage: "line.3.horizontal.decrease")
+                }
+                .font(.tbCaption.weight(.semibold))
+                .foregroundStyle(TBTheme.deepSky)
+                .fixedSize(horizontal: true, vertical: false)
+
+                Menu {
+                    Picker("Sort", selection: animatedCatalogSort) {
+                        ForEach(SellerCatalogSort.allCases) { sort in
+                            Text(sort.rawValue).tag(sort)
+                        }
+                    }
+                } label: {
+                    Label("Sort", systemImage: "arrow.up.arrow.down")
+                }
+                .font(.tbCaption.weight(.semibold))
+                .foregroundStyle(TBTheme.deepSky)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Showing: \(catalogFilter == .all ? "All products" : catalogFilter.rawValue)")
+                Text("Sorted by: \(catalogSort.rawValue)")
+            }
+            .font(.tbCaption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(height: 34, alignment: .topLeading)
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private var animatedCatalogFilter: Binding<SellerCatalogFilter> {
+        Binding(
+            get: { catalogFilter },
+            set: { newValue in
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    catalogFilter = newValue
+                }
+            }
         )
+    }
+
+    private var animatedCatalogSort: Binding<SellerCatalogSort> {
+        Binding(
+            get: { catalogSort },
+            set: { newValue in
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    catalogSort = newValue
+                }
+            }
+        )
+    }
+
+    private func catalogStatusPill(_ status: SellerMarketplaceStatus) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: status.symbolName)
+                .font(.system(size: 9, weight: .bold))
+            Text(status.title)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .lineLimit(1)
+        }
+        .foregroundStyle(statusTint(for: status))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(statusBackground(for: status), in: Capsule(style: .continuous))
     }
 
     private var headerCard: some View {
@@ -1422,72 +1676,6 @@ struct SellerProductsView: View {
                 }
             }
         }
-    }
-
-    private func sellerProductCard(_ draft: SellerProductDraft) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(draft.name)
-                        .font(.tbBodyStrong)
-                        .foregroundStyle(TBTheme.deepSky)
-
-                    Text(draft.priceDisplay)
-                        .font(.tbMeta)
-                        .foregroundStyle(TBTheme.icyBlue)
-                }
-
-                Spacer()
-
-                HStack(spacing: 6) {
-                    Image(systemName: draft.marketplaceStatus.symbolName)
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(draft.marketplaceStatus.title)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                }
-                .foregroundStyle(statusTint(for: draft.marketplaceStatus))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .background(statusBackground(for: draft.marketplaceStatus), in: Capsule(style: .continuous))
-            }
-
-            Text(sellerProductSubtitle(for: draft))
-                .font(.tbCaption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let notes = draft.serverReviewNotes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty,
-               draft.marketplaceStatus == .rejected {
-                Text("Feedback: \(notes)")
-                    .font(.tbCaption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack(spacing: 10) {
-                sellerMetaPill(draft.category.rawValue)
-                sellerMetaPill(draft.material)
-                sellerMetaPill("\(draft.shipsInMinDays)-\(draft.shipsInMaxDays) days")
-            }
-        }
-        .padding(16)
-        .background(cardBackground(for: draft.marketplaceStatus), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(cardBorderColor(for: draft.marketplaceStatus), lineWidth: 0.9)
-        )
-        .shadow(color: cardShadowColor(for: draft.marketplaceStatus), radius: 10, y: 5)
-    }
-
-    private func sellerMetaPill(_ text: String) -> some View {
-        Text(text)
-            .font(.tbCaption)
-            .foregroundStyle(TBTheme.deepSky)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(TBTheme.skyLight.opacity(0.4), in: Capsule())
     }
 
     private func productMetricCard(title: String, value: String, subtitle: String) -> some View {
@@ -1943,17 +2131,6 @@ struct SellerProductsView: View {
         }
     }
 
-    private func sellerProductSubtitle(for draft: SellerProductDraft) -> String {
-        if submittingProductIDs.contains(draft.id) {
-            return "Submitting to TenBelow..."
-        }
-        if productIDsAwaitingServerConfirmation.contains(draft.id),
-           draft.marketplaceStatus == .pendingReview {
-            return "Waiting for TenBelow server confirmation"
-        }
-        return draft.marketplaceStatus.subtitle
-    }
-
     private func statusTint(for status: SellerMarketplaceStatus) -> Color {
         switch status {
         case .draft:
@@ -1981,49 +2158,6 @@ struct SellerProductsView: View {
             return Color.red.opacity(0.12)
         case .archived:
             return Color.gray.opacity(0.12)
-        }
-    }
-
-    private func cardBackground(for status: SellerMarketplaceStatus) -> Color {
-        switch status {
-        case .live:
-            return Color.green.opacity(0.08)
-        case .rejected:
-            return Color.red.opacity(0.07)
-        case .archived:
-            return Color.gray.opacity(0.10)
-        case .pendingReview:
-            return Color.white.opacity(0.78)
-        case .draft:
-            return Color.white.opacity(0.76)
-        }
-    }
-
-    private func cardBorderColor(for status: SellerMarketplaceStatus) -> Color {
-        switch status {
-        case .live:
-            return Color.green.opacity(0.24)
-        case .rejected:
-            return Color.red.opacity(0.24)
-        case .archived:
-            return Color.gray.opacity(0.18)
-        case .pendingReview:
-            return TBTheme.skyBlue.opacity(0.16)
-        case .draft:
-            return TBTheme.skyBlue.opacity(0.12)
-        }
-    }
-
-    private func cardShadowColor(for status: SellerMarketplaceStatus) -> Color {
-        switch status {
-        case .live:
-            return Color.green.opacity(0.08)
-        case .rejected:
-            return Color.red.opacity(0.08)
-        case .archived:
-            return Color.black.opacity(0.02)
-        case .pendingReview, .draft:
-            return Color.black.opacity(0.03)
         }
     }
 
