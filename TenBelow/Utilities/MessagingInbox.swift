@@ -113,7 +113,7 @@ enum MessagingInbox {
                     inquiryBuyerEmail: thread.buyerEmail,
                     buyerLabel: buyerLabel,
                     contextLabel: "Shop chat",
-                    lastMessageText: last?.text ?? "Buyer question from your storefront.",
+                    lastMessageText: last?.text ?? "New question from your storefront.",
                     lastMessageTimestamp: last?.timestampLabel ?? thread.updatedAt.formatted(date: .abbreviated, time: .omitted),
                     lastMessageDate: last?.createdAt ?? thread.updatedAt,
                     hasConversation: last != nil,

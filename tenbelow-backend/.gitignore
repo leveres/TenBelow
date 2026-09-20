@@ -2,3 +2,7 @@ push_devices.json
 data/
 media/
 node_modules/
+tmp-*-email-preview*.html
+tmp-buyer-welcome-email-preview.html
+tmp-seller-welcome-email-preview.html
+tmp-order-confirmation-email-preview.html

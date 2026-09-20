@@ -1773,6 +1773,7 @@ private struct SellerAgreementAcceptanceView: View {
     @State private var hasReachedAgreementEnd = false
     @State private var hasAcceptedAgreement = false
     @State private var agreementViewportHeight: CGFloat = 0
+    @State private var agreementEndMinY: CGFloat = .infinity
 
     private var isTransitioning: Bool {
         isCreatingAccount || accountCreationSucceeded
@@ -1979,6 +1980,10 @@ private struct SellerAgreementAcceptanceView: View {
                         .foregroundStyle(TBTheme.deepSky)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 8)
+                        // Visible end marker is enough — unlock even if geometry prefs race.
+                        .onAppear {
+                            markAgreementEndReached()
+                        }
 
                     Color.clear
                         .frame(height: 1)
@@ -1995,27 +2000,25 @@ private struct SellerAgreementAcceptanceView: View {
             }
             .coordinateSpace(name: "sellerAgreementScroll")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                GeometryReader { proxy in
+                    // Measure the scroll viewport itself (before outer padding).
+                    Color.clear.preference(key: SellerAgreementViewportHeightKey.self, value: proxy.size.height)
+                }
+            )
             .padding(12)
             .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
             )
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: SellerAgreementViewportHeightKey.self, value: proxy.size.height)
-                }
-            )
             .onPreferenceChange(SellerAgreementViewportHeightKey.self) { newHeight in
                 agreementViewportHeight = newHeight
+                evaluateAgreementEndReached()
             }
             .onPreferenceChange(SellerAgreementEndPositionKey.self) { endMinY in
-                guard !hasReachedAgreementEnd, agreementViewportHeight > 0 else { return }
-                if endMinY <= agreementViewportHeight - 8 {
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) {
-                        hasReachedAgreementEnd = true
-                    }
-                }
+                agreementEndMinY = endMinY
+                evaluateAgreementEndReached()
             }
 
             agreementAcceptanceToggle
@@ -2083,6 +2086,22 @@ private struct SellerAgreementAcceptanceView: View {
             return "Check the agreement box to continue."
         }
         return "Tap agree to create your seller account."
+    }
+
+    private func evaluateAgreementEndReached() {
+        guard !hasReachedAgreementEnd else { return }
+        guard agreementViewportHeight > 0, agreementEndMinY.isFinite else { return }
+        // Unlock once the end marker enters (or nearly enters) the visible scroll viewport.
+        if agreementEndMinY <= agreementViewportHeight + 24 {
+            markAgreementEndReached()
+        }
+    }
+
+    private func markAgreementEndReached() {
+        guard !hasReachedAgreementEnd else { return }
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) {
+            hasReachedAgreementEnd = true
+        }
     }
 }
 

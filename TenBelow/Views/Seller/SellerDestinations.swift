@@ -3172,7 +3172,7 @@ struct SupportView: View {
             VStack(alignment: .leading, spacing: TBTheme.spacingLG) {
                 SellerSettingsHeader(
                     title: "Seller Support",
-                    subtitle: "Get quick help with listings, payouts, shipping setup, and policy questions without leaving the seller flow."
+                    subtitle: "Get help with listings, orders, payouts, shipping, and shop policies without leaving the seller dashboard."
                 )
 
                 SellerSettingsCard(title: "Quick Actions") {
@@ -3315,7 +3315,7 @@ struct PayoutSettingsView: View {
             VStack(alignment: .leading, spacing: TBTheme.spacingLG) {
                 SellerSettingsHeader(
                     title: "Payout Settings",
-                    subtitle: "Check payout readiness and finish Stripe Connect when it is available."
+                    subtitle: "Connect Stripe, confirm payout details, and see when transfers from your orders are enabled."
                 )
 
                 if sellerPreviewMode {
@@ -3406,7 +3406,7 @@ struct PayoutSettingsView: View {
             .padding(.bottom, 120)
         }
         .background(TBFrostBackground())
-        .navigationTitle("Payout")
+        .navigationTitle("Payouts")
         #if os(iOS) || os(visionOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif

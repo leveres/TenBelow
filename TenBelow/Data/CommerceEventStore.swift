@@ -26,4 +26,20 @@ final class CommerceEventStore: ObservableObject {
     private func persist() {
         LocalCodableStore.save(recentEvents, key: storageKey)
     }
+
+    /// Counts marketplace-wide favorite events for a product within a recent window (all buyers on this device).
+    func recentProductFavoriteCount(
+        productId: String,
+        within interval: TimeInterval = 7 * 24 * 60 * 60
+    ) -> Int {
+        let trimmedProductId = productId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedProductId.isEmpty else { return 0 }
+
+        let cutoff = Date().addingTimeInterval(-interval)
+        return recentEvents.filter { event in
+            event.kind == .productFavorited
+                && event.productId == trimmedProductId
+                && event.createdAt >= cutoff
+        }.count
+    }
 }

@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import "dotenv/config";
-import { buildSellerWelcomeEmailHtml } from "../services/sellerWelcomeEmail.js";
+import {
+  SELLER_WELCOME_EMAIL_PREVIEW,
+  SELLER_WELCOME_EMAIL_SUBJECT,
+  buildSellerWelcomeEmailHtml,
+} from "../services/sellerWelcomeEmail.js";
 import { getActiveSellerAgreementDocument } from "../legal/sellerAgreementDocuments.js";
 
 const document = getActiveSellerAgreementDocument();
@@ -8,6 +12,7 @@ const seller = {
   sellerId: "preview-seller",
   email: "seller@example.com",
   legalName: "Jordan Example",
+  businessName: "Jordan Makes",
   sellerAgreement: {
     accepted: true,
     acceptedAt: new Date().toISOString(),
@@ -31,6 +36,8 @@ const html = buildSellerWelcomeEmailHtml({
 });
 
 console.log("Seller welcome email HTML preview generated.");
+console.log(`Subject: ${SELLER_WELCOME_EMAIL_SUBJECT}`);
+console.log(`Preview: ${SELLER_WELCOME_EMAIL_PREVIEW}`);
 console.log(`Agreement document: ${document.id}`);
 console.log(`PDF attachment available: ${document.pdfAvailable ? "yes" : "no (add PDF to legal/documents folder)"}`);
 console.log(`HTML length: ${html.length} characters`);

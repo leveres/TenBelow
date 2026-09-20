@@ -13,6 +13,8 @@ struct HomeView: View {
     @EnvironmentObject private var catalog: CatalogStore
     @EnvironmentObject private var localProducts: LocalProductStore
     @EnvironmentObject private var orderStore: OrderStore
+    @EnvironmentObject private var commerceEvents: CommerceEventStore
+    @EnvironmentObject private var buyerEngagement: BuyerEngagementStore
     @EnvironmentObject private var notifications: NotificationStore
     @AppStorage("userRole") private var userRole = ""
     @AppStorage("buyerFullName") private var buyerFullName = ""
@@ -37,8 +39,12 @@ struct HomeView: View {
     @State private var catalogCache = HomeCatalogCache()
     @Environment(\.tbTabIsActive) private var isHomeTabActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let rotationInterval: TimeInterval = 120
-    private let rotationTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
+    /// Deal of the Day and Fresh Favorites carousel offset.
+    private let dealRotationInterval: TimeInterval = 120
+    /// Featured Maker spotlight — rotates on the hour.
+    private let makerSpotlightRotationInterval: TimeInterval = 3600
+    private let dealRotationTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
+    private let makerSpotlightRotationTimer = Timer.publish(every: 3600, on: .main, in: .common).autoconnect()
 
     /// Shared horizontal inset and vertical rhythm for the home screen.
     private enum HomeMetrics {
@@ -257,7 +263,7 @@ struct HomeView: View {
     /// resolution), and Home re-renders on rotation timers. Memoize per catalog revision so
     /// repeated body evaluations and per-card lookups stay O(1).
     private var catalogSnapshot: HomeCatalogSnapshot {
-        let key = "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(catalog.isUsingCachedData)|\(orderStore.orders.count)|\(showMockCatalog)"
+        let key = homeCatalogCacheKey
         if let cached = catalogCache.snapshot, cached.key == key {
             return cached
         }
@@ -566,7 +572,16 @@ struct HomeView: View {
 
     private var freshFavoritesRotationOffset: Int {
         let poolSize = max(freshFavoriteProductsCountForRotation, 1)
-        return (featuredRotationIndex + creatorRotationIndex) % poolSize
+        return featuredRotationIndex % poolSize
+    }
+
+    private var homeCatalogCacheKey: String {
+        let favoriteSignal = commerceEvents.recentEvents
+            .prefix(24)
+            .filter { $0.kind == .productFavorited }
+            .map { "\($0.productId ?? ""):\(Int($0.createdAt.timeIntervalSince1970))" }
+            .joined(separator: "|")
+        return "\(catalog.contentRevision)|\(localProducts.productsRevision)|\(catalog.isUsingCachedData)|\(orderStore.orders.count)|\(showMockCatalog)|\(favoriteSignal)"
     }
 
     private var freshFavoriteProductsCountForRotation: Int {
@@ -642,43 +657,55 @@ struct HomeView: View {
         let salesCount = Double(salesCounts[product.id] ?? 0)
         let favorites = Double(product.favoriteCount)
         let productViews = Double(product.pageViewCount)
-        let sellerTraffic = Double(sellerProfilesByID[product.sellerId]?.pageViewCount ?? 0)
-        return salesCount * 45 + favorites * 8 + productViews * 0.35 + sellerTraffic * 0.05
+        // Lower score = less buyer traction → prioritized for Deal of the Day rotation.
+        return salesCount * 60 + favorites * 16 + productViews * 0.2
     }
 
     private func freshFavoritePriorityScore(_ product: Product, salesCounts: [String: Int]) -> Double {
         let salesCount = Double(salesCounts[product.id] ?? 0)
         let favorites = Double(product.favoriteCount)
-        let sellerTraffic = Double(sellerProfilesByID[product.sellerId]?.pageViewCount ?? 0)
-        let sellerOrders = Double(sellerProfilesByID[product.sellerId]?.orderCount ?? 0)
-        let priceWeight = Double(product.priceCents) / 100.0
         let productViews = Double(product.pageViewCount)
-        let attentionWithoutPurchase = max(productViews - (salesCount * 3), 0)
-        return favorites * 16
-            + attentionWithoutPurchase * 0.8
-            + sellerTraffic * 0.08
-            + sellerOrders * 1.5
-            + priceWeight
-            - salesCount * 22
+        let recentFavoriteEvents = Double(commerceEvents.recentProductFavoriteCount(productId: product.id))
+        let savedByCurrentBuyer = buyerEngagement.isProductFavorited(product.id) ? 1.0 : 0.0
+        let recentFavoriteLift = (recentFavoriteEvents * 140) + (savedByCurrentBuyer * 60)
+        let popularityLift = favorites * 22
+        let risingWithoutSales = max(productViews - (salesCount * 4), 0) * 0.5
+        return recentFavoriteLift + popularityLift + risingWithoutSales - (salesCount * 8)
+    }
+
+    private func freshFavoriteBadgeTitle(for product: Product) -> String? {
+        if commerceEvents.recentProductFavoriteCount(productId: product.id) > 0
+            || buyerEngagement.isProductFavorited(product.id) {
+            return "❄️ Fresh pick"
+        }
+        if product.favoriteCount >= 3 {
+            return "❤️ Popular"
+        }
+        return nil
     }
 
     private func seedRotations() {
         let spotlightCount = max(spotlightCreators.count, 1)
         let featuredCount = max(featuredProducts.count, 1)
-        let timeBucket = Int(Date().timeIntervalSinceReferenceDate / rotationInterval)
+        let spotlightBucket = Int(Date().timeIntervalSinceReferenceDate / makerSpotlightRotationInterval)
+        let dealBucket = Int(Date().timeIntervalSinceReferenceDate / dealRotationInterval)
 
-        creatorRotationIndex = timeBucket % spotlightCount
-        featuredRotationIndex = timeBucket % featuredCount
+        creatorRotationIndex = spotlightBucket % spotlightCount
+        featuredRotationIndex = dealBucket % featuredCount
     }
 
-    private func advanceRotations() {
+    private func advanceDealRotations() {
+        withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
+            if featuredProducts.count > 1 {
+                featuredRotationIndex = (featuredRotationIndex + 1) % featuredProducts.count
+            }
+        }
+    }
+
+    private func advanceMakerSpotlightRotation() {
         withAnimation(reduceMotion ? nil : TBMotion.stateChange) {
             if spotlightCreators.count > 1 {
                 creatorRotationIndex = (creatorRotationIndex + 1) % spotlightCreators.count
-            }
-
-            if featuredProducts.count > 1 {
-                featuredRotationIndex = (featuredRotationIndex + 1) % featuredProducts.count
             }
         }
     }
@@ -705,8 +732,8 @@ struct HomeView: View {
                                 .shadow(color: TBTheme.deepSky.opacity(0.08), radius: 5, x: 0, y: 2)
                         )
                         .overlay(alignment: .topLeading) {
-                            if product.id == freshFavoritesDisplayProducts.first?.id {
-                                Text("❄️ New Drop")
+                            if let badgeTitle = freshFavoriteBadgeTitle(for: product) {
+                                Text(badgeTitle)
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(TBTheme.deepSky)
                                     .padding(.horizontal, 8)
@@ -845,9 +872,13 @@ struct HomeView: View {
             .onAppear {
                 seedRotations()
             }
-            .onReceive(rotationTimer) { _ in
+            .onReceive(dealRotationTimer) { _ in
                 guard isHomeTabActive else { return }
-                advanceRotations()
+                advanceDealRotations()
+            }
+            .onReceive(makerSpotlightRotationTimer) { _ in
+                guard isHomeTabActive else { return }
+                advanceMakerSpotlightRotation()
             }
             .navigationBarTitleDisplayMode(.inline)
             #if os(iOS) || os(visionOS)

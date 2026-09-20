@@ -1,4 +1,5 @@
 import { normalizeAccountModeration } from "./accountModeration.js";
+import { normalizeBuyerWelcomeEmailFields } from "../../services/email/buyerWelcomeEmail.js";
 
 export function normalizeBuyerRecord(record = {}, email = "") {
   const normalizedEmail = String(email || record.email || "").trim().toLowerCase();
@@ -11,6 +12,7 @@ export function normalizeBuyerRecord(record = {}, email = "") {
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: record.updatedAt || new Date().toISOString(),
     accountModeration: normalizeAccountModeration(record.accountModeration),
+    welcomeEmail: normalizeBuyerWelcomeEmailFields(record),
   };
 }
 

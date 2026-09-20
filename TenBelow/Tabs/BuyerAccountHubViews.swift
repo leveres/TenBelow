@@ -275,7 +275,7 @@ struct SellerInboxListView: View {
             if inboxEntries.isEmpty {
                 buyerAccountEmptyState(
                     title: "No buyer messages yet",
-                    subtitle: "Shop questions and order threads from buyers appear here.",
+                    subtitle: "Storefront questions and order threads from buyers will show up here.",
                     systemImage: "bubble.left.and.bubble.right"
                 )
             } else {
@@ -476,10 +476,10 @@ struct MessagingInboxRow: View {
                     .foregroundStyle(TBTheme.icyBlue)
                     .lineLimit(1)
 
-                Text(entry.hasConversation ? entry.lastMessageText : "No messages yet")
+                Text(entry.lastMessageText)
                     .font(.tbBody)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .foregroundStyle(entry.hasConversation ? Color.secondary : Color.secondary.opacity(0.88))
+                    .lineLimit(2)
             }
 
             Image(systemName: "chevron.right")

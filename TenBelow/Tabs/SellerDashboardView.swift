@@ -519,7 +519,7 @@ struct SellerDashboardView: View {
                     NavigationLink {
                         SupportView()
                     } label: {
-                        settingsRow(icon: "questionmark.circle", title: "View support", subtitle: "Help center and contact")
+                        settingsRow(icon: "questionmark.circle", title: "View support", subtitle: "Help with listings, orders, payouts, and policies")
                     }
                     .buttonStyle(.plain)
                     Divider().opacity(0.5)
@@ -595,7 +595,6 @@ struct SellerDashboardView: View {
 // MARK: - Preview
 
 private struct SellerStoresDirectoryView: View {
-    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var catalog: CatalogStore
 
     @State private var currentStorePage = 0
@@ -649,14 +648,17 @@ private struct SellerStoresDirectoryView: View {
             profilesByID[sellerId] = profile.mergingFallback(profilesByID[sellerId])
         }
 
-        let sorted = profilesByID.values.sorted { lhs, rhs in
-            if lhs.id == currentSellerID { return true }
-            if rhs.id == currentSellerID { return false }
-            if lhs.productCount == rhs.productCount {
-                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+        let trimmedCurrentSellerID = currentSellerID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sorted = profilesByID.values
+            .filter { profile in
+                trimmedCurrentSellerID.isEmpty || profile.id != trimmedCurrentSellerID
             }
-            return lhs.productCount > rhs.productCount
-        }
+            .sorted { lhs, rhs in
+                if lhs.productCount == rhs.productCount {
+                    return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+                }
+                return lhs.productCount > rhs.productCount
+            }
 
         directoryCache.key = key
         directoryCache.storefrontProducts = products
@@ -688,24 +690,15 @@ private struct SellerStoresDirectoryView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(visibleSellerProfiles) { profile in
-                            if profile.id == currentSellerID {
-                                Button {
-                                    dismiss()
-                                } label: {
-                                    PremiumStorefrontCard(content: cardContent(for: profile))
-                                }
-                                .buttonStyle(PremiumStorefrontCardButtonStyle())
-                            } else {
-                                NavigationLink {
-                                    PublicSellerProfileView(
-                                        seller: profile,
-                                        products: storefrontProducts.filter { $0.sellerId == profile.id }
-                                    )
-                                } label: {
-                                    PremiumStorefrontCard(content: cardContent(for: profile))
-                                }
-                                .buttonStyle(PremiumStorefrontCardButtonStyle())
+                            NavigationLink {
+                                PublicSellerProfileView(
+                                    seller: profile,
+                                    products: storefrontProducts.filter { $0.sellerId == profile.id }
+                                )
+                            } label: {
+                                PremiumStorefrontCard(content: cardContent(for: profile))
                             }
+                            .buttonStyle(PremiumStorefrontCardButtonStyle())
                         }
                     }
                     .padding(.horizontal, 20)

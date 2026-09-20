@@ -106,7 +106,7 @@ struct OrderRowCard: View {
         HStack(spacing: 6) {
             Image(systemName: "bag.fill")
                 .font(.system(size: 9, weight: .bold))
-            Text(order.id)
+            Text(order.displayOrderNumber)
                 .font(.system(size: 10.5, weight: .bold, design: .rounded))
                 .lineLimit(1)
         }

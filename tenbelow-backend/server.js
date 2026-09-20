@@ -95,6 +95,22 @@ import {
 } from "./legal/sellerAgreementDocuments.js";
 import { deliverSellerWelcomeEmailIfNeeded, queueSellerWelcomeEmail } from "./services/sellerOnboardingEmail.js";
 import {
+  normalizeBuyerWelcomeEmailFields,
+  scheduleBuyerWelcomeAfterVerification,
+} from "./services/email/buyerWelcomeEmail.js";
+import {
+  deliverBuyerOrderConfirmationEmail,
+  normalizeOrderConfirmationEmailFields,
+} from "./services/email/orderConfirmationEmail.js";
+import { deliverSellerNewOrderEmailsForPaidOrder } from "./services/email/sellerNewOrderEmail.js";
+import { deliverBuyerShipmentShippedEmail } from "./services/email/shipmentUpdateEmail.js";
+import { deliverBuyerDeliveryConfirmationEmail } from "./services/email/deliveryConfirmationEmail.js";
+import { deliverProductSubmittedEmail } from "./services/email/productSubmittedEmail.js";
+import { deliverProductDecisionEmail } from "./services/email/productReviewEmail.js";
+import { normalizeProductReviewEmails } from "./services/email/productEmailShared.js";
+import { normalizeCustomerOrderNumber, resolvePersistedCustomerOrderNumber } from "./domain/phase1/orderNumber.js";
+import { resolveShipmentAction } from "./domain/phase1/shipmentActions.js";
+import {
   applyAccountModerationAction,
   accountModerationBlockPayload,
   accountModerationRequiresEmail,
@@ -774,6 +790,7 @@ function normalizeCatalogProduct(product = {}) {
     rightsCertificationAcceptedAt: asProductISODateOrNull(product.rightsCertificationAcceptedAt),
     requiresManualReview: product.requiresManualReview === true,
     reviewReason: product.reviewReason ? String(product.reviewReason).trim() : null,
+    reviewEmails: normalizeProductReviewEmails(product),
   };
 }
 
@@ -2415,6 +2432,16 @@ function normalizeBuyerRecord(record = {}, email = "") {
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: record.updatedAt || new Date().toISOString(),
     accountModeration: normalizeAccountModeration(record.accountModeration),
+    welcomeEmail: normalizeBuyerWelcomeEmailFields(record),
+  };
+}
+
+function buyerWelcomeEmailDeliveryArgs() {
+  return {
+    loadBuyersFile,
+    saveBuyersFile,
+    sendTransactionalEmail,
+    isEmailBypassed: transactionalEmailBypassEnabled,
   };
 }
 
@@ -2730,56 +2757,6 @@ async function sendBuyerAccountUpdateConfirmation({
   return targets;
 }
 
-async function sendSellerProductReviewEmail({ sellerId, productName, decision, notes }) {
-  const normalizedSellerId = String(sellerId || "").trim();
-  if (!normalizedSellerId) return null;
-
-  const sellers = loadSellersFile();
-  const sellerEmail = String(sellers[normalizedSellerId]?.email || "").trim().toLowerCase();
-  if (!sellerEmail) {
-    console.warn(`Product review email skipped: no seller email for ${normalizedSellerId}`);
-    return null;
-  }
-
-  const approved = String(decision || "").trim().toLowerCase() === "approve";
-  const safeName = String(productName || "Your listing")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  const safeNotes = String(notes || "")
-    .trim()
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  const subject = approved
-    ? `TenBelow approved "${String(productName || "your listing")}"`
-    : `TenBelow needs updates on "${String(productName || "your listing")}"`;
-
-  const notesBlock = safeNotes
-    ? `<p><strong>Reviewer notes:</strong></p><p>${safeNotes}</p>`
-    : approved
-      ? ""
-      : `<p>Open My Products in the TenBelow app to review feedback and resubmit.</p>`;
-
-  const html = approved
-    ? `<h2>Your listing is live</h2>
-<p><strong>${safeName}</strong> was approved and is now visible in the TenBelow marketplace.</p>
-${notesBlock}
-<p>Buyers can find it in Shop and on your storefront.</p>`
-    : `<h2>Your listing needs updates</h2>
-<p><strong>${safeName}</strong> was not approved for the marketplace yet.</p>
-${notesBlock}
-<p>Open <strong>My Products</strong> in the TenBelow app, update the listing, and submit it again for review.</p>`;
-
-  const result = await sendTransactionalEmail({
-    to: sellerEmail,
-    subject,
-    html,
-    idempotencyKey: `product-review-${normalizedSellerId}-${approved ? "approve" : "reject"}-${Date.now()}`,
-  });
-
-  return { sellerEmail, messageId: result?.messageId || null };
-}
-
 function loadBuyersFile() {
   let raw = getCachedDocument("buyers");
   if (raw === undefined) {
@@ -2939,6 +2916,7 @@ function hydrateOrderRecord(order = {}) {
   const support = normalizeOrderSupportFields(order);
   return {
     ...order,
+    orderNumber: normalizeCustomerOrderNumber(order.orderNumber) || null,
     supportRequests: support.supportRequests,
     orderMessages: support.orderMessages,
   };
@@ -3024,6 +3002,12 @@ function upsertPaidOrder({ orderId, buyerEmail, shipping, totalCents, currency =
 
   const nextOrder = hydrateOrderRecord({
     id: orderId,
+    orderNumber: resolvePersistedCustomerOrderNumber({
+      existingOrderNumber: existingOrder?.orderNumber,
+      existingNumbers: orders
+        .filter((order) => order.id !== orderId)
+        .map((order) => order.orderNumber),
+    }) || null,
     createdAt: existingOrder?.createdAt || new Date().toISOString(),
     status: deriveOrderStatus(shipments, "placed"),
     buyerEmail: buyerEmail || existingOrder?.buyerEmail || null,
@@ -3034,6 +3018,11 @@ function upsertPaidOrder({ orderId, buyerEmail, shipping, totalCents, currency =
     shipments,
     supportRequests: existingOrder?.supportRequests || [],
     orderMessages: existingOrder?.orderMessages || [],
+    confirmationEmail: normalizeOrderConfirmationEmailFields(existingOrder || {}),
+    sellerNewOrderEmails:
+      existingOrder?.sellerNewOrderEmails && typeof existingOrder.sellerNewOrderEmails === "object"
+        ? existingOrder.sellerNewOrderEmails
+        : {},
   });
 
   if (existingIndex >= 0) {
@@ -3074,7 +3063,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
       const shippingTotals = JSON.parse(meta.shippingTotals || "{}");
       const shippingAddress = JSON.parse(meta.shippingAddress || meta.shipping || "{}");
       const sellers = await fetchSellers();
-      upsertPaidOrder({
+      const savedOrder = upsertPaidOrder({
         orderId,
         buyerEmail: meta.buyerEmail,
         shipping: shippingAddress,
@@ -3104,14 +3093,41 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 
       if (meta.buyerEmail) {
         try {
-          await sendTransactionalEmail({
-            to: meta.buyerEmail,
-            subject: `TenBelow Order Confirmed — ${orderId}`,
-            html: `<h2>Thanks for your order!</h2><p>Order <strong>${orderId}</strong></p><p>We'll email tracking when items ship.</p>`,
+          await deliverBuyerOrderConfirmationEmail({
+            orderId: savedOrder.id,
+            buyerEmail: meta.buyerEmail,
+            paymentIntentId: pi.id,
+            paymentSummary: {
+              subtotalCents: Math.max(0, Math.floor(Number(meta.subtotalCents) || 0)),
+              shippingCents: Math.max(0, Math.floor(Number(meta.shippingCents) || 0)),
+              totalCents: Math.max(
+                0,
+                Math.floor(Number(pi.amount_received || pi.amount || savedOrder.totalCents) || 0)
+              ),
+              currency: (pi.currency || savedOrder.currency || "usd").toUpperCase(),
+            },
+            shippingAddress,
+            loadBuyersFile,
+            loadOrdersFile,
+            saveOrdersFile,
+            sendTransactionalEmail,
           });
         } catch (emailErr) {
           console.error("Failed to send order confirmation email:", emailErr?.message || emailErr);
         }
+      }
+
+      try {
+        await deliverSellerNewOrderEmailsForPaidOrder({
+          orderId: savedOrder.id,
+          shippingAddress,
+          loadOrdersFile,
+          saveOrdersFile,
+          loadSellersFile: () => sellers,
+          sendTransactionalEmail,
+        });
+      } catch (sellerEmailErr) {
+        console.error("Failed to send seller new-order emails:", sellerEmailErr?.message || sellerEmailErr);
       }
 
       try {
@@ -3436,6 +3452,13 @@ app.post("/auth/buyer-email-verification/verify", credentialAbuseLimiter, requir
       email
     );
     saveBuyersFile(buyers);
+
+    // Welcome email is best-effort and must never fail verification.
+    scheduleBuyerWelcomeAfterVerification({
+      email,
+      bypassEnabled: transactionalEmailBypassEnabled(),
+      deliveryArgs: buyerWelcomeEmailDeliveryArgs(),
+    });
 
     const token = issueUserSessionToken({
       role: "buyer",
@@ -5317,56 +5340,72 @@ app.post("/orders/shipment-action", requireAppClient, requireAuthenticatedSeller
 
     const timestamp = new Date().toISOString();
     const shipment = orders[orderIndex].shipments[shipmentIndex];
-
-    switch (action) {
-      case "startProcessing":
-        orders[orderIndex].status = "processing";
-        break;
-      case "markShipped": {
-        const trimmedCarrier = String(carrier || "").trim();
-        const trimmedTrackingNumber = String(trackingNumber || "").trim();
-        if (!trimmedCarrier || !trimmedTrackingNumber) {
-          return res.status(400).json({ error: "carrier and trackingNumber are required to mark a shipment as shipped" });
-        }
-        shipment.status = "shipped";
-        shipment.shippedAt = timestamp;
-        shipment.carrier = trimmedCarrier;
-        shipment.trackingNumber = trimmedTrackingNumber;
-        break;
-      }
-      case "markDelivered":
-        shipment.status = "delivered";
-        shipment.deliveredAt = timestamp;
-        break;
-      case "updateTracking": {
-        const trimmedCarrier = String(carrier || "").trim();
-        const trimmedTrackingNumber = String(trackingNumber || "").trim();
-        if (!trimmedCarrier || !trimmedTrackingNumber) {
-          return res.status(400).json({ error: "carrier and trackingNumber are required to update tracking" });
-        }
-        if (!["shipped", "delivered"].includes(String(shipment.status || "").trim().toLowerCase())) {
-          return res.status(400).json({ error: "Tracking can only be updated after a shipment is marked shipped" });
-        }
-        shipment.carrier = trimmedCarrier;
-        shipment.trackingNumber = trimmedTrackingNumber;
-        break;
-      }
-      default:
-        return res.status(400).json({ error: "Unknown shipment action" });
+    const resolved = resolveShipmentAction({
+      action,
+      shipment,
+      carrier,
+      trackingNumber,
+      timestamp,
+    });
+    if (!resolved.ok) {
+      return res.status(resolved.statusCode || 400).json({ error: resolved.error });
     }
 
-    orders[orderIndex].status = deriveOrderStatus(orders[orderIndex].shipments, orders[orderIndex].status);
-    const updatedOrder = saveHydratedOrder(orders[orderIndex]);
+    orders[orderIndex].shipments[shipmentIndex] = resolved.nextShipment;
+    if (resolved.orderStatusOverride) {
+      orders[orderIndex].status = resolved.orderStatusOverride;
+    }
+    if (resolved.mutated || resolved.orderStatusOverride) {
+      orders[orderIndex].status = deriveOrderStatus(orders[orderIndex].shipments, orders[orderIndex].status);
+    }
+
+    const updatedOrder =
+      resolved.mutated || resolved.orderStatusOverride
+        ? saveHydratedOrder(orders[orderIndex])
+        : hydrateOrderRecord(orders[orderIndex]);
+    const updatedShipment =
+      updatedOrder.shipments.find((entry) => entry.id === shipmentId && entry.sellerId === sellerId) ||
+      resolved.nextShipment;
+
+    if (resolved.sendShippedEmail) {
+      try {
+        await deliverBuyerShipmentShippedEmail({
+          orderId: updatedOrder.id,
+          shipmentId,
+          loadBuyersFile,
+          loadOrdersFile,
+          saveOrdersFile,
+          sendTransactionalEmail,
+        });
+      } catch (emailErr) {
+        console.error("Failed to send shipment shipped email:", emailErr?.message || emailErr);
+      }
+    }
+
+    if (resolved.sendDeliveredEmail) {
+      try {
+        await deliverBuyerDeliveryConfirmationEmail({
+          orderId: updatedOrder.id,
+          shipmentId,
+          loadBuyersFile,
+          loadOrdersFile,
+          saveOrdersFile,
+          sendTransactionalEmail,
+        });
+      } catch (emailErr) {
+        console.error("Failed to send delivery confirmation email:", emailErr?.message || emailErr);
+      }
+    }
 
     try {
-      const firstItemName = shipment.items?.[0]?.productName || "your item";
-      if (updatedOrder.buyerEmail && ["startProcessing", "markShipped", "markDelivered"].includes(action)) {
+      const firstItemName = updatedShipment.items?.[0]?.productName || "your item";
+      if (updatedOrder.buyerEmail && resolved.sendPush && resolved.pushAction) {
         await notifyShipmentStatusToBuyer({
           buyerEmail: updatedOrder.buyerEmail,
-          action,
+          action: resolved.pushAction,
           itemName: firstItemName,
-          carrier: shipment.carrier,
-          trackingNumber: shipment.trackingNumber,
+          carrier: updatedShipment.carrier,
+          trackingNumber: updatedShipment.trackingNumber,
         });
       }
     } catch (pushErr) {
@@ -6993,6 +7032,9 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
     const existingProducts = Array.isArray(catalog.products) ? catalog.products : [];
     const existingIndex = existingProducts.findIndex((product) => product.id === productId);
     const existingProduct = existingIndex >= 0 ? existingProducts[existingIndex] : null;
+    const previousApprovalStatus = existingProduct
+      ? String(existingProduct.approvalStatus || "").trim().toLowerCase()
+      : "";
 
     if (existingProduct && existingProduct.sellerId !== sellerId) {
       auditOwnershipMismatch(req, {
@@ -7049,6 +7091,7 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
       rightsCertificationAcceptedAt: body.rightsCertificationAcceptedAt,
       requiresManualReview: body.requiresManualReview,
       reviewReason: body.reviewReason,
+      reviewEmails: existingProduct?.reviewEmails,
     });
 
     if (!nextProduct.name) {
@@ -7087,6 +7130,19 @@ app.put("/seller-products/:sellerId/:productId", sellerWriteLimiter, requireAppC
       version: catalog.version,
       products: updatedProducts,
     });
+
+    try {
+      await deliverProductSubmittedEmail({
+        product: mergedProduct,
+        previousApprovalStatus,
+        loadSellersFile,
+        loadCatalog: fetchCatalog,
+        saveCatalog: saveCatalogAndAwaitPersistence,
+        sendTransactionalEmail,
+      });
+    } catch (emailErr) {
+      console.error("Failed to send product submitted email:", emailErr?.message || emailErr);
+    }
 
     auditLog(
       auditContext(req, {
@@ -7997,6 +8053,7 @@ app.post("/admin/products/:productId/review", adminMutationLimiter, requireAdmin
     }
 
     const existingProduct = existingProducts[productIndex];
+    const previousApprovalStatus = String(existingProduct.approvalStatus || "").trim().toLowerCase();
     const reviewedAt = new Date().toISOString();
     const reviewedProduct = normalizeCatalogProduct({
       ...existingProduct,
@@ -8038,11 +8095,15 @@ app.post("/admin/products/:productId/review", adminMutationLimiter, requireAdmin
     }
 
     try {
-      await sendSellerProductReviewEmail({
-        sellerId: reviewedProduct.sellerId,
-        productName: reviewedProduct.name || "Your listing",
+      await deliverProductDecisionEmail({
+        product: reviewedProduct,
+        previousApprovalStatus,
         decision,
         notes,
+        loadSellersFile,
+        loadCatalog: fetchCatalog,
+        saveCatalog: saveCatalogAndAwaitPersistence,
+        sendTransactionalEmail,
       });
     } catch (emailErr) {
       console.error("Product review seller email error:", emailErr?.message || emailErr);

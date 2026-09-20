@@ -1236,10 +1236,10 @@ struct DropView: View {
         if !sellerSubmissionProducts.isEmpty {
             return "Thursday uploads are closed. Your drop lineup now appears in History for date-based review."
         }
-        if let next = effectiveSellerSubmissions?.nextDropAt {
-            return "The next submission window opens \(DropCountdown.timeLeft(until: next)). New uploads reopen Thursday at 5:00 PM ET."
+        if effectiveSellerSubmissions?.nextDropAt != nil {
+            return "New uploads reopen Thursday at 5:00 PM ET."
         }
-        return "The next submission window opens Thursday at 5:00 PM ET. New uploads return during that submission window."
+        return "New uploads reopen Thursday at 5:00 PM ET."
     }
 
     private var primarySellerCTA: String {

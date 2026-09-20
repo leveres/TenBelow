@@ -700,7 +700,7 @@ struct BuyerOrderDetailView: View {
                                 Text("Your order")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text(activeOrder.id)
+                                Text(activeOrder.displayOrderNumber)
                                     .font(.headline)
                                     .fontWeight(.semibold)
                             }
@@ -1214,7 +1214,7 @@ struct SellerOrderDetailView: View {
                                 Text("Order to fulfill")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                Text(order.id)
+                                Text(displayedOrder.displayOrderNumber)
                                     .font(.headline)
                                     .fontWeight(.semibold)
                             }

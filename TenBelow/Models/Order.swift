@@ -24,6 +24,8 @@ enum ShipmentStatus: String, Codable {
 
 struct Order: Identifiable, Codable, Hashable {
     let id: String
+    /// Customer-facing TenBelow order number (e.g. TB-8F42C7). Internal identity remains `id`.
+    var orderNumber: String? = nil
     var createdAt: Date
     var status: OrderStatus
 
@@ -42,6 +44,11 @@ struct Order: Identifiable, Codable, Hashable {
     var exchangeRequestId: String? = nil
     var exchangeCount: Int? = nil
     var deliveredAt: Date? = nil
+
+    var displayOrderNumber: String {
+        let trimmed = (orderNumber ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? id : trimmed
+    }
 
     var totalItemsCount: Int {
         shipments.reduce(0) { $0 + $1.items.reduce(0) { $0 + $1.quantity } }
