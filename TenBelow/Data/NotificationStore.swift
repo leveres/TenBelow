@@ -24,28 +24,37 @@ final class NotificationStore: ObservableObject {
     private let buyerEngagement: BuyerEngagementStore
     private let localProducts: LocalProductStore
     private let orderStore: OrderStore
+    private let bannerCenter: NotificationBannerCenter
     private var processedEventIDs: Set<String>
     private var cancellables: Set<AnyCancellable> = []
+    /// Blocks delivery channels while rows are being *reconciled* rather than *delivered*:
+    /// hydrating persisted state at launch, and the derived "action needed" sweep. Those rows
+    /// still land in the inbox and the badge, they just never pop a banner.
+    private var isDeliverySuppressed = true
 
     init(
         eventStore: CommerceEventStore,
         buyerEngagement: BuyerEngagementStore,
         localProducts: LocalProductStore,
         orderStore: OrderStore,
-        deliveries: [NotificationDelivering]? = nil
+        deliveries: [NotificationDelivering]? = nil,
+        bannerCenter: NotificationBannerCenter? = nil
     ) {
         self.eventStore = eventStore
         self.buyerEngagement = buyerEngagement
         self.localProducts = localProducts
         self.orderStore = orderStore
+        self.bannerCenter = bannerCenter ?? .shared
         self.deliveries = deliveries ?? [PushNotificationDeliveryBridge()]
         notifications = LocalCodableStore.load(key: storageKey, default: [])
         processedEventIDs = LocalCodableStore.load(key: processedEventsKey, default: Set<String>())
         migrateLegacyGuestNotificationsIfNeeded()
+        normalizeLegacyDedupeKeysIfNeeded()
         purgeNoisySellerFavoriteNotifications()
 
         processUnseenEvents(in: eventStore.recentEvents)
         evaluateActionNeededNotifications()
+        isDeliverySuppressed = false
 
         eventStore.$recentEvents
             .sink { [weak self] events in
@@ -55,6 +64,12 @@ final class NotificationStore: ObservableObject {
     }
 
     var currentUserId: String {
+        Self.currentUserIdFromDefaults()
+    }
+
+    /// Identity resolution reads only `UserDefaults`, so callers outside the store (such as the
+    /// APNs delegate) can resolve it without holding a store instance.
+    static func currentUserIdFromDefaults() -> String {
         let userDefaults = UserDefaults.standard
         let userRole = userDefaults.string(forKey: InboxIdentityDefaults.userRole) ?? "buyer"
 
@@ -195,11 +210,11 @@ final class NotificationStore: ObservableObject {
                 AppNotification(
                     userId: userId,
                     type: .priceDrop,
-                    title: "Price Drop 🔥",
+                    title: "Price drop",
                     message: "\(productName) just dropped to \(Money.format(cents: currentPriceCents)). Grab it before it's gone.",
                     relatedProductId: productId,
                     relatedSellerId: sellerId,
-                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "priceDrop.\(userId)")
+                    dedupeKey: Self.inboxDedupeKey("priceDrop.\(userId)")
                 )
             )
         }
@@ -232,7 +247,7 @@ final class NotificationStore: ObservableObject {
                     message: "They just added \(productName). Check it out.",
                     relatedProductId: productId,
                     relatedSellerId: sellerId,
-                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "newProduct.\(userId)")
+                    dedupeKey: Self.inboxDedupeKey("newProduct.\(userId)")
                 )
             )
         }
@@ -292,7 +307,7 @@ final class NotificationStore: ObservableObject {
                     relatedProductId: shipment.items.first?.productId,
                     relatedOrderId: order.id,
                     relatedSellerId: shipment.sellerId,
-                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "orderPlaced.seller.\(shipment.id)")
+                    dedupeKey: Self.inboxDedupeKey("orderPlaced.seller.\(order.id).\(shipment.sellerId)")
                 )
             )
         }
@@ -317,9 +332,9 @@ final class NotificationStore: ObservableObject {
 
             let buyerMessage: String
             if hasMakerVideo {
-                buyerMessage = "Order confirmed — production updates for \(firstName) will appear in Order details when they become available."
+                buyerMessage = "Production updates for \(firstName) will appear in Order details when they become available."
             } else {
-                buyerMessage = "Order confirmed — we’ll keep you updated on \(firstName)."
+                buyerMessage = "We’ll keep you updated on \(firstName)."
             }
 
             appendNotification(
@@ -331,7 +346,7 @@ final class NotificationStore: ObservableObject {
                     relatedProductId: lineItems.first?.productId,
                     relatedOrderId: order.id,
                     relatedSellerId: order.shipments.first?.sellerId,
-                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "orderPlaced.buyer.\(order.id)")
+                    dedupeKey: Self.inboxDedupeKey("orderPlaced.buyer.\(order.id)")
                 )
             )
         }
@@ -356,10 +371,10 @@ final class NotificationStore: ObservableObject {
         switch status {
         case OrderStatus.processing.rawValue:
             content = (
-                "Your order is being made 👀",
+                "Production started",
                 hasProductionPreview
-                    ? "Your \(firstItemName) is now in production. Check Order details for updates."
-                    : "Your \(firstItemName) is now in production."
+                    ? "Your \(firstItemName) is being made. Check Order details for updates."
+                    : "Your \(firstItemName) is being made."
             )
         case OrderStatus.shipped.rawValue, OrderStatus.partiallyShipped.rawValue:
             content = (
@@ -371,10 +386,16 @@ final class NotificationStore: ObservableObject {
                 "Order delivered",
                 "Your \(firstItemName) has been delivered."
             )
-        default:
+        case OrderStatus.cancelled.rawValue:
             content = (
-                "Order Update",
-                "Your order status changed to \(status.capitalized)."
+                "Order cancelled",
+                "Your \(firstItemName) was cancelled."
+            )
+        default:
+            let readableStatus = status.replacingOccurrences(of: "_", with: " ")
+            content = (
+                readableStatus.capitalized,
+                "Your order is now \(readableStatus)."
             )
         }
 
@@ -387,7 +408,7 @@ final class NotificationStore: ObservableObject {
                 relatedProductId: order.shipments.first?.items.first?.productId,
                 relatedOrderId: order.id,
                 relatedSellerId: event.sellerId,
-                dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "buyerOrderStatus.\(orderId).\(status)")
+                dedupeKey: Self.inboxDedupeKey("buyerOrderStatus.\(orderId).\(status)")
             )
         )
     }
@@ -425,9 +446,18 @@ final class NotificationStore: ObservableObject {
         case ShipmentStatus.cancelled.rawValue:
             title = "Shipment cancelled"
             message = "\(itemName) was cancelled for this order."
+        case ShipmentStatus.preparing.rawValue:
+            title = "Being prepared"
+            message = "\(itemName) is now in production."
         default:
-            title = "Production update"
-            message = "\(itemName) is now being prepared."
+            if shipmentStatus.isEmpty || shipmentStatus == "updated" {
+                title = "Being prepared"
+                message = "\(itemName) is now in production."
+            } else {
+                let readableStatus = shipmentStatus.replacingOccurrences(of: "_", with: " ")
+                title = readableStatus.capitalized
+                message = "\(itemName) is now \(readableStatus)."
+            }
         }
 
         let shipmentDisc = event.shipmentId ?? event.metadata["shipmentId"] ?? "na"
@@ -441,8 +471,7 @@ final class NotificationStore: ObservableObject {
                 relatedOrderId: orderId,
                 relatedSellerId: event.sellerId,
                 dedupeKey: Self.inboxDedupeKey(
-                    eventId: event.id,
-                    semantic: "shipmentStatus.\(orderId).\(shipmentDisc).\(shipmentStatus)"
+                    "shipmentStatus.\(orderId).\(shipmentDisc).\(shipmentStatus)"
                 )
             )
         )
@@ -479,7 +508,7 @@ final class NotificationStore: ObservableObject {
                     relatedProductId: productId,
                     relatedOrderId: order.id,
                     relatedSellerId: event.sellerId,
-                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "makerVideoReady.\(order.id)")
+                    dedupeKey: Self.inboxDedupeKey("makerVideoReady.\(order.id)")
                 )
             )
         }
@@ -518,7 +547,7 @@ final class NotificationStore: ObservableObject {
                 message: "A buyer submitted a \(typeLabel.lowercased()) request for \(itemName).",
                 relatedOrderId: orderId,
                 relatedSellerId: sellerId,
-                dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportCreated.seller.\(requestId)")
+                dedupeKey: Self.inboxDedupeKey("supportCreated.seller.\(requestId)")
             )
         )
     }
@@ -555,7 +584,7 @@ final class NotificationStore: ObservableObject {
                     message: message,
                     relatedOrderId: orderId,
                     relatedSellerId: sellerId,
-                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportUpdated.buyer.\(requestId).\(status)")
+                    dedupeKey: Self.inboxDedupeKey("supportUpdated.buyer.\(requestId).\(status)")
                 )
             )
         } else if status == "withdrawn" {
@@ -567,7 +596,7 @@ final class NotificationStore: ObservableObject {
                     message: "The buyer withdrew their \(requestType) request for order \(orderId).",
                     relatedOrderId: orderId,
                     relatedSellerId: sellerId,
-                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportWithdrawn.seller.\(requestId)")
+                    dedupeKey: Self.inboxDedupeKey("supportWithdrawn.seller.\(requestId)")
                 )
             )
         }
@@ -594,7 +623,7 @@ final class NotificationStore: ObservableObject {
                     message: body,
                     relatedOrderId: orderId,
                     relatedSellerId: sellerId,
-                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportMessage.seller.\(messageId)")
+                    dedupeKey: Self.inboxDedupeKey("supportMessage.seller.\(messageId)")
                 )
             )
         } else if let buyerIdentity = event.buyerIdentity {
@@ -606,7 +635,7 @@ final class NotificationStore: ObservableObject {
                     message: body,
                     relatedOrderId: orderId,
                     relatedSellerId: sellerId,
-                    dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "supportMessage.buyer.\(messageId)")
+                    dedupeKey: Self.inboxDedupeKey("supportMessage.buyer.\(messageId)")
                 )
             )
         }
@@ -616,7 +645,6 @@ final class NotificationStore: ObservableObject {
         guard let buyerIdentity = event.buyerIdentity,
               let exchangeRequestId = event.metadata["exchangeRequestId"] else { return }
 
-        let status = event.metadata["status"] ?? ExchangeRequestStatus.submitted.rawValue
         let reason = event.metadata["reasonCode"] ?? ""
         let readableReason = ExchangeReasonCode.allCases.first(where: { $0.rawValue == reason })?.title ?? "issue"
 
@@ -624,13 +652,13 @@ final class NotificationStore: ObservableObject {
             AppNotification(
                 userId: buyerIdentity,
                 type: .exchangeUpdate,
-                title: "Exchange Submitted",
-                message: "Your exchange request for \(readableReason.lowercased()) is now \(status.replacingOccurrences(of: "_", with: " ")).",
+                title: "Exchange submitted",
+                message: "Your request for \(readableReason.lowercased()) was submitted.",
                 relatedProductId: event.productId,
                 relatedOrderId: event.orderId,
                 relatedSellerId: event.sellerId,
                 relatedExchangeRequestId: exchangeRequestId,
-                dedupeKey: Self.inboxDedupeKey(eventId: event.id, semantic: "exchangeSubmitted.\(exchangeRequestId)")
+                dedupeKey: Self.inboxDedupeKey("exchangeSubmitted.\(exchangeRequestId)")
             )
         )
     }
@@ -645,29 +673,35 @@ final class NotificationStore: ObservableObject {
 
         switch status {
         case ExchangeRequestStatus.awaitingBuyerProof.rawValue:
-            title = "More Info Needed"
+            title = "More info needed"
             message = "Add more proof to keep your exchange request moving."
         case ExchangeRequestStatus.approved.rawValue:
-            title = "Exchange Approved"
+            title = "Exchange approved"
             message = "Your replacement request was approved."
         case ExchangeRequestStatus.denied.rawValue:
-            title = "Exchange Update"
-            message = "Your exchange request was denied."
+            title = "Exchange declined"
+            message = "Your exchange request wasn't approved."
         case ExchangeRequestStatus.replacementPreparing.rawValue:
-            title = "Replacement Preparing"
-            message = "Your replacement item is being prepared."
+            title = "Replacement preparing"
+            message = "Your replacement is being prepared."
         case ExchangeRequestStatus.replacementShipped.rawValue:
-            title = "Replacement Shipped"
-            message = "Your replacement item is on the way."
+            title = "Replacement shipped"
+            message = "Your replacement is on the way."
         case ExchangeRequestStatus.replacementDelivered.rawValue:
-            title = "Replacement Delivered"
-            message = "Your replacement item was delivered."
+            title = "Replacement delivered"
+            message = "Your replacement was delivered."
         case ExchangeRequestStatus.cancelled.rawValue:
-            title = "Exchange Cancelled"
+            title = "Exchange cancelled"
             message = "Your exchange request was cancelled."
         default:
-            title = "Exchange Update"
-            message = "Your exchange request status changed."
+            let readableStatus = status.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            if readableStatus.isEmpty {
+                title = "Exchange update"
+                message = "Your exchange request status changed."
+            } else {
+                title = readableStatus.capitalized
+                message = "Your exchange request is now \(readableStatus)."
+            }
         }
 
         appendNotification(
@@ -681,14 +715,20 @@ final class NotificationStore: ObservableObject {
                 relatedSellerId: event.sellerId,
                 relatedExchangeRequestId: exchangeRequestId,
                 dedupeKey: Self.inboxDedupeKey(
-                    eventId: event.id,
-                    semantic: "exchangeStatus.\(exchangeRequestId).\(status)"
+                    "exchangeStatus.\(exchangeRequestId).\(status)"
                 )
             )
         )
     }
 
+    /// Derived from order age rather than from a discrete event, so it is reconciled into the
+    /// inbox without a banner. Otherwise the first orders refresh after launch would pop a
+    /// banner for a nudge the seller may have already seen days ago.
     private func evaluateActionNeededNotifications() {
+        let wasSuppressed = isDeliverySuppressed
+        isDeliverySuppressed = true
+        defer { isDeliverySuppressed = wasSuppressed }
+
         let threshold: TimeInterval = 60 * 60 * 24
         let now = Date.now
 
@@ -703,7 +743,7 @@ final class NotificationStore: ObservableObject {
                     AppNotification(
                         userId: sellerUserId,
                         type: .system,
-                        title: "Action Needed",
+                        title: "Action needed",
                         message: "Update your order status to keep buyers informed.",
                         relatedProductId: shipment.items.first?.productId,
                         relatedOrderId: order.id,
@@ -742,9 +782,31 @@ final class NotificationStore: ObservableObject {
 
         notifications.insert(notification, at: 0)
         persistNotifications()
+
+        // Reaching here means the row did not exist, so this is the first time TenBelow has
+        // seen the event. Reconciliation passes replay known state and are not deliveries.
+        guard !isDeliverySuppressed else { return }
+
         let deliveryChannelCount = deliveries.count
         inboxNotificationLogger.debug("appended \(notification.type.rawValue, privacy: .public) deliveries=\(deliveryChannelCount, privacy: .public)")
         deliveries.forEach { $0.deliver(notification) }
+
+        guard notification.userId == currentUserId else { return }
+        bannerCenter.deliver(
+            notification,
+            presentationKey: Self.bannerPresentationKey(for: notification),
+            source: .localEvent
+        )
+    }
+
+    /// Banner delivery identity. Prefers the stable domain dedupe key; the row id is only a
+    /// last resort for legacy rows that predate dedupe keys.
+    private static func bannerPresentationKey(for notification: AppNotification) -> String {
+        if let dedupeKey = notification.dedupeKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !dedupeKey.isEmpty {
+            return "inbox:\(dedupeKey)"
+        }
+        return "row:\(notification.id)"
     }
 
     private func persistNotifications() {
@@ -777,6 +839,59 @@ final class NotificationStore: ObservableObject {
         LocalCodableStore.save(notifications, key: storageKey)
     }
 
+    /// Rewrites `"<eventUUID>|<semantic>"` dedupe keys written by earlier builds down to the
+    /// stable `"<semantic>"` form, then collapses the duplicate rows those unstable keys let
+    /// through. Read state is preserved: if any copy was read, the survivor stays read.
+    private func normalizeLegacyDedupeKeysIfNeeded() {
+        guard notifications.contains(where: { ($0.dedupeKey ?? "").contains("|") }) else { return }
+
+        let normalized = notifications.map { note -> AppNotification in
+            guard let dedupeKey = note.dedupeKey,
+                  let separatorIndex = dedupeKey.firstIndex(of: "|")
+            else { return note }
+
+            let semantic = String(dedupeKey[dedupeKey.index(after: separatorIndex)...])
+            guard !semantic.isEmpty else { return note }
+
+            return AppNotification(
+                id: note.id,
+                userId: note.userId,
+                type: note.type,
+                title: note.title,
+                message: note.message,
+                relatedProductId: note.relatedProductId,
+                relatedOrderId: note.relatedOrderId,
+                relatedSellerId: note.relatedSellerId,
+                relatedExchangeRequestId: note.relatedExchangeRequestId,
+                dedupeKey: semantic,
+                isRead: note.isRead,
+                createdAt: note.createdAt
+            )
+        }
+
+        var survivorIndexByKey: [String: Int] = [:]
+        var collapsed: [AppNotification] = []
+        for note in normalized.sorted(by: { $0.createdAt > $1.createdAt }) {
+            guard let dedupeKey = note.dedupeKey else {
+                collapsed.append(note)
+                continue
+            }
+            if let existingIndex = survivorIndexByKey[dedupeKey] {
+                if note.isRead {
+                    collapsed[existingIndex].isRead = true
+                }
+                continue
+            }
+            survivorIndexByKey[dedupeKey] = collapsed.count
+            collapsed.append(note)
+        }
+
+        let removedCount = notifications.count - collapsed.count
+        notifications = collapsed
+        persistNotifications()
+        inboxNotificationLogger.debug("normalized legacy dedupe keys, collapsed \(removedCount, privacy: .public) rows")
+    }
+
     private func persistProcessedEventIDs() {
         LocalCodableStore.save(processedEventIDs, key: processedEventsKey)
     }
@@ -791,7 +906,14 @@ final class NotificationStore: ObservableObject {
 
     static var guestUserId: String { GuestInstallIdentity.userKey }
 
-    private static func inboxDedupeKey(eventId: String, semantic: String) -> String {
-        "\(eventId)|\(semantic)"
+    /// Identity for an inbox row **and** for banner delivery.
+    ///
+    /// This must stay derived purely from the domain (order / shipment / message /
+    /// request / exchange ids plus status) and must never include `CommerceEvent.id`,
+    /// which is a fresh UUID each time an event is recorded. Mixing the event UUID in
+    /// made every re-emitted event look brand new, which duplicated inbox rows and
+    /// replayed banners.
+    private static func inboxDedupeKey(_ semantic: String) -> String {
+        semantic
     }
 }

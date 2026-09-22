@@ -39,9 +39,13 @@ function apnsBearerToken() {
 
 /**
  * @param {string} deviceTokenHex
- * @param {{ title: string; body: string; sound?: string }} alert
+ * @param {{ title: string; body: string; sound?: string; eventId?: string }} alert
+ *
+ * `eventId` is an additive custom key (`tb.eventId`) that mirrors the in-app
+ * notification dedupe/presentation identity. Clients use it to show a push and its
+ * local twin exactly once. Omitting it preserves legacy payload behavior.
  */
-export function sendApnsAlert(deviceTokenHex, { title, body, sound = "default" }) {
+export function sendApnsAlert(deviceTokenHex, { title, body, sound = "default", eventId } = {}) {
   return new Promise((resolve, reject) => {
     if (!isApnsConfigured()) {
       resolve({ skipped: true });
@@ -62,12 +66,18 @@ export function sendApnsAlert(deviceTokenHex, { title, body, sound = "default" }
     });
 
     const path = `/3/device/${tokenHex}`;
-    const payload = JSON.stringify({
+    /** @type {Record<string, unknown>} */
+    const payloadObject = {
       aps: {
         alert: { title, body },
         sound,
       },
-    });
+    };
+    const trimmedEventId = String(eventId || "").trim();
+    if (trimmedEventId) {
+      payloadObject["tb.eventId"] = trimmedEventId;
+    }
+    const payload = JSON.stringify(payloadObject);
 
     const req = client.request({
       ":method": "POST",

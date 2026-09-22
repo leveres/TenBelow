@@ -231,7 +231,8 @@ struct ProductColorSwatch: View {
         Circle()
             .fill(Color(productHex: hex))
             .frame(width: size, height: size)
-            .overlay(Circle().strokeBorder(.primary.opacity(0.16), lineWidth: 1))
+            .overlay(Circle().strokeBorder(.primary.opacity(0.28), lineWidth: 1))
+            .overlay(Circle().strokeBorder(.white.opacity(0.55), lineWidth: 0.8).padding(0.5))
             .accessibilityHidden(true)
     }
 }

@@ -1772,8 +1772,6 @@ private struct SellerAgreementAcceptanceView: View {
 
     @State private var hasReachedAgreementEnd = false
     @State private var hasAcceptedAgreement = false
-    @State private var agreementViewportHeight: CGFloat = 0
-    @State private var agreementEndMinY: CGFloat = .infinity
 
     private var isTransitioning: Bool {
         isCreatingAccount || accountCreationSucceeded
@@ -1980,46 +1978,30 @@ private struct SellerAgreementAcceptanceView: View {
                         .foregroundStyle(TBTheme.deepSky)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 8)
-                        // Visible end marker is enough — unlock even if geometry prefs race.
-                        .onAppear {
-                            markAgreementEndReached()
-                        }
-
-                    Color.clear
-                        .frame(height: 1)
-                        .background(
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: SellerAgreementEndPositionKey.self,
-                                    value: proxy.frame(in: .named("sellerAgreementScroll")).minY
-                                )
-                            }
-                        )
+                        .id("sellerAgreementEnd")
                 }
-                .padding(.bottom, 4)
+                .padding(.bottom, 28)
             }
-            .coordinateSpace(name: "sellerAgreementScroll")
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                GeometryReader { proxy in
-                    // Measure the scroll viewport itself (before outer padding).
-                    Color.clear.preference(key: SellerAgreementViewportHeightKey.self, value: proxy.size.height)
+            .scrollBounceBehavior(.basedOnSize)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height
+                let contentBottom = geometry.contentSize.height - geometry.contentInsets.bottom
+                // Unlock only once the user has scrolled to (or past) the true bottom.
+                return contentBottom > 0
+                    && geometry.containerSize.height > 0
+                    && visibleBottom >= contentBottom - 12
+            } action: { _, reachedEnd in
+                if reachedEnd {
+                    markAgreementEndReached()
                 }
-            )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(12)
             .background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
             )
-            .onPreferenceChange(SellerAgreementViewportHeightKey.self) { newHeight in
-                agreementViewportHeight = newHeight
-                evaluateAgreementEndReached()
-            }
-            .onPreferenceChange(SellerAgreementEndPositionKey.self) { endMinY in
-                agreementEndMinY = endMinY
-                evaluateAgreementEndReached()
-            }
 
             agreementAcceptanceToggle
         }
@@ -2088,36 +2070,11 @@ private struct SellerAgreementAcceptanceView: View {
         return "Tap agree to create your seller account."
     }
 
-    private func evaluateAgreementEndReached() {
-        guard !hasReachedAgreementEnd else { return }
-        guard agreementViewportHeight > 0, agreementEndMinY.isFinite else { return }
-        // Unlock once the end marker enters (or nearly enters) the visible scroll viewport.
-        if agreementEndMinY <= agreementViewportHeight + 24 {
-            markAgreementEndReached()
-        }
-    }
-
     private func markAgreementEndReached() {
         guard !hasReachedAgreementEnd else { return }
         withAnimation(.spring(response: 0.34, dampingFraction: 0.76)) {
             hasReachedAgreementEnd = true
         }
-    }
-}
-
-private struct SellerAgreementViewportHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct SellerAgreementEndPositionKey: PreferenceKey {
-    static var defaultValue: CGFloat = .infinity
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = min(value, nextValue())
     }
 }
 

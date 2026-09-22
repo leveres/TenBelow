@@ -98,6 +98,7 @@ struct TenBelowApp: App {
                 .environmentObject(orderStore)
                 .environmentObject(exchangeStore)
                 .environmentObject(notifications)
+                .environmentObject(NotificationBannerCenter.shared)
                 .environmentObject(sellerSubscription)
                 .environmentObject(sellerInquiries)
                 .accentColor(TBTheme.icyBlue)

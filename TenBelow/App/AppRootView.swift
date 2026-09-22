@@ -40,6 +40,10 @@ struct AppRootView: View {
                 .opacity(splashOpacity)
                 .zIndex(1)
             }
+
+            // Single app-level banner host: one instance for every tab and every screen.
+            NotificationBannerHost(isEligible: !showSplash && !userRole.isEmpty && hasSeenOnboarding)
+                .zIndex(2)
         }
         .task(id: cartSyncTaskKey) {
             guard !showSplash else { return }

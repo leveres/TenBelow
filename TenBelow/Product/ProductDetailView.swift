@@ -1015,11 +1015,9 @@ private struct ProductColorSelectionSection: View {
                     .foregroundStyle(selection == nil ? .orange : TBTheme.accent)
             }
 
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 104), spacing: 10)],
-                alignment: .leading,
-                spacing: 10
-            ) {
+            // Chips size to the color name instead of a narrow adaptive grid column
+            // that was truncating labels like "Red" → "R..." and "White" → "...".
+            WrappingChipLayout(spacing: 10) {
                 ForEach(colors) { color in
                     Button {
                         selection = color
@@ -1029,7 +1027,7 @@ private struct ProductColorSelectionSection: View {
                             Text(color.name)
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(1)
-                            Spacer(minLength: 0)
+                                .fixedSize(horizontal: true, vertical: false)
                             if selection?.id == color.id {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(TBTheme.accent)
@@ -1071,6 +1069,51 @@ private struct ProductColorSelectionSection: View {
             RoundedRectangle(cornerRadius: 22)
                 .strokeBorder(TBTheme.skyBlue.opacity(0.12), lineWidth: 1)
         )
+    }
+}
+
+/// Left-aligned wrapping row for color chips that hug their label width.
+private struct WrappingChipLayout: Layout {
+    var spacing: CGFloat = 10
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(proposal: proposal, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrange(proposal: proposal, subviews: subviews)
+        for index in subviews.indices {
+            let point = result.positions[index]
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y),
+                proposal: .unspecified
+            )
+        }
+    }
+
+    private func arrange(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, positions: [CGPoint]) {
+        let maxWidth = proposal.width ?? .infinity
+        var positions: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var usedWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            positions.append(CGPoint(x: x, y: y))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+            usedWidth = max(usedWidth, x - spacing)
+        }
+
+        let width = maxWidth.isFinite ? maxWidth : usedWidth
+        return (CGSize(width: width, height: y + rowHeight), positions)
     }
 }
 
@@ -1437,25 +1480,42 @@ private struct CareWarningRow: View {
 }
 
 private struct AddedToCartToast: View {
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let productName: String
     let onViewCart: () -> Void
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                toastMessage
-                Spacer(minLength: 8)
-                viewCartButton
-            }
+        // Always one slim row on buyer and seller — never stack View Cart under the title.
+        HStack(spacing: 10) {
+            Image(systemName: "cart.badge.plus")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 10) {
-                toastMessage
-                viewCartButton
+            Text("\(productName) added to cart")
+                .font(.tbBodyStrong)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onViewCart) {
+                HStack(spacing: 4) {
+                    Text("View Cart")
+                    Image(systemName: "arrow.right")
+                }
+                .font(.caption.weight(.bold))
+                .foregroundStyle(TBTheme.deepSky)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(.white.opacity(0.92), in: Capsule())
             }
+            .buttonStyle(.plain)
+            .layoutPriority(1)
+            .accessibilityLabel("View cart")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
         .background(
             Capsule()
                 .fill(
@@ -1469,38 +1529,7 @@ private struct AddedToCartToast: View {
         )
         .clipShape(Capsule())
         .padding(.horizontal, 16)
-    }
-
-    private var toastMessage: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "cart.badge.plus")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.white)
-
-            Text("\(productName) added to cart")
-                .font(.tbBodyStrong)
-                .foregroundStyle(.white)
-                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-        }
-    }
-
-    private var viewCartButton: some View {
-        Button(action: onViewCart) {
-            HStack(spacing: 4) {
-                Text("View Cart")
-                Image(systemName: "arrow.right")
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(TBTheme.deepSky)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(.white.opacity(0.55), lineWidth: 0.8)
-            )
-        }
-        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
     }
 }
 

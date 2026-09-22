@@ -221,6 +221,9 @@ final class TenBelowUITests: XCTestCase {
             colorByLabel.firstMatch.tap()
         }
     }
+
+    @MainActor
+    private func completeBuyerGuestEntryIfNeeded() {
         tapControlIfPresent("I'm Shopping", timeout: 10)
         tapControlIfPresent("Continue as Guest", timeout: 10)
         tapControlIfPresent("Skip", timeout: 10)

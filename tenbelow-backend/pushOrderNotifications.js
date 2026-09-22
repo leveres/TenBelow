@@ -10,6 +10,7 @@ export async function notifyPaymentSucceeded({ orderId, buyerEmail, sellerTotals
   }
 
   const map = loadPushDevices();
+  const trimmedOrderId = String(orderId || "").trim();
 
   /** @type {Promise<{ status: number } | { skipped: boolean }>[]} */
   const jobs = [];
@@ -28,6 +29,8 @@ export async function notifyPaymentSucceeded({ orderId, buyerEmail, sellerTotals
         sendApnsAlert(t, {
           title: "Order confirmed",
           body: buyerBody,
+          // Matches NotificationStore orderPlaced.buyer.<orderId>
+          eventId: trimmedOrderId ? `orderPlaced.buyer.${trimmedOrderId}` : undefined,
         })
       );
     }
@@ -36,11 +39,17 @@ export async function notifyPaymentSucceeded({ orderId, buyerEmail, sellerTotals
   for (const sellerId of Object.keys(sellerTotals || {})) {
     const key = `seller:${sellerId}`;
     const tokens = map[key] || [];
+    const trimmedSellerId = String(sellerId || "").trim();
     for (const t of tokens) {
       jobs.push(
         sendApnsAlert(t, {
           title: "New order received",
           body: `You have a new order (${orderId}) ready to fulfill.`,
+          // Matches NotificationStore orderPlaced.seller.<orderId>.<sellerId>
+          eventId:
+            trimmedOrderId && trimmedSellerId
+              ? `orderPlaced.seller.${trimmedOrderId}.${trimmedSellerId}`
+              : undefined,
         })
       );
     }
@@ -56,9 +65,10 @@ export async function notifyPaymentSucceeded({ orderId, buyerEmail, sellerTotals
  *   sellerId?: string;
  *   title: string;
  *   body: string;
+ *   eventId?: string;
  * }} params
  */
-export async function notifyOrderStatusChanged({ buyerEmail, sellerId, title, body }) {
+export async function notifyOrderStatusChanged({ buyerEmail, sellerId, title, body, eventId }) {
   if (!isApnsConfigured()) {
     return { skipped: true };
   }
@@ -66,12 +76,13 @@ export async function notifyOrderStatusChanged({ buyerEmail, sellerId, title, bo
   const map = loadPushDevices();
   /** @type {Promise<{ status: number } | { skipped: boolean }>[]} */
   const jobs = [];
+  const trimmedEventId = String(eventId || "").trim() || undefined;
 
   if (buyerEmail) {
     const key = `buyer:${String(buyerEmail).toLowerCase().trim()}`;
     const tokens = map[key] || [];
     for (const t of tokens) {
-      jobs.push(sendApnsAlert(t, { title, body }));
+      jobs.push(sendApnsAlert(t, { title, body, eventId: trimmedEventId }));
     }
   }
 
@@ -79,7 +90,7 @@ export async function notifyOrderStatusChanged({ buyerEmail, sellerId, title, bo
     const key = `seller:${String(sellerId).trim()}`;
     const tokens = map[key] || [];
     for (const t of tokens) {
-      jobs.push(sendApnsAlert(t, { title, body }));
+      jobs.push(sendApnsAlert(t, { title, body, eventId: trimmedEventId }));
     }
   }
 
@@ -89,38 +100,72 @@ export async function notifyOrderStatusChanged({ buyerEmail, sellerId, title, bo
 
 /**
  * Buyer alerts for shipment lifecycle (shipped / delivered / production).
+ *
+ * @param {{
+ *   buyerEmail?: string;
+ *   orderId?: string;
+ *   shipmentId?: string;
+ *   action: string;
+ *   itemName?: string;
+ *   carrier?: string;
+ *   trackingNumber?: string;
+ * }} params
  */
 export async function notifyShipmentStatusToBuyer({
   buyerEmail,
+  orderId = "",
+  shipmentId = "",
   action,
   itemName = "your item",
   carrier = "",
   trackingNumber = "",
 }) {
   const trimmedAction = String(action || "").trim();
+  const trimmedOrderId = String(orderId || "").trim();
+  const trimmedShipmentId = String(shipmentId || "").trim() || "na";
   let title = "";
   let body = "";
+  /** @type {string | undefined} */
+  let eventId;
 
   if (trimmedAction === "markShipped") {
     title = "Order shipped";
     const trackingBits = [String(carrier || "").trim(), String(trackingNumber || "").trim()].filter(Boolean);
     const trackingSuffix = trackingBits.length ? ` Tracking: ${trackingBits.join(" ")}.` : "";
     body = `${itemName} is on the way.${trackingSuffix}`;
+    eventId = trimmedOrderId
+      ? `shipmentStatus.${trimmedOrderId}.${trimmedShipmentId}.shipped`
+      : undefined;
   } else if (trimmedAction === "markDelivered") {
     title = "Order delivered";
     body = `${itemName} has been delivered.`;
+    eventId = trimmedOrderId
+      ? `shipmentStatus.${trimmedOrderId}.${trimmedShipmentId}.delivered`
+      : undefined;
   } else if (trimmedAction === "startProcessing") {
     title = "Order in production";
     body = `${itemName} is being prepared by the seller.`;
+    // startProcessing updates order status to processing without mutating shipment status.
+    eventId = trimmedOrderId ? `buyerOrderStatus.${trimmedOrderId}.processing` : undefined;
   } else {
     return { skipped: true };
   }
 
-  return notifyOrderStatusChanged({ buyerEmail, title, body });
+  return notifyOrderStatusChanged({ buyerEmail, title, body, eventId });
 }
 
 /**
  * Order support: cancel/refund requests, resolutions, and thread messages.
+ *
+ * @param {{
+ *   buyerEmail?: string;
+ *   sellerId?: string;
+ *   notifyBuyer?: boolean;
+ *   notifySeller?: boolean;
+ *   title: string;
+ *   body: string;
+ *   eventId?: string;
+ * }} params
  */
 export async function notifyOrderSupportEvent({
   buyerEmail,
@@ -129,12 +174,14 @@ export async function notifyOrderSupportEvent({
   notifySeller = false,
   title,
   body,
+  eventId,
 }) {
   return notifyOrderStatusChanged({
     buyerEmail: notifyBuyer ? buyerEmail : undefined,
     sellerId: notifySeller ? sellerId : undefined,
     title,
     body,
+    eventId,
   });
 }
 
@@ -160,11 +207,20 @@ export async function notifyAccountModeration({
     ? `${reasonSnippet} Open TenBelow Settings for details.`
     : "Open TenBelow Settings for details about this account action.";
 
+  const identity =
+    accountKind === "buyer"
+      ? String(buyerEmail || accountId || "")
+          .toLowerCase()
+          .trim()
+      : String(accountId || "").trim();
+  const eventId = identity ? `accountModeration.${accountKind}.${identity}.${normalizedAction}` : undefined;
+
   if (accountKind === "buyer") {
     return notifyOrderStatusChanged({
       buyerEmail: buyerEmail || accountId,
       title,
       body,
+      eventId,
     });
   }
 
@@ -172,5 +228,6 @@ export async function notifyAccountModeration({
     sellerId: String(accountId || "").trim(),
     title,
     body,
+    eventId,
   });
 }

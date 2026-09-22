@@ -73,6 +73,20 @@ struct DeveloperSettingsView: View {
             }
 
             Section {
+                NavigationLink {
+                    NotificationBannerPreviewView()
+                } label: {
+                    Text("Preview notification banners")
+                }
+                Text("Scroll through buyer and seller in-app banners using the live component. Samples stay off your inbox.")
+                    .font(.tbCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Notifications")
+            }
+
+            Section {
                 Text("Seller signup: Settings → Become a seller (RolePicker). Seed backend orders with `npm run seed:seller-test-orders` (CONFIRM_SEED=1 SELLER_ID=…). See docs/seller-testing.md.")
                     .font(.tbCaption)
                     .foregroundStyle(.secondary)

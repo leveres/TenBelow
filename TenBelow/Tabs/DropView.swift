@@ -740,20 +740,25 @@ struct DropView: View {
 
     private var sellerFixedHeroContent: some View {
         VStack(alignment: .leading, spacing: DropLayoutMetrics.sellerHeaderSpacing) {
-            SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 4, flakeCount: 82) {
-                Image("WeeklyDropTitle")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: DropLayoutMetrics.sellerTitleHeight)
-                    .padding(.top, DropLayoutMetrics.sellerTitleTopTuck)
-                    .padding(.bottom, DropLayoutMetrics.sellerTitleBottomTuck)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, DropLayoutMetrics.sellerTitleCardOverlap)
+            VStack(alignment: .leading, spacing: DropLayoutMetrics.sellerHeaderSpacing) {
+                SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 4, flakeCount: 82) {
+                    Image("WeeklyDropTitle")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: DropLayoutMetrics.sellerTitleHeight)
+                        .padding(.top, DropLayoutMetrics.sellerTitleTopTuck)
+                        .padding(.bottom, DropLayoutMetrics.sellerTitleBottomTuck)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, DropLayoutMetrics.sellerTitleCardOverlap)
 
-            if isUsingWeeklyDropPreview {
-                weeklyDropPreviewBadge
+                if isUsingWeeklyDropPreview {
+                    weeklyDropPreviewBadge
+                }
             }
+            .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
+
+            // Full-bleed blue status hero — edge to edge under the title.
             sellerHeroCard
 
             if let errorMessage {
@@ -775,9 +780,9 @@ struct DropView: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 0.8)
                 )
+                .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
             }
         }
-        .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
         .padding(.top, DropLayoutMetrics.sellerContentTopInset)
         .padding(.bottom, 0)
         .clipped()
@@ -1017,25 +1022,37 @@ struct DropView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(TBTheme.dropBannerGradient)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(sellerHeroShape)
         .overlay(
             LinearGradient(
                 colors: [.white.opacity(0.22), .clear],
                 startPoint: .top,
                 endPoint: .center
             )
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .clipShape(sellerHeroShape)
             .allowsHitTesting(false)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            sellerHeroShape
                 .strokeBorder(.white.opacity(0.16), lineWidth: 1)
                 .allowsHitTesting(false)
         )
-        .shadow(color: TBTheme.deepSky.opacity(0.22), radius: 16, y: 8)
+        .shadow(color: TBTheme.deepSky.opacity(0.18), radius: 12, y: 6)
+    }
+
+    /// Straight left/right edges so the banner reads full-bleed; soft bottom corners only.
+    private var sellerHeroShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 0,
+            bottomLeadingRadius: 22,
+            bottomTrailingRadius: 22,
+            topTrailingRadius: 0,
+            style: .continuous
+        )
     }
 
     private var sellerSubmissionHeader: some View {

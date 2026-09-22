@@ -19,6 +19,7 @@ struct OrdersStatusBar: View {
     let orders: [Order]
     var mode: OrdersMode = .buyer
     var sellerId: String? = nil
+    var compactLayout: Bool = false
     @Binding var selectedFilter: OrderListFilter
 
 #if os(iOS)
@@ -105,12 +106,12 @@ struct OrdersStatusBar: View {
                         .frame(minWidth: proxy.size.width, alignment: .center)
                     }
                 }
-                .frame(height: 44)
+                .frame(height: compactLayout ? 38 : 44)
             }
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.horizontal, 4)
-        .padding(.vertical, 4)
+        .padding(.vertical, compactLayout ? 2 : 4)
         .animation(nil, value: selectedFilter)
     }
 

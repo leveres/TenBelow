@@ -15,6 +15,16 @@ private struct OrderNavigationTarget: Identifiable, Hashable {
     let id: String
 }
 
+private struct OrderHistoryMonthGroup: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let orders: [Order]
+}
+
+private enum BuyerOrderHistoryMetrics {
+    static let initialPreviewCount = 4
+}
+
 private enum OrderDateFilter: String, CaseIterable, Identifiable {
     case allTime
     case last30Days
@@ -97,6 +107,12 @@ struct OrdersView: View {
         static let dateFilterChipWidth: CGFloat = 132
         static let dateFilterChipHeight: CGFloat = 44
         static let dateFilterClearButtonWidth: CGFloat = 44
+
+        static let buyerContentPadding: CGFloat = 6
+        static let buyerSectionSpacing: CGFloat = 2
+        static let buyerSnowfallVerticalPadding: CGFloat = 0
+        static let buyerEffectVerticalInset: CGFloat = 4
+        static let buyerDateFilterChipHeight: CGFloat = 38
     }
 
     @EnvironmentObject private var orderStore: OrderStore
@@ -109,6 +125,8 @@ struct OrdersView: View {
     @State private var lastOrdersRefresh = Date.distantPast
     @State private var autoPresentedOrder: OrderNavigationTarget?
     @AppStorage(OrderNavigationBridge.pendingOrderIdKey) private var pendingOrderNavigationId = ""
+    @State private var expandedHistoryMonthKeys: Set<String> = []
+    @State private var expandedRecentMonthPreviewKeys: Set<String> = []
 
 #if os(iOS)
     private enum Haptics {
@@ -249,24 +267,8 @@ struct OrdersView: View {
             ordersHeaderBlock(statusBarOrders: statusBarOrders)
 
             ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(visibleOrders) { order in
-                        NavigationLink {
-                            OrderDetailView(
-                                orderId: order.id,
-                                mode: mode,
-                                currentSellerId: effectiveSellerId
-                            )
-                        } label: {
-                            OrderRowCard(
-                                order: order,
-                                productsById: productsById,
-                                hasPendingCancellation: hasPendingCancellation(order)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("orders.row.\(order.id)")
-                    }
+                LazyVStack(spacing: 12) {
+                    ordersListContent(orders: visibleOrders)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 2)
@@ -287,16 +289,16 @@ struct OrdersView: View {
     }
 
     private func ordersHeaderBlock(statusBarOrders: [Order]) -> some View {
-        GlassCard(cornerRadius: 16, contentPadding: 9) {
-            VStack(alignment: .center, spacing: HeroMetrics.sectionSpacing) {
+        GlassCard(cornerRadius: 16, contentPadding: HeroMetrics.buyerContentPadding) {
+            VStack(alignment: .center, spacing: HeroMetrics.buyerSectionSpacing) {
                 VStack(alignment: .center, spacing: HeroMetrics.headerSpacing) {
                     SnowfallTitleContainer(
                         cornerRadius: HeroMetrics.snowfallCornerRadius,
                         horizontalPadding: HeroMetrics.snowfallHorizontalPadding,
-                        verticalPadding: HeroMetrics.snowfallVerticalPadding,
+                        verticalPadding: HeroMetrics.buyerSnowfallVerticalPadding,
                         flakeCount: HeroMetrics.snowfallFlakeCount,
                         effectHorizontalInset: 10,
-                        effectVerticalInset: 8
+                        effectVerticalInset: HeroMetrics.buyerEffectVerticalInset
                     ) {
                         Image("OrdersTitle")
                             .resizable()
@@ -323,6 +325,7 @@ struct OrdersView: View {
                     orders: statusBarOrders,
                     mode: mode,
                     sellerId: effectiveSellerId,
+                    compactLayout: true,
                     selectedFilter: $selectedFilter
                 )
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -336,8 +339,8 @@ struct OrdersView: View {
             .animation(nil, value: selectedDateFilter)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 4)
-        .padding(.bottom, 6)
+        .padding(.top, 2)
+        .padding(.bottom, 3)
     }
 
     private var isDateFilterApplied: Bool {
@@ -394,9 +397,13 @@ struct OrdersView: View {
                 height: HeroMetrics.dateFilterClearButtonWidth
             )
         }
-        .frame(height: HeroMetrics.dateFilterChipHeight, alignment: .center)
+        .frame(height: dateFilterControlHeight, alignment: .center)
         .transaction { $0.disablesAnimations = true }
         .animation(nil, value: selectedDateFilter)
+    }
+
+    private var dateFilterControlHeight: CGFloat {
+        HeroMetrics.buyerDateFilterChipHeight
     }
 
     private var dateFilterPill: some View {
@@ -409,7 +416,7 @@ struct OrdersView: View {
                 .minimumScaleFactor(0.9)
         }
         .foregroundStyle(isDateFilterApplied ? TBTheme.deepSky : Color.primary.opacity(0.64))
-        .frame(width: HeroMetrics.dateFilterChipWidth, height: HeroMetrics.dateFilterChipHeight)
+        .frame(width: HeroMetrics.dateFilterChipWidth, height: dateFilterControlHeight)
         .background(
             isDateFilterApplied
                 ? TBTheme.skyBlue.opacity(0.10)
@@ -595,6 +602,206 @@ struct OrdersView: View {
                 ?? myShipments.compactMap(\.shippedAt).max()
                 ?? order.createdAt
         }
+    }
+
+    // MARK: - Shared list organization (active vs history)
+
+    /// Presentation-only split. Keeps in-progress work (including shipped) separate from delivered/cancelled history.
+    private func isHistoryOrder(_ order: Order) -> Bool {
+        switch mode {
+        case .buyer:
+            return order.status == .delivered || order.status == .cancelled
+        case .seller:
+            guard let effectiveSellerId else { return false }
+            let myShipments = order.shipments.filter { $0.sellerId == effectiveSellerId }
+            guard !myShipments.isEmpty else { return false }
+            return myShipments.allSatisfy { $0.status == .delivered || $0.status == .cancelled }
+        }
+    }
+
+    @ViewBuilder
+    private func ordersListContent(orders: [Order]) -> some View {
+        let showActiveSection = selectedFilter == .all || selectedFilter == .active
+        let showHistorySection = selectedFilter == .all || selectedFilter == .completed
+
+        if showActiveSection {
+            let activeOrders = selectedFilter == .active
+                ? orders
+                : orders.filter { !isHistoryOrder($0) }
+            if !activeOrders.isEmpty {
+                ordersSectionHeader(title: "Active Orders", count: activeOrders.count)
+                ForEach(activeOrders) { order in
+                    activeOrderNavigationLink(for: order)
+                }
+            }
+        }
+
+        if showHistorySection {
+            let historyOrders = selectedFilter == .completed
+                ? orders
+                : orders.filter(isHistoryOrder)
+            if !historyOrders.isEmpty {
+                ordersSectionHeader(title: "Order History", count: nil)
+                let monthGroups = historyMonthGroups(from: historyOrders)
+                ForEach(Array(monthGroups.enumerated()), id: \.element.id) { index, group in
+                    historyMonthSection(group, isMostRecent: index == 0)
+                }
+            }
+        }
+    }
+
+    private func ordersSectionHeader(title: String, count: Int?) -> some View {
+        HStack(spacing: 6) {
+            Text(count.map { "\(title) · \($0)" } ?? title)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .textCase(.uppercase)
+                .tracking(0.6)
+                .foregroundStyle(Color.primary.opacity(0.46))
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 2)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private func activeOrderNavigationLink(for order: Order) -> some View {
+        NavigationLink {
+            OrderDetailView(
+                orderId: order.id,
+                mode: mode,
+                currentSellerId: effectiveSellerId
+            )
+        } label: {
+            OrderRowCard(
+                order: order,
+                productsById: productsById,
+                hasPendingCancellation: hasPendingCancellation(order),
+                sellerId: mode == .seller ? effectiveSellerId : nil,
+                layout: .buyerList
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("orders.row.\(order.id)")
+    }
+
+    private func historyOrderNavigationLink(for order: Order) -> some View {
+        NavigationLink {
+            OrderDetailView(
+                orderId: order.id,
+                mode: mode,
+                currentSellerId: effectiveSellerId
+            )
+        } label: {
+            BuyerOrderHistoryRow(
+                order: order,
+                productsById: productsById,
+                sellerId: mode == .seller ? effectiveSellerId : nil
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("orders.history.row.\(order.id)")
+    }
+
+    private func historyMonthGroups(from orders: [Order]) -> [OrderHistoryMonthGroup] {
+        let calendar = Calendar.current
+        var grouped: [String: (title: String, orders: [Order])] = [:]
+
+        for order in orders {
+            let anchor = completedDate(for: order) ?? order.createdAt
+            let components = calendar.dateComponents([.year, .month], from: anchor)
+            let year = components.year ?? 0
+            let month = components.month ?? 0
+            let key = "\(year)-\(month)"
+            let title = anchor.formatted(.dateTime.year().month(.wide))
+            grouped[key, default: (title, [])].orders.append(order)
+        }
+
+        return grouped
+            .map { key, value in
+                OrderHistoryMonthGroup(
+                    id: key,
+                    title: value.title,
+                    orders: value.orders.sorted { lhs, rhs in
+                        let lhsDate = completedDate(for: lhs) ?? lhs.createdAt
+                        let rhsDate = completedDate(for: rhs) ?? rhs.createdAt
+                        return lhsDate > rhsDate
+                    }
+                )
+            }
+            .sorted { lhs, rhs in
+                guard
+                    let lhsOrder = lhs.orders.first,
+                    let rhsOrder = rhs.orders.first
+                else { return lhs.title > rhs.title }
+                let lhsDate = completedDate(for: lhsOrder) ?? lhsOrder.createdAt
+                let rhsDate = completedDate(for: rhsOrder) ?? rhsOrder.createdAt
+                return lhsDate > rhsDate
+            }
+    }
+
+    @ViewBuilder
+    private func historyMonthSection(_ group: OrderHistoryMonthGroup, isMostRecent: Bool) -> some View {
+        let isExpanded = expandedHistoryMonthKeys.contains(group.id)
+        let showsFullRecentMonth = expandedRecentMonthPreviewKeys.contains(group.id)
+        let previewCount = BuyerOrderHistoryMetrics.initialPreviewCount
+        let visibleOrders: [Order] = {
+            if isMostRecent {
+                if showsFullRecentMonth || group.orders.count <= previewCount {
+                    return group.orders
+                }
+                return Array(group.orders.prefix(previewCount))
+            }
+            guard isExpanded else { return [] }
+            return group.orders
+        }()
+
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                guard !isMostRecent else { return }
+                if isExpanded {
+                    expandedHistoryMonthKeys.remove(group.id)
+                } else {
+                    expandedHistoryMonthKeys.insert(group.id)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(group.title)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.primary.opacity(0.82))
+                    Spacer(minLength: 8)
+                    Text("\(group.orders.count) order" + (group.orders.count == 1 ? "" : "s"))
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(Color.primary.opacity(0.46))
+                    if !isMostRecent {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.primary.opacity(0.32))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isMostRecent)
+
+            ForEach(visibleOrders) { order in
+                historyOrderNavigationLink(for: order)
+            }
+
+            if isMostRecent, group.orders.count > previewCount, !showsFullRecentMonth {
+                Button {
+                    expandedRecentMonthPreviewKeys.insert(group.id)
+                } label: {
+                    Text("See all \(group.title) orders")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(TBTheme.deepSky.opacity(0.82))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 2)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 4)
     }
 
     private func refreshOrders(force: Bool = false) async {

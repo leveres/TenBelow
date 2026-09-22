@@ -5044,6 +5044,7 @@ app.post("/exchange-requests", requireAppClient, requireAuthenticatedBuyer, asyn
         sellerId: resolved.shipment.sellerId,
         title: "Exchange request submitted",
         body: `${resolved.item.productName || "An item"} has a new exchange request to review.`,
+        eventId: `exchangeSubmitted.${nextRequest.id}`,
       });
     } catch (pushErr) {
       console.warn("Exchange request push notification error:", pushErr?.message || pushErr);
@@ -5402,6 +5403,8 @@ app.post("/orders/shipment-action", requireAppClient, requireAuthenticatedSeller
       if (updatedOrder.buyerEmail && resolved.sendPush && resolved.pushAction) {
         await notifyShipmentStatusToBuyer({
           buyerEmail: updatedOrder.buyerEmail,
+          orderId: updatedOrder.id,
+          shipmentId,
           action: resolved.pushAction,
           itemName: firstItemName,
           carrier: updatedShipment.carrier,
@@ -5496,6 +5499,7 @@ app.post(
             notifySeller: true,
             title: "New buyer request",
             body: `A buyer submitted a ${typeLabel} request for ${itemName} on order ${orderId}.`,
+            eventId: `supportCreated.seller.${request.id}`,
           });
         }
       } catch (pushErr) {
@@ -5597,6 +5601,7 @@ app.patch(
             notifyBuyer: true,
             title,
             body,
+            eventId: `supportUpdated.buyer.${requestId}.${status}`,
           });
         } else if (status === "withdrawn") {
           await notifyOrderSupportEvent({
@@ -5604,6 +5609,7 @@ app.patch(
             notifySeller: true,
             title: "Request withdrawn",
             body: `The buyer withdrew their ${existing.type} request for order ${orderId}.`,
+            eventId: `supportWithdrawn.seller.${requestId}`,
           });
         }
       } catch (pushErr) {
@@ -5791,6 +5797,7 @@ app.post(
             notifySeller: true,
             title: "Buyer message",
             body: `New message on order ${orderId}: ${preview}`,
+            eventId: `supportMessage.seller.${message.id}`,
           });
         } else {
           await notifyOrderSupportEvent({
@@ -5798,6 +5805,7 @@ app.post(
             notifyBuyer: true,
             title: "Seller message",
             body: `Reply on order ${orderId}: ${preview}`,
+            eventId: `supportMessage.buyer.${message.id}`,
           });
         }
       } catch (pushErr) {
@@ -5958,6 +5966,7 @@ app.post(
             notifySeller: true,
             title: "Shop message",
             body: `New message from a buyer: ${preview}`,
+            eventId: `inquiryMessage.seller.${savedMessage.id}`,
           });
         } else {
           await notifyOrderSupportEvent({
@@ -5965,6 +5974,7 @@ app.post(
             notifyBuyer: true,
             title: "Seller replied",
             body: `${preview}`,
+            eventId: `inquiryMessage.buyer.${savedMessage.id}`,
           });
         }
       } catch (pushErr) {
@@ -6043,6 +6053,7 @@ app.post("/orders/production-preview", requireAppClient, requireAuthenticatedSel
           buyerEmail: updatedOrder.buyerEmail,
           title: "Production update is ready",
           body: `A new production update for ${item.productName || "your item"} is now available in your order details.`,
+          eventId: `makerVideoReady.${updatedOrder.id}`,
         });
       } catch (pushErr) {
         console.warn("Production preview push notification error:", pushErr?.message || pushErr);
@@ -6847,6 +6858,7 @@ ${imageList ? `<p><strong>Reference images</strong></p><ul>${imageList}</ul>` : 
         sellerId,
         title: "New custom order request",
         body: `${buyerName || "A buyer"} sent a custom order request for ${profile.displayName}.`,
+        eventId: `customOrderRequest.${entry.id}`,
       });
     } catch (pushErr) {
       console.warn("Custom order push notification error:", pushErr?.message || pushErr);
@@ -6946,6 +6958,7 @@ app.patch(
             body: status === "accepted"
               ? "Your custom order request was accepted. Check TenBelow for the next steps."
               : "Your custom order request was declined. Open TenBelow for details.",
+            eventId: `customOrderStatus.${requestId}.${status}`,
           });
         } catch (pushErr) {
           console.warn("Custom order status push notification error:", pushErr?.message || pushErr);
@@ -8089,6 +8102,7 @@ app.post("/admin/products/:productId/review", adminMutationLimiter, requireAdmin
         body: decision === "approve"
           ? `${reviewedProduct.name || "Your listing"} is now live on TenBelow.`
           : `${reviewedProduct.name || "Your listing"} was not approved. Check the admin notes and update it when ready.`,
+        eventId: `productReview.${productId}.${decision}`,
       });
     } catch (pushErr) {
       console.warn("Product review push notification error:", pushErr?.message || pushErr);
