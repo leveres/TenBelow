@@ -182,20 +182,21 @@ struct DropView: View {
     }
 
     #if DEBUG
+    /// Two mock releases so Drop screenshots look populated without membership or uploads.
     private static let debugBuyerPreviewDropProducts: [DropProduct] = [
         DropProduct(
             id: "debug-preview-drop-1",
             sellerId: "preview_seller",
-            name: "Sample Drop Item",
+            name: "Desk Cable Tray",
             priceCents: 1_299,
             previousPriceCents: 1_499,
             category: Category.desk.rawValue,
             imageURLs: ["products_image"],
             demoVideoURL: nil,
             productionPreviewURL: nil,
-            headline: "Sample Friday release",
+            headline: "Clean routing under the desk",
             story: "Buyer preview layout only — not a real seller listing.",
-            bestUseCase: "Preview data",
+            bestUseCase: "Desk cable management",
             material: "PLA+",
             durabilityNote: "Everyday use",
             careWarnings: ["Handle with care."],
@@ -206,6 +207,30 @@ struct DropView: View {
             reviewedAt: nil,
             submittedAt: "preview",
             slotNumber: 1
+        ),
+        DropProduct(
+            id: "debug-preview-drop-2",
+            sellerId: "preview_seller_2",
+            name: "Laptop Risers",
+            priceCents: 1_899,
+            previousPriceCents: nil,
+            category: Category.desk.rawValue,
+            imageURLs: ["products_image"],
+            demoVideoURL: nil,
+            productionPreviewURL: nil,
+            headline: "Lift and cool your laptop",
+            story: "Buyer preview layout only — not a real seller listing.",
+            bestUseCase: "Lap, books, food",
+            material: "PETG",
+            durabilityNote: "Sturdy daily use",
+            careWarnings: ["Wipe with a soft cloth."],
+            shipsInMinDays: 3,
+            shipsInMaxDays: 5,
+            approvalStatus: .approved,
+            reviewNotes: nil,
+            reviewedAt: nil,
+            submittedAt: "preview",
+            slotNumber: 2
         ),
     ]
     #endif
@@ -372,15 +397,21 @@ struct DropView: View {
         static let buyerContentTopInset: CGFloat = -18
         static let buyerInactiveHeroTopSpacing: CGFloat = 0
         static let buyerInactiveHeroBottomSpacing: CGFloat = 84
-        /// Seller hub: tighter vertical rhythm than buyer (smaller title art + less gap to badge/hero).
+        /// Seller hub matches the buyer Weekly Drop title + board-card rhythm.
         static let sellerHeaderSpacing: CGFloat = 0
-        static let sellerTitleHeight: CGFloat = 132
-        static let sellerTitleTopTuck: CGFloat = -6
-        static let sellerTitleBottomTuck: CGFloat = -38
-        static let sellerTitleCardOverlap: CGFloat = -10
-        static let sellerContentTopInset: CGFloat = -22
-        static let sellerSectionTopSpacing: CGFloat = 4
+        static let sellerTitleHeight: CGFloat = buyerTitleHeight
+        static let sellerTitleTopTuck: CGFloat = 0
+        static let sellerTitleBottomTuck: CGFloat = buyerTitleBottomTuck
+        static let sellerTitleCardOverlap: CGFloat = buyerTitleCardOverlap
+        static let sellerContentTopInset: CGFloat = buyerContentTopInset
+        static let sellerSectionTopSpacing: CGFloat = 8
         static let sellerScrollBottomInset: CGFloat = TopLevelHeaderMetrics.dropBottomInset + TopLevelHeaderMetrics.homeFloatingTabBarClearance
+        /// Shared with `WeeklyDropBoardCard` so buyer and seller blue heroes read the same size.
+        static let heroContentHorizontalPadding: CGFloat = 15
+        static let heroContentVerticalPadding: CGFloat = 8
+        static let heroSectionSpacing: CGFloat = 8
+        static let heroTextStackSpacing: CGFloat = 2
+        static let heroMaximumWidth: CGFloat = 640
     }
 
     var body: some View {
@@ -740,26 +771,30 @@ struct DropView: View {
 
     private var sellerFixedHeroContent: some View {
         VStack(alignment: .leading, spacing: DropLayoutMetrics.sellerHeaderSpacing) {
-            VStack(alignment: .leading, spacing: DropLayoutMetrics.sellerHeaderSpacing) {
-                SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 4, flakeCount: 82) {
-                    Image("WeeklyDropTitle")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: DropLayoutMetrics.sellerTitleHeight)
-                        .padding(.top, DropLayoutMetrics.sellerTitleTopTuck)
-                        .padding(.bottom, DropLayoutMetrics.sellerTitleBottomTuck)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, DropLayoutMetrics.sellerTitleCardOverlap)
-
-                if isUsingWeeklyDropPreview {
-                    weeklyDropPreviewBadge
-                }
+            SnowfallTitleContainer(cornerRadius: 28, horizontalPadding: 18, verticalPadding: 5, flakeCount: 82) {
+                Image("WeeklyDropTitle")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: DropLayoutMetrics.sellerTitleHeight)
+                    .padding(.top, DropLayoutMetrics.sellerTitleTopTuck)
+                    .padding(.bottom, DropLayoutMetrics.sellerTitleBottomTuck)
             }
-            .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, DropLayoutMetrics.sellerTitleCardOverlap)
 
-            // Full-bleed blue status hero — edge to edge under the title.
+            if isUsingWeeklyDropPreview {
+                weeklyDropPreviewBadge
+            }
+
+            sellerStatusBadges
             sellerHeroCard
+
+            Text(sellerStatusSubtitle)
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 2)
+                .padding(.top, 8)
 
             if let errorMessage {
                 HStack(spacing: 10) {
@@ -780,12 +815,44 @@ struct DropView: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(TBTheme.skyBlue.opacity(0.14), lineWidth: 0.8)
                 )
-                .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
+                .padding(.top, 8)
             }
         }
+        .padding(.horizontal, TopLevelHeaderMetrics.sharedHorizontalInset)
         .padding(.top, DropLayoutMetrics.sellerContentTopInset)
         .padding(.bottom, 0)
         .clipped()
+    }
+
+    private var sellerStatusBadges: some View {
+        HStack(spacing: 8) {
+            Label("Seller Exclusive", systemImage: "sparkles")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(TBTheme.deepSky)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.white.opacity(0.92), in: Capsule(style: .continuous))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(TBTheme.skyBlue.opacity(0.22), lineWidth: 0.8)
+                )
+
+            if submissionWindowOpen {
+                Label("Window Open", systemImage: "clock.badge.checkmark")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(TBTheme.deepSky)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(0.92), in: Capsule(style: .continuous))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(TBTheme.skyBlue.opacity(0.22), lineWidth: 0.8)
+                    )
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -925,134 +992,149 @@ struct DropView: View {
     }
 
     private var sellerHeroCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Label("Seller Exclusive", systemImage: "sparkles")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(TBTheme.deepSky)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.white.opacity(0.88), in: Capsule())
+        VStack(alignment: .leading, spacing: DropLayoutMetrics.heroSectionSpacing) {
+            VStack(alignment: .leading, spacing: DropLayoutMetrics.heroTextStackSpacing) {
+                GlowingHeadlineText(text: sellerStatusTitle)
 
-                if submissionWindowOpen {
-                    Label("Window Open", systemImage: "clock.badge.checkmark")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(TBTheme.deepSky)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.white.opacity(0.88), in: Capsule())
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(sellerStatusTitle)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
+                Text(sellerHeroPromoLine)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
                     .minimumScaleFactor(0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(sellerStatusSubtitle)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.88))
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            if shouldShowSellerHeroAction {
-                Button {
-                    Task {
-                        if sellerHasWeeklyDropAccess {
-                            await MainActor.run { showDropSubmit = true }
-                        } else {
-                            await sellerSubscription.refresh()
-                            await sellerSubscription.purchaseMembership()
-                            if sellerSubscription.hasActiveSubscription {
+            HStack(spacing: 10) {
+                if shouldShowSellerHeroAction {
+                    Button {
+                        Task {
+                            if sellerHasWeeklyDropAccess {
                                 await MainActor.run { showDropSubmit = true }
+                            } else {
+                                await sellerSubscription.refresh()
+                                await sellerSubscription.purchaseMembership()
+                                if sellerSubscription.hasActiveSubscription {
+                                    await MainActor.run { showDropSubmit = true }
+                                }
                             }
                         }
-                    }
-                } label: {
-                    HStack(spacing: 10) {
-                        Text(primarySellerCTA)
-                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    } label: {
+                        Label(primarySellerCTA, systemImage: "arrow.right.circle.fill")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundStyle(TBTheme.bannerCTAForeground)
-                            .multilineTextAlignment(.leading)
-
-                        Spacer(minLength: 8)
-
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(TBTheme.bannerCTAForeground.opacity(0.86))
-                    }
-                    .padding(.horizontal, 15)
-                    .padding(.vertical, 13)
-                    .background {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(.ultraThinMaterial)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(.white.opacity(0.94))
+                            )
                             .overlay(
-                                LinearGradient(
-                                    colors: [
-                                        .white.opacity(0.34),
-                                        TBTheme.skyLight.opacity(0.18),
-                                        TBTheme.icyBlue.opacity(0.12)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                Capsule(style: .continuous)
+                                    .strokeBorder(.white.opacity(0.48), lineWidth: 0.8)
                             )
                     }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        .white.opacity(0.78),
-                                        TBTheme.skyBlue.opacity(0.28),
-                                        TBTheme.deepSky.opacity(0.18)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+
+                Spacer(minLength: 8)
+
+                Label(
+                    "\(sellerSubmissionProducts.count) item\(sellerSubmissionProducts.count == 1 ? "" : "s")",
+                    systemImage: "shippingbox.fill"
+                )
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(TBTheme.bannerCTAForeground)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(.white.opacity(0.94))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(.white.opacity(0.48), lineWidth: 0.8)
+                )
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.horizontal, DropLayoutMetrics.heroContentHorizontalPadding)
+        .padding(.vertical, DropLayoutMetrics.heroContentVerticalPadding)
+        .frame(maxWidth: DropLayoutMetrics.heroMaximumWidth, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TBTheme.dropBannerGradient)
-        .clipShape(sellerHeroShape)
-        .overlay(
-            LinearGradient(
-                colors: [.white.opacity(0.22), .clear],
-                startPoint: .top,
-                endPoint: .center
-            )
-            .clipShape(sellerHeroShape)
-            .allowsHitTesting(false)
-        )
-        .overlay(
-            sellerHeroShape
-                .strokeBorder(.white.opacity(0.16), lineWidth: 1)
-                .allowsHitTesting(false)
-        )
-        .shadow(color: TBTheme.deepSky.opacity(0.18), radius: 12, y: 6)
+        .background(sellerHeroBackground)
+        .overlay(sellerHeroBorder)
+        .shadow(color: TBTheme.deepSky.opacity(0.1), radius: 8, y: 3)
     }
 
-    /// Straight left/right edges so the banner reads full-bleed; soft bottom corners only.
-    private var sellerHeroShape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(
-            topLeadingRadius: 0,
-            bottomLeadingRadius: 22,
-            bottomTrailingRadius: 22,
-            topTrailingRadius: 0,
-            style: .continuous
-        )
+    private var sellerHeroPromoLine: String {
+        if !sellerHasWeeklyDropAccess {
+            return "Seller plan required to submit"
+        }
+        if isActive {
+            return "Your premium lineup is live this weekend"
+        }
+        if submissionWindowOpen {
+            return "Submit over-$10 products before lock"
+        }
+        if !sellerSubmissionProducts.isEmpty {
+            return "Thursday uploads are closed"
+        }
+        return "New uploads reopen Thursday 5:00 PM ET"
+    }
+
+    private var sellerHeroBackground: some View {
+        RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        TBTheme.deepSky.opacity(0.9),
+                        TBTheme.skyBlue.opacity(0.88),
+                        TBTheme.skyBlue.opacity(0.8)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.08),
+                                .clear,
+                                .black.opacity(0.04)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            }
+            .overlay(alignment: .topLeading) {
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 132, height: 132)
+                    .offset(x: -26, y: -48)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(.white.opacity(0.04))
+                    .frame(width: 128, height: 48)
+                    .offset(x: 20, y: 14)
+            }
+    }
+
+    private var sellerHeroBorder: some View {
+        RoundedRectangle(cornerRadius: TBTheme.radiusXL, style: .continuous)
+            .strokeBorder(
+                LinearGradient(
+                    colors: [.white.opacity(0.18), .clear, .white.opacity(0.06)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                lineWidth: 1
+            )
     }
 
     private var sellerSubmissionHeader: some View {

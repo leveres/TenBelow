@@ -749,6 +749,211 @@ async function retrySellerWelcomeEmail(sellerId, button) {
   }
 }
 
+const FOUNDING_FREE_MONTHS = 2;
+
+function foundingDateInputValue(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function foundingISOFromDateInput(value, { endOfDay = false } = {}) {
+  if (!value) return null;
+  const date = new Date(`${value}T${endOfDay ? "23:59:59" : "00:00:00"}`);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function foundingState(account) {
+  const founding = account.founding || {};
+  const now = Date.now();
+  const startsAt = founding.foundingCreatorAccessStartsAt ? new Date(founding.foundingCreatorAccessStartsAt).getTime() : null;
+  const endsAt = founding.foundingCreatorAccessEndsAt ? new Date(founding.foundingCreatorAccessEndsAt).getTime() : null;
+  const hasWindow = endsAt != null;
+
+  if (!founding.isFoundingCreator) {
+    if (hasWindow && endsAt > now) return "paused";
+    return "off";
+  }
+  if (!hasWindow) return "missing-end";
+  if (endsAt < now) return "expired";
+  if (startsAt != null && startsAt > now) return "scheduled";
+  return "active";
+}
+
+function foundingSummary(account) {
+  const founding = account.founding || {};
+  const endsLabel = formatAgreementTimestamp(founding.foundingCreatorAccessEndsAt);
+  switch (foundingState(account)) {
+    case "active":
+      return `Founding creator · Free until ${endsLabel}`;
+    case "scheduled":
+      return `Founding creator · Starts ${formatAgreementTimestamp(founding.foundingCreatorAccessStartsAt)}`;
+    case "paused":
+      return "Founding creator · Paused";
+    case "expired":
+      return `Founding creator · Ended ${endsLabel}`;
+    case "missing-end":
+      return "Founding creator · Needs an end date";
+    default:
+      return account.hasPaidSubscription ? "Founding creator · Off (paid member)" : "Founding creator · Off";
+  }
+}
+
+function foundingPill(account) {
+  const pill = document.createElement("span");
+  const state = foundingState(account);
+  const labels = {
+    active: ["compliance-pill is-ok", "Free access active"],
+    scheduled: ["compliance-pill is-frozen", "Free access scheduled"],
+    paused: ["compliance-pill is-warning", "Free access paused"],
+    expired: ["compliance-pill is-missing", "Free access ended"],
+    "missing-end": ["compliance-pill is-warning", "No end date — access is not granted"],
+    off: ["compliance-pill", "Not a founding creator"],
+  };
+  const [className, text] = labels[state] || labels.off;
+  pill.className = className;
+  pill.textContent = text;
+  return pill;
+}
+
+function buildSellerFoundingSection(account) {
+  const section = document.createElement("div");
+  section.className = "account-panel account-founding-panel";
+  const founding = account.founding || {};
+  const state = foundingState(account);
+
+  const pills = document.createElement("div");
+  pills.className = "account-compliance-pills";
+  pills.appendChild(foundingPill(account));
+  const membershipPill = document.createElement("span");
+  membershipPill.className = account.hasPaidSubscription ? "compliance-pill is-ok" : "compliance-pill";
+  membershipPill.textContent = account.hasPaidSubscription ? "Paid membership active" : "No paid membership";
+  pills.appendChild(membershipPill);
+
+  const note = document.createElement("p");
+  note.className = "account-card-meta";
+  note.textContent = "Free access covers seller uploads and Weekly Drop. It ends automatically on the end date; after that the seller needs a paid membership. Pausing keeps the dates, and the clock keeps running while paused.";
+
+  const dates = document.createElement("div");
+  dates.className = "founding-date-row";
+
+  const startLabel = document.createElement("label");
+  startLabel.className = "founding-date-field";
+  startLabel.textContent = "Starts";
+  const startInput = document.createElement("input");
+  startInput.type = "date";
+  startInput.value = foundingDateInputValue(founding.foundingCreatorAccessStartsAt);
+  startLabel.appendChild(startInput);
+
+  const endLabel = document.createElement("label");
+  endLabel.className = "founding-date-field";
+  endLabel.textContent = "Ends";
+  const endInput = document.createElement("input");
+  endInput.type = "date";
+  endInput.value = foundingDateInputValue(founding.foundingCreatorAccessEndsAt);
+  endLabel.appendChild(endInput);
+
+  dates.append(startLabel, endLabel);
+
+  const actions = document.createElement("div");
+  actions.className = "account-panel-actions";
+
+  const makeButton = (text, onClick, { danger = false } = {}) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = danger ? "danger-button" : "account-action-button";
+    button.textContent = text;
+    button.addEventListener("click", () => onClick(button));
+    return button;
+  };
+
+  actions.appendChild(makeButton(`Give ${FOUNDING_FREE_MONTHS} months free`, (button) => {
+    const start = new Date();
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + FOUNDING_FREE_MONTHS);
+    updateSellerFounding(account.id, button, {
+      isFoundingCreator: true,
+      foundingCreatorAccessStartsAt: start.toISOString(),
+      foundingCreatorAccessEndsAt: end.toISOString(),
+    });
+  }));
+
+  actions.appendChild(makeButton("Save dates", (button) => {
+    const startsAt = foundingISOFromDateInput(startInput.value);
+    const endsAt = foundingISOFromDateInput(endInput.value, { endOfDay: true });
+    if (!endsAt) {
+      window.alert("Pick an end date. Free access is only granted with an end date.");
+      return;
+    }
+    updateSellerFounding(account.id, button, {
+      isFoundingCreator: state !== "paused",
+      foundingCreatorAccessStartsAt: startsAt,
+      foundingCreatorAccessEndsAt: endsAt,
+    });
+  }));
+
+  if (state === "active" || state === "scheduled") {
+    actions.appendChild(makeButton("Pause", (button) => {
+      updateSellerFounding(account.id, button, {
+        isFoundingCreator: false,
+        foundingCreatorAccessStartsAt: founding.foundingCreatorAccessStartsAt,
+        foundingCreatorAccessEndsAt: founding.foundingCreatorAccessEndsAt,
+      });
+    }));
+  }
+
+  if (state === "paused") {
+    actions.appendChild(makeButton("Resume", (button) => {
+      updateSellerFounding(account.id, button, {
+        isFoundingCreator: true,
+        foundingCreatorAccessStartsAt: founding.foundingCreatorAccessStartsAt,
+        foundingCreatorAccessEndsAt: founding.foundingCreatorAccessEndsAt,
+      });
+    }));
+  }
+
+  if (state !== "off") {
+    actions.appendChild(makeButton("Remove founding", (button) => {
+      if (!window.confirm(`Remove founding creator access for ${account.displayName || account.id}?`)) return;
+      updateSellerFounding(account.id, button, {
+        isFoundingCreator: false,
+        foundingCreatorAccessStartsAt: null,
+        foundingCreatorAccessEndsAt: null,
+      });
+    }, { danger: true }));
+  }
+
+  section.append(pills, note, dates, actions);
+  return section;
+}
+
+async function updateSellerFounding(sellerId, button, body) {
+  if (!sellerId || !button) return;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = "Saving…";
+  try {
+    const response = await fetch(`/admin/sellers/${encodeURIComponent(sellerId)}/founding`, {
+      method: "PUT",
+      headers: adminHeaders(),
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || "Founding update failed");
+    }
+    setFeedback("Founding access updated");
+    await Promise.all([loadAccounts(), loadSellerDirectory()]);
+  } catch (error) {
+    window.alert(error.message || "Founding update failed");
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
 function accountModerationStatusLabel(accountModeration = {}) {
   if (accountModeration.isFrozen) return "Frozen";
   if (accountModeration.isFlagged) return "Flagged";
@@ -990,6 +1195,11 @@ function renderAccounts(payload) {
           sellerComplianceSummary(account),
           buildSellerComplianceSection(account),
           { open: sellerComplianceNeedsAttention(account) }
+        ),
+        wrapAccountPanel(
+          foundingSummary(account),
+          buildSellerFoundingSection(account),
+          { open: ["paused", "missing-end"].includes(foundingState(account)) }
         ),
         moderationPanel,
         deletePanel

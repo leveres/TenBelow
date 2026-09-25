@@ -7569,10 +7569,14 @@ app.get("/admin/accounts", adminMutationLimiter, requireAdmin, async (req, res) 
       const profiles = buildSellerProfiles(sellers, products, orders);
       accounts = profiles.map((profile) => {
         const sellerRecord = sellers[profile.id] || {};
+        const membershipState = effectiveSellerMembershipStatus(sellerRecord);
         return {
           kind: "seller",
           id: profile.id,
           email: sellerRecord.email || "",
+          membershipStatus: membershipState.membershipStatus,
+          hasPaidSubscription: membershipState.membership.hasActiveSubscription === true,
+          founding: membershipState.founding,
           displayName: profile.displayName,
           handle: profile.handle,
           legalName: sellerRecord.legalName || "",
